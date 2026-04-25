@@ -1,0 +1,39 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+REPO_ROOT="${SCRIPT_DIR}/.."
+
+cd "${REPO_ROOT}/docker"
+
+# Keep backend in docker, but disable docker-managed frontend routing.
+docker compose stop web nginx >/dev/null 2>&1 || true
+
+# Ensure core backend services are available for local frontend development.
+# Default VECTOR_STORE is weaviate in docker/.env, so include it here.
+docker compose up -d api worker worker_beat ietfdata_service weaviate
+
+cd "${REPO_ROOT}/web"
+
+if [ ! -f .env.local ]; then
+  cp .env.example .env.local
+  echo "Created web/.env.local from .env.example"
+fi
+
+# Reuse an existing local dev server if already running.
+if lsof -iTCP:3000 -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+  echo "Next dev server already running on http://localhost:3000"
+  exit 0
+fi
+
+run_pnpm() {
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm "$@"
+  else
+    corepack pnpm "$@"
+  fi
+}
+
+run_pnpm install
+run_pnpm dev

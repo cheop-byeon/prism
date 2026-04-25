@@ -1,0 +1,40 @@
+#!/bin/bash
+# Start the full production stack (build web image, then bring up all services).
+# Usage: ./dev/start-production [--no-build]
+#   --no-build  Skip rebuilding the web image (use existing image).
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+REPO_ROOT="${SCRIPT_DIR}/.."
+
+NO_BUILD=false
+for arg in "$@"; do
+  case "$arg" in
+    --no-build) NO_BUILD=true ;;
+  esac
+done
+
+cd "${REPO_ROOT}/docker"
+
+# Stop any local next dev server that might be using port 3000.
+pkill -f "next dev" 2>/dev/null || true
+
+if [ "$NO_BUILD" = false ]; then
+  echo "Building web image..."
+  docker compose build web
+fi
+
+echo "Starting all services..."
+docker compose up -d api worker worker_beat ietfdata_service weaviate web nginx
+
+echo "Waiting for services to be ready..."
+sleep 5
+
+APP_CODE=$(curl -sL -o /dev/null -w '%{http_code}' http://localhost/)
+API_STATUS=$(curl -s http://localhost:5001/health 2>/dev/null || echo '{}')
+
+echo "App:       http://localhost  (HTTP status after redirect: ${APP_CODE})"
+echo "API:       ${API_STATUS}"
+echo ""
+echo "Done. Open http://localhost in your browser."

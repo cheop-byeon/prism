@@ -1,6 +1,7 @@
 import base64
 import logging
 import pickle
+import time
 from typing import Any, cast
 
 import numpy as np
@@ -64,9 +65,23 @@ class CacheEmbedding(Embeddings):
                 for i in range(0, len(embedding_queue_texts), max_chunks):
                     batch_texts = embedding_queue_texts[i : i + max_chunks]
 
-                    embedding_result = self._model_instance.invoke_text_embedding(
-                        texts=batch_texts, user=self._user, input_type=EmbeddingInputType.DOCUMENT
-                    )
+                    embedding_result = None
+                    last_exception: Exception | None = None
+                    for attempt in range(3):
+                        try:
+                            embedding_result = self._model_instance.invoke_text_embedding(
+                                texts=batch_texts, user=self._user, input_type=EmbeddingInputType.DOCUMENT
+                            )
+                            break
+                        except Exception as ex:
+                            last_exception = ex
+                            if attempt == 2:
+                                raise
+                            # Transient provider disconnects are common under load; retry quickly.
+                            time.sleep(0.5 * (attempt + 1))
+
+                    if embedding_result is None:
+                        raise last_exception or RuntimeError("Failed to invoke text embedding")
 
                     for vector in embedding_result.embeddings:
                         try:

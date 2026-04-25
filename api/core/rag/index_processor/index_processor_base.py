@@ -21,9 +21,18 @@ from core.rag.extractor.entity.extract_setting import ExtractSetting
 from core.rag.index_processor.constant.doc_type import DocType
 from core.rag.models.document import AttachmentDocument, Document
 from core.rag.retrieval.retrieval_methods import RetrievalMethod
+from core.rag.splitter.chunk_strategy import (
+    DEFAULT_CHUNK_STRATEGY,
+    StrategyCategory,
+    get_strategy_category,
+    get_strategy_provider,
+    get_strategy_separators,
+)
 from core.rag.splitter.fixed_text_splitter import (
     EnhanceRecursiveCharacterTextSplitter,
     FixedRecursiveCharacterTextSplitter,
+    ParagraphSplitter,
+    SemanticTextSplitter,
 )
 from core.rag.splitter.text_splitter import TextSplitter
 from extensions.ext_database import db
@@ -114,40 +123,155 @@ class BaseIndexProcessor(ABC):
     def _get_splitter(
         self,
         processing_rule_mode: str,
-        max_tokens: int,
-        chunk_overlap: int,
-        separator: str,
+        max_tokens: int | None,
+        chunk_overlap: int | None,
+        separator: str | None,
+        chunk_strategy: str | None,
         embedding_model_instance: Optional["ModelInstance"],
+        strategy_params: dict | None = None,
     ) -> TextSplitter:
         """
         Get the NodeParser object according to the processing rule.
         """
+        strategy = chunk_strategy or DEFAULT_CHUNK_STRATEGY
+        category = get_strategy_category(strategy)
+        provider = get_strategy_provider(strategy)
+        params = strategy_params or {}
+        # Apply defaults for optional fields
+        effective_max_tokens: int = max_tokens if max_tokens is not None else 1024
+        effective_chunk_overlap: int = chunk_overlap if chunk_overlap is not None else 0
+        effective_separator: str = separator if separator is not None else "\n"
+
         if processing_rule_mode in ["custom", "hierarchical"]:
-            # The user-defined segmentation rule
+            # Route to framework splitters first
+            if category == StrategyCategory.FRAMEWORK:
+                return BaseIndexProcessor._get_framework_splitter(
+                    strategy, provider, params, embedding_model_instance
+                )
+
+            # Boundary strategies split at natural breaks and skip size enforcement.
+            if category == StrategyCategory.BOUNDARY:
+                if strategy == "semantic":
+                    return SemanticTextSplitter(embedding_model_instance=embedding_model_instance)
+                return ParagraphSplitter()
+
             max_segmentation_tokens_length = dify_config.INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH
-            if max_tokens < 50 or max_tokens > max_segmentation_tokens_length:
+            if effective_max_tokens < 50 or effective_max_tokens > max_segmentation_tokens_length:
                 raise ValueError(f"Custom segment length should be between 50 and {max_segmentation_tokens_length}.")
 
-            if separator:
-                separator = separator.replace("\\n", "\n")
+            effective_separator = effective_separator.replace("\\n", "\n")
 
-            character_splitter = FixedRecursiveCharacterTextSplitter.from_encoder(
-                chunk_size=max_tokens,
-                chunk_overlap=chunk_overlap,
-                fixed_separator=separator,
-                separators=["\n\n", "。", ". ", " ", ""],
-                embedding_model_instance=embedding_model_instance,
-            )
+            if category == StrategyCategory.TOKEN:
+                character_splitter = EnhanceRecursiveCharacterTextSplitter.from_encoder(
+                    chunk_size=effective_max_tokens,
+                    chunk_overlap=effective_chunk_overlap,
+                    separators=[" ", ""],
+                    embedding_model_instance=embedding_model_instance,
+                )
+            else:
+                # CHARACTER strategies
+                character_splitter = FixedRecursiveCharacterTextSplitter.from_encoder(
+                    chunk_size=effective_max_tokens,
+                    chunk_overlap=effective_chunk_overlap,
+                    fixed_separator=effective_separator,
+                    separators=get_strategy_separators(strategy),
+                    embedding_model_instance=embedding_model_instance,
+                )
         else:
             # Automatic segmentation
             character_splitter = EnhanceRecursiveCharacterTextSplitter.from_encoder(
                 chunk_size=DatasetProcessRule.AUTOMATIC_RULES["segmentation"]["max_tokens"],
                 chunk_overlap=DatasetProcessRule.AUTOMATIC_RULES["segmentation"]["chunk_overlap"],
-                separators=["\n\n", "。", ". ", " ", ""],
+                separators=get_strategy_separators(DEFAULT_CHUNK_STRATEGY),
                 embedding_model_instance=embedding_model_instance,
             )
 
         return character_splitter  # type: ignore
+
+    @staticmethod
+    def _get_framework_splitter(
+        strategy: str,
+        provider: str,
+        params: dict,
+        embedding_model_instance: Optional["ModelInstance"],
+    ) -> TextSplitter:
+        """Route to LlamaIndex or LangChain splitter implementations."""
+        if provider == "llamaindex":
+            from core.rag.splitter.llamaindex_splitters import (
+                LICodeSplitter,
+                LIFixedTextSplitter,
+                LIHTMLNodeParser,
+                LIMarkdownNodeParser,
+                LISemanticSplitter,
+                LISentenceSplitter,
+                LITokenTextSplitter,
+            )
+            mapping = {
+                "li_sentence": lambda: LISentenceSplitter(
+                    chunk_size=int(params.get("chunk_size", 1024)),
+                    chunk_overlap=int(params.get("chunk_overlap", 200)),
+                ),
+                "li_token": lambda: LITokenTextSplitter(
+                    chunk_size=int(params.get("chunk_size", 1024)),
+                    chunk_overlap=int(params.get("chunk_overlap", 20)),
+                ),
+                "li_fixed": lambda: LIFixedTextSplitter(
+                    chunk_size=int(params.get("chunk_size", 1024)),
+                ),
+                "li_semantic": lambda: LISemanticSplitter(
+                    buffer_size=int(params.get("buffer_size", 1)),
+                    breakpoint_percentile=int(params.get("breakpoint_percentile", 95)),
+                    embedding_model_instance=embedding_model_instance,
+                ),
+                "li_markdown": lambda: LIMarkdownNodeParser(),
+                "li_html": lambda: LIHTMLNodeParser(),
+                "li_code": lambda: LICodeSplitter(
+                    chunk_size=int(params.get("chunk_size", 1024)),
+                    language=str(params.get("language", "python")),
+                ),
+            }
+        else:  # langchain
+            from core.rag.splitter.langchain_splitters import (
+                LCCharacterTextSplitter,
+                LCHTMLHeaderTextSplitter,
+                LCMarkdownHeaderTextSplitter,
+                LCPythonCodeTextSplitter,
+                LCRecursiveCharacterTextSplitter,
+                LCSemanticChunker,
+                LCTokenTextSplitter,
+            )
+            mapping = {
+                "lc_recursive": lambda: LCRecursiveCharacterTextSplitter(
+                    chunk_size=int(params.get("chunk_size", 1000)),
+                    chunk_overlap=int(params.get("chunk_overlap", 200)),
+                ),
+                "lc_character": lambda: LCCharacterTextSplitter(
+                    separator=str(params.get("separator", "\n\n")),
+                    chunk_size=int(params.get("chunk_size", 1000)),
+                    chunk_overlap=int(params.get("chunk_overlap", 200)),
+                ),
+                "lc_token": lambda: LCTokenTextSplitter(
+                    chunk_size=int(params.get("chunk_size", 1000)),
+                    chunk_overlap=int(params.get("chunk_overlap", 0)),
+                ),
+                "lc_markdown_header": lambda: LCMarkdownHeaderTextSplitter(),
+                "lc_html_header": lambda: LCHTMLHeaderTextSplitter(),
+                "lc_semantic": lambda: LCSemanticChunker(
+                    breakpoint_threshold_type=str(params.get("breakpoint_threshold_type", "percentile")),
+                    breakpoint_threshold_amount=float(params["breakpoint_threshold_amount"])
+                    if "breakpoint_threshold_amount" in params else None,
+                    embedding_model_instance=embedding_model_instance,
+                ),
+                "lc_python": lambda: LCPythonCodeTextSplitter(
+                    chunk_size=int(params.get("chunk_size", 1000)),
+                    chunk_overlap=int(params.get("chunk_overlap", 200)),
+                ),
+            }
+
+        factory = mapping.get(strategy)
+        if factory is None:
+            raise ValueError(f"Unknown framework strategy: {strategy}")
+        return factory()
 
     def _get_content_files(self, document: Document, current_user: Account | None = None) -> list[AttachmentDocument]:
         """

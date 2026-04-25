@@ -82,9 +82,9 @@ class TestBaseIndexProcessor:
             "core.rag.index_processor.index_processor_base.dify_config.INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH", 1000
         ):
             with pytest.raises(ValueError, match="between 50 and 1000"):
-                processor._get_splitter("custom", 49, 0, "", None)
+                processor._get_splitter("custom", 49, 0, "", None, None)
             with pytest.raises(ValueError, match="between 50 and 1000"):
-                processor._get_splitter("custom", 1001, 0, "", None)
+                processor._get_splitter("custom", 1001, 0, "", None, None)
 
     def test_get_splitter_custom_mode_uses_fixed_splitter(self, processor: _ForwardingBaseIndexProcessor) -> None:
         fixed_splitter = Mock()
@@ -92,7 +92,7 @@ class TestBaseIndexProcessor:
             "core.rag.index_processor.index_processor_base.FixedRecursiveCharacterTextSplitter.from_encoder",
             return_value=fixed_splitter,
         ) as mock_fixed:
-            splitter = processor._get_splitter("hierarchical", 120, 10, "\\n\\n", None)
+            splitter = processor._get_splitter("hierarchical", 120, 10, "\\n\\n", None, None)
 
         assert splitter is fixed_splitter
         assert mock_fixed.call_args.kwargs["fixed_separator"] == "\n\n"
@@ -104,7 +104,7 @@ class TestBaseIndexProcessor:
             "core.rag.index_processor.index_processor_base.EnhanceRecursiveCharacterTextSplitter.from_encoder",
             return_value=auto_splitter,
         ) as mock_enhance:
-            splitter = processor._get_splitter("automatic", 0, 0, "", None)
+            splitter = processor._get_splitter("automatic", 0, 0, "", None, None)
 
         assert splitter is auto_splitter
         assert "chunk_size" in mock_enhance.call_args.kwargs

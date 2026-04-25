@@ -366,6 +366,42 @@ class DatasetDocumentSegmentUpdateApi(Resource):
     @setup_required
     @login_required
     @account_initialization_required
+    def get(self, dataset_id, document_id, segment_id):
+        current_user, current_tenant_id = current_account_with_tenant()
+
+        dataset_id = str(dataset_id)
+        dataset = DatasetService.get_dataset(dataset_id)
+        if not dataset:
+            raise NotFound("Dataset not found.")
+
+        document_id = str(document_id)
+        document = DocumentService.get_document(dataset_id, document_id)
+        if not document:
+            raise NotFound("Document not found.")
+
+        segment_id = str(segment_id)
+        segment = db.session.scalar(
+            select(DocumentSegment)
+            .where(DocumentSegment.id == segment_id, DocumentSegment.tenant_id == current_tenant_id)
+            .limit(1)
+        )
+        if not segment:
+            raise NotFound("Segment not found.")
+
+        try:
+            DatasetService.check_dataset_permission(dataset, current_user)
+        except services.errors.account.NoPermissionError as e:
+            raise Forbidden(str(e))
+
+        segment_dict = dict(marshal(segment, segment_fields))  # type: ignore
+        segment_dict["summary"] = None
+        metadata = SegmentService.get_chunk_metadata(dataset=dataset, index_node_id=segment.index_node_id)
+        segment_dict["metadata"] = metadata
+        return {"data": segment_dict}, 200
+
+    @setup_required
+    @login_required
+    @account_initialization_required
     @cloud_edition_billing_resource_check("vector_space")
     @cloud_edition_billing_rate_limit_check("knowledge")
     @console_ns.expect(console_ns.models[SegmentUpdatePayload.__name__])
@@ -694,6 +730,55 @@ class ChildChunkAddApi(Resource):
     "/datasets/<uuid:dataset_id>/documents/<uuid:document_id>/segments/<uuid:segment_id>/child_chunks/<uuid:child_chunk_id>"
 )
 class ChildChunkUpdateApi(Resource):
+    @setup_required
+    @login_required
+    @account_initialization_required
+    def get(self, dataset_id, document_id, segment_id, child_chunk_id):
+        current_user, current_tenant_id = current_account_with_tenant()
+
+        dataset_id = str(dataset_id)
+        dataset = DatasetService.get_dataset(dataset_id)
+        if not dataset:
+            raise NotFound("Dataset not found.")
+
+        document_id = str(document_id)
+        document = DocumentService.get_document(dataset_id, document_id)
+        if not document:
+            raise NotFound("Document not found.")
+
+        segment_id = str(segment_id)
+        segment = db.session.scalar(
+            select(DocumentSegment)
+            .where(DocumentSegment.id == segment_id, DocumentSegment.tenant_id == current_tenant_id)
+            .limit(1)
+        )
+        if not segment:
+            raise NotFound("Segment not found.")
+
+        child_chunk_id = str(child_chunk_id)
+        child_chunk = db.session.scalar(
+            select(ChildChunk)
+            .where(
+                ChildChunk.id == child_chunk_id,
+                ChildChunk.tenant_id == current_tenant_id,
+                ChildChunk.segment_id == segment.id,
+                ChildChunk.document_id == document_id,
+            )
+            .limit(1)
+        )
+        if not child_chunk:
+            raise NotFound("Child chunk not found.")
+
+        try:
+            DatasetService.check_dataset_permission(dataset, current_user)
+        except services.errors.account.NoPermissionError as e:
+            raise Forbidden(str(e))
+
+        child_chunk_dict = dict(marshal(child_chunk, child_chunk_fields))  # type: ignore
+        metadata = SegmentService.get_chunk_metadata(dataset=dataset, index_node_id=child_chunk.index_node_id)
+        child_chunk_dict["metadata"] = metadata
+        return {"data": child_chunk_dict}, 200
+
     @setup_required
     @login_required
     @account_initialization_required

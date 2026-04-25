@@ -1,6 +1,7 @@
 import concurrent.futures
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -25,6 +26,13 @@ from core.rag.index_processor.constant.index_type import IndexStructureType, Ind
 from core.rag.index_processor.index_processor_base import BaseIndexProcessor
 from core.rag.index_processor.index_processor_factory import IndexProcessorFactory
 from core.rag.models.document import ChildDocument, Document
+from core.rag.splitter.chunk_strategy import (
+    DEFAULT_CHUNK_STRATEGY,
+    StrategyCategory,
+    get_strategy_category,
+    get_strategy_provider,
+    get_strategy_separators,
+)
 from core.rag.splitter.fixed_text_splitter import (
     EnhanceRecursiveCharacterTextSplitter,
     FixedRecursiveCharacterTextSplitter,
@@ -472,38 +480,68 @@ class IndexingRunner:
     @staticmethod
     def _get_splitter(
         processing_rule_mode: str,
-        max_tokens: int,
-        chunk_overlap: int,
-        separator: str,
+        max_tokens: int | None,
+        chunk_overlap: int | None,
+        separator: str | None,
+        chunk_strategy: str | None,
         embedding_model_instance: ModelInstance | None,
+        strategy_params: dict | None = None,
     ) -> TextSplitter:
         """
         Get the NodeParser object according to the processing rule.
         """
+        from core.rag.splitter.fixed_text_splitter import ParagraphSplitter, SemanticTextSplitter
+
+        strategy = chunk_strategy or DEFAULT_CHUNK_STRATEGY
+        category = get_strategy_category(strategy)
+        provider = get_strategy_provider(strategy)
+        params = strategy_params or {}
+        effective_max_tokens: int = max_tokens if max_tokens is not None else 1024
+        effective_chunk_overlap: int = chunk_overlap if chunk_overlap is not None else 0
+        effective_separator: str = separator if separator is not None else "\n"
+
         character_splitter: TextSplitter
         if processing_rule_mode in ["custom", "hierarchical"]:
+            if category == StrategyCategory.FRAMEWORK:
+                from core.rag.index_processor.index_processor_base import BaseIndexProcessor
+                return BaseIndexProcessor._get_framework_splitter(
+                    strategy, provider, params, embedding_model_instance
+                )
+
+            if category == StrategyCategory.BOUNDARY:
+                if strategy == "semantic":
+                    return SemanticTextSplitter(embedding_model_instance=embedding_model_instance)
+                return ParagraphSplitter()
+
             # The user-defined segmentation rule
             max_segmentation_tokens_length = dify_config.INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH
-            if max_tokens < 50 or max_tokens > max_segmentation_tokens_length:
+            if effective_max_tokens < 50 or effective_max_tokens > max_segmentation_tokens_length:
                 raise ValueError(f"Custom segment length should be between 50 and {max_segmentation_tokens_length}.")
 
-            if separator:
-                separator = separator.replace("\\n", "\n")
+            effective_separator = effective_separator.replace("\\n", "\n")
 
-            character_splitter = FixedRecursiveCharacterTextSplitter.from_encoder(
-                chunk_size=max_tokens,
-                chunk_overlap=chunk_overlap,
-                fixed_separator=separator,
-                separators=["\n\n", "。", ". ", " ", ""],
-                embedding_model_instance=embedding_model_instance,
-            )
+            if category == StrategyCategory.TOKEN:
+                character_splitter = EnhanceRecursiveCharacterTextSplitter.from_encoder(
+                    chunk_size=effective_max_tokens,
+                    chunk_overlap=effective_chunk_overlap,
+                    separators=[" ", ""],
+                    embedding_model_instance=embedding_model_instance,
+                )
+            else:
+                character_splitter = FixedRecursiveCharacterTextSplitter.from_encoder(
+                    chunk_size=effective_max_tokens,
+                    chunk_overlap=effective_chunk_overlap,
+                    fixed_separator=effective_separator,
+                    separators=get_strategy_separators(strategy),
+                    embedding_model_instance=embedding_model_instance,
+                )
         else:
             # Automatic segmentation
             automatic_rules: dict[str, Any] = dict(DatasetProcessRule.AUTOMATIC_RULES["segmentation"])
             character_splitter = EnhanceRecursiveCharacterTextSplitter.from_encoder(
                 chunk_size=automatic_rules["max_tokens"],
                 chunk_overlap=automatic_rules["chunk_overlap"],
-                separators=["\n\n", "。", ". ", " ", ""],
+                separators=get_strategy_separators(DEFAULT_CHUNK_STRATEGY),
                 embedding_model_instance=embedding_model_instance,
             )
 
@@ -596,7 +634,7 @@ class IndexingRunner:
             )
             create_keyword_thread.start()
 
-        max_workers = 10
+        max_workers = int(os.getenv("INDEXING_MAX_WORKERS", "1"))
         if dataset.indexing_technique == IndexTechniqueType.HIGH_QUALITY:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []

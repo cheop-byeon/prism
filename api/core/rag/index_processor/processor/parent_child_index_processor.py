@@ -62,7 +62,9 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                 max_tokens=rules.segmentation.max_tokens,
                 chunk_overlap=rules.segmentation.chunk_overlap,
                 separator=rules.segmentation.separator,
+                chunk_strategy=rules.segmentation.chunk_strategy,
                 embedding_model_instance=kwargs.get("embedding_model_instance"),
+                strategy_params=rules.segmentation.strategy_params,
             )
             for document in documents:
                 if kwargs.get("preview") and len(all_documents) >= 10:
@@ -251,7 +253,9 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
             max_tokens=rules.subchunk_segmentation.max_tokens,
             chunk_overlap=rules.subchunk_segmentation.chunk_overlap,
             separator=rules.subchunk_segmentation.separator,
+            chunk_strategy=rules.subchunk_segmentation.chunk_strategy,
             embedding_model_instance=embedding_model_instance,
+            strategy_params=rules.subchunk_segmentation.strategy_params,
         )
         # parse document to child nodes
         child_nodes = []

@@ -56,10 +56,12 @@ class QAIndexProcessor(BaseIndexProcessor):
         rules = Rule.model_validate(process_rule.get("rules"))
         splitter = self._get_splitter(
             processing_rule_mode=process_rule.get("mode"),
-            max_tokens=rules.segmentation.max_tokens if rules.segmentation else 0,
-            chunk_overlap=rules.segmentation.chunk_overlap if rules.segmentation else 0,
-            separator=rules.segmentation.separator if rules.segmentation else "",
+            max_tokens=rules.segmentation.max_tokens if rules.segmentation else None,
+            chunk_overlap=rules.segmentation.chunk_overlap if rules.segmentation else None,
+            separator=rules.segmentation.separator if rules.segmentation else None,
+            chunk_strategy=rules.segmentation.chunk_strategy if rules.segmentation else None,
             embedding_model_instance=kwargs.get("embedding_model_instance"),
+            strategy_params=rules.segmentation.strategy_params if rules.segmentation else None,
         )
 
         # Split the text documents into nodes.

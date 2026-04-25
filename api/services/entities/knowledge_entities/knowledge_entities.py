@@ -59,9 +59,11 @@ class PreProcessingRule(BaseModel):
 
 
 class Segmentation(BaseModel):
-    separator: str = "\n"
-    max_tokens: int
-    chunk_overlap: int = 0
+    separator: str | None = None
+    max_tokens: int | None = None
+    chunk_overlap: int | None = None
+    chunk_strategy: str = "recursive"
+    strategy_params: dict | None = None
 
 
 class Rule(BaseModel):

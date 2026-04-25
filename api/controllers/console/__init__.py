@@ -24,6 +24,7 @@ RESOURCE_MODULES = (
     "controllers.console.explore.message",
     "controllers.console.explore.workflow",
     "controllers.console.files",
+    "controllers.console.ietf_import",
     "controllers.console.remote_files",
 )
 
@@ -38,6 +39,7 @@ from . import (
     extension,
     feature,
     human_input_form,
+    ietf_import,
     init_validate,
     notification,
     ping,
@@ -174,6 +176,7 @@ __all__ = [
     "generator",
     "hit_testing",
     "human_input_form",
+    "ietf_import",
     "init_validate",
     "installed_app",
     "load_balancing_config",

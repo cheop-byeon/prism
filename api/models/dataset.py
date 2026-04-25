@@ -62,6 +62,7 @@ class SegmentationConfig(TypedDict):
     delimiter: str
     max_tokens: int
     chunk_overlap: int
+    chunk_strategy: str
 
 
 class AutomaticRulesConfig(TypedDict):
@@ -408,7 +409,7 @@ class DatasetProcessRule(Base):  # bug
             {"id": "remove_extra_spaces", "enabled": True},
             {"id": "remove_urls_emails", "enabled": False},
         ],
-        "segmentation": {"delimiter": "\n", "max_tokens": 500, "chunk_overlap": 50},
+        "segmentation": {"delimiter": "\n", "max_tokens": 500, "chunk_overlap": 50, "chunk_strategy": "recursive"},
     }
 
     def to_dict(self) -> ProcessRuleDict:

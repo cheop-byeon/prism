@@ -20,9 +20,11 @@ from core.db.session_factory import session_factory
 from core.errors.error import LLMBadRequestError, ProviderTokenNotInitError
 from core.helper.name_generator import generate_incremental_name
 from core.model_manager import ModelManager
+from core.rag.datasource.vdb.vector_factory import Vector
 from core.rag.index_processor.constant.built_in_field import BuiltInField
 from core.rag.index_processor.constant.index_type import IndexStructureType, IndexTechniqueType
 from core.rag.retrieval.retrieval_methods import RetrievalMethod
+from core.rag.splitter.chunk_strategy import StrategyCategory, get_strategy_category
 from dify_graph.file import helpers as file_helpers
 from dify_graph.model_runtime.entities.model_entities import ModelFeature, ModelType
 from dify_graph.model_runtime.model_providers.__base.text_embedding_model import TextEmbeddingModel
@@ -1229,7 +1231,7 @@ class DocumentService:
                 {"id": "remove_extra_spaces", "enabled": True},
                 {"id": "remove_urls_emails", "enabled": False},
             ],
-            "segmentation": {"delimiter": "\n", "max_tokens": 1024, "chunk_overlap": 50},
+            "segmentation": {"delimiter": "\n", "max_tokens": 1024, "chunk_overlap": 50, "chunk_strategy": "recursive"},
         },
         "limits": {
             "indexing_max_segmentation_tokens_length": dify_config.INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH,
@@ -1963,7 +1965,11 @@ class DocumentService:
                             dataset_process_rule = DatasetProcessRule(
                                 dataset_id=dataset.id,
                                 mode=process_rule.mode,
-                                rules=process_rule.rules.model_dump_json() if process_rule.rules else None,
+                                rules=(
+                                    process_rule.rules.model_dump_json(exclude_none=True)
+                                    if process_rule.rules
+                                    else None
+                                ),
                                 created_by=account.id,
                             )
                         else:
@@ -2550,7 +2556,7 @@ class DocumentService:
                 dataset_process_rule = DatasetProcessRule(
                     dataset_id=dataset.id,
                     mode=process_rule.mode,
-                    rules=process_rule.rules.model_dump_json() if process_rule.rules else None,
+                    rules=process_rule.rules.model_dump_json(exclude_none=True) if process_rule.rules else None,
                     created_by=account.id,
                 )
             elif process_rule.mode == ProcessRuleMode.AUTOMATIC:
@@ -2804,20 +2810,26 @@ class DocumentService:
             if not knowledge_config.process_rule.rules.segmentation:
                 raise ValueError("Process rule segmentation is required")
 
-            if not knowledge_config.process_rule.rules.segmentation.separator:
-                raise ValueError("Process rule segmentation separator is required")
+            seg = knowledge_config.process_rule.rules.segmentation
+            strategy_category = get_strategy_category(seg.chunk_strategy)
+            is_boundary = strategy_category == StrategyCategory.BOUNDARY
+            is_framework = strategy_category == StrategyCategory.FRAMEWORK
 
-            if not isinstance(knowledge_config.process_rule.rules.segmentation.separator, str):
-                raise ValueError("Process rule segmentation separator is invalid")
+            if not is_boundary and not is_framework:
+                if not seg.separator:
+                    raise ValueError("Process rule segmentation separator is required")
 
-            if not (
+                if not isinstance(seg.separator, str):
+                    raise ValueError("Process rule segmentation separator is invalid")
+
+            if not is_boundary and not is_framework and not (
                 knowledge_config.process_rule.mode == ProcessRuleMode.HIERARCHICAL
                 and knowledge_config.process_rule.rules.parent_mode == "full-doc"
             ):
-                if not knowledge_config.process_rule.rules.segmentation.max_tokens:
+                if not seg.max_tokens:
                     raise ValueError("Process rule segmentation max_tokens is required")
 
-                if not isinstance(knowledge_config.process_rule.rules.segmentation.max_tokens, int):
+                if not isinstance(seg.max_tokens, int):
                     raise ValueError("Process rule segmentation max_tokens is invalid")
 
     @classmethod
@@ -2885,23 +2897,23 @@ class DocumentService:
             if not isinstance(args["process_rule"]["rules"]["segmentation"], dict):
                 raise ValueError("Process rule segmentation is invalid")
 
-            if (
-                "separator" not in args["process_rule"]["rules"]["segmentation"]
-                or not args["process_rule"]["rules"]["segmentation"]["separator"]
-            ):
-                raise ValueError("Process rule segmentation separator is required")
+            seg_dict = args["process_rule"]["rules"]["segmentation"]
+            seg_strategy_category = get_strategy_category(seg_dict.get("chunk_strategy", "recursive"))
+            is_boundary_dict = seg_strategy_category == StrategyCategory.BOUNDARY
+            is_framework_dict = seg_strategy_category == StrategyCategory.FRAMEWORK
 
-            if not isinstance(args["process_rule"]["rules"]["segmentation"]["separator"], str):
-                raise ValueError("Process rule segmentation separator is invalid")
+            if not is_boundary_dict and not is_framework_dict:
+                if "separator" not in seg_dict or not seg_dict["separator"]:
+                    raise ValueError("Process rule segmentation separator is required")
 
-            if (
-                "max_tokens" not in args["process_rule"]["rules"]["segmentation"]
-                or not args["process_rule"]["rules"]["segmentation"]["max_tokens"]
-            ):
-                raise ValueError("Process rule segmentation max_tokens is required")
+                if not isinstance(seg_dict["separator"], str):
+                    raise ValueError("Process rule segmentation separator is invalid")
 
-            if not isinstance(args["process_rule"]["rules"]["segmentation"]["max_tokens"], int):
-                raise ValueError("Process rule segmentation max_tokens is invalid")
+                if "max_tokens" not in seg_dict or not seg_dict["max_tokens"]:
+                    raise ValueError("Process rule segmentation max_tokens is required")
+
+                if not isinstance(seg_dict["max_tokens"], int):
+                    raise ValueError("Process rule segmentation max_tokens is invalid")
 
         # valid summary index setting
         summary_index_setting = args["process_rule"].get("summary_index_setting")
@@ -3102,6 +3114,17 @@ class DocumentService:
 
 
 class SegmentService:
+    # Output key -> metadata key aliases, in lookup priority order.
+    _DISPLAY_METADATA_FIELDS: dict[str, tuple[str, ...]] = {
+        "email_id": ("email_id", "emailId", "message_id", "messageId", "id"),
+        "url": ("url", "source_url", "sourceURL", "link"),
+        "subject_line": ("subject_line", "subject-line", "subject", "title"),
+        "date": ("date", "sent_at", "sentAt", "timestamp"),
+        # Backward-compatible keys for existing UI consumers.
+        "id": ("id",),
+        "subject": ("subject",),
+    }
+
     @classmethod
     def segment_create_args_validate(cls, args: dict, document: Document):
         if document.doc_form == IndexStructureType.QA_INDEX:
@@ -3971,6 +3994,48 @@ class SegmentService:
             query = query.where(DocumentSegment.enabled == enabled)
 
         return db.session.scalars(query).all()
+
+    @classmethod
+    def get_chunk_metadata(cls, dataset: Dataset, index_node_id: str | None) -> dict[str, str]:
+        """
+        Fetch selected metadata fields for a chunk from vector storage.
+
+        Returns only the metadata keys used by the drawer UI.
+        """
+        if not index_node_id:
+            return {}
+
+        if dataset.indexing_technique != IndexTechniqueType.HIGH_QUALITY:
+            return {}
+
+        try:
+            vector = Vector(dataset=dataset)
+            get_by_ids = getattr(vector, "get_by_ids", None)
+            if not callable(get_by_ids):
+                return {}
+            documents = get_by_ids([index_node_id])
+        except Exception:
+            logger.warning("failed to fetch chunk metadata by index node id: %s", index_node_id, exc_info=True)
+            return {}
+
+        if not documents:
+            return {}
+
+        metadata = documents[0].metadata or {}
+        filtered_metadata: dict[str, str] = {}
+        for output_key, candidates in cls._DISPLAY_METADATA_FIELDS.items():
+            value = None
+            for candidate in candidates:
+                candidate_value = metadata.get(candidate)
+                if candidate_value in (None, ""):
+                    continue
+                value = candidate_value
+                break
+            if value is None:
+                continue
+            filtered_metadata[output_key] = str(value)
+
+        return filtered_metadata
 
 
 class DatasetCollectionBindingService:

@@ -31,7 +31,9 @@ if dify_config.ETL_TYPE == "Unstructured":
         "docx",
         "csv",
         "eml",
+        "mbox",
         "msg",
+        "jsonl",
         "pptx",
         "xml",
         "epub",
@@ -51,6 +53,8 @@ else:
         "xls",
         "docx",
         "csv",
+        "mbox",
+        "jsonl",
         "vtt",
         "properties",
     }

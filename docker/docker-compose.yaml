@@ -405,6 +405,8 @@ x-shared-env: &shared-api-worker-env
   IRIS_TIMEZONE: ${IRIS_TIMEZONE:-UTC}
   UPLOAD_FILE_SIZE_LIMIT: ${UPLOAD_FILE_SIZE_LIMIT:-15}
   UPLOAD_FILE_BATCH_LIMIT: ${UPLOAD_FILE_BATCH_LIMIT:-5}
+  IETFDATA_SERVICE_URL: ${IETFDATA_SERVICE_URL:-http://ietfdata_service:8010}
+  IETFDATA_SERVICE_TIMEOUT: ${IETFDATA_SERVICE_TIMEOUT:-60}
   UPLOAD_FILE_EXTENSION_BLACKLIST: ${UPLOAD_FILE_EXTENSION_BLACKLIST:-}
   SINGLE_CHUNK_ATTACHMENT_LIMIT: ${SINGLE_CHUNK_ATTACHMENT_LIMIT:-10}
   IMAGE_FILE_BATCH_LIMIT: ${IMAGE_FILE_BATCH_LIMIT:-10}
@@ -751,16 +753,6 @@ services:
         condition: service_completed_successfully
       db_postgres:
         condition: service_healthy
-        required: false
-      db_mysql:
-        condition: service_healthy
-        required: false
-      oceanbase:
-        condition: service_healthy
-        required: false
-      seekdb:
-        condition: service_healthy
-        required: false
       redis:
         condition: service_started
     volumes:
@@ -790,16 +782,6 @@ services:
         condition: service_completed_successfully
       db_postgres:
         condition: service_healthy
-        required: false
-      db_mysql:
-        condition: service_healthy
-        required: false
-      oceanbase:
-        condition: service_healthy
-        required: false
-      seekdb:
-        condition: service_healthy
-        required: false
       redis:
         condition: service_started
     volumes:
@@ -824,16 +806,6 @@ services:
         condition: service_completed_successfully
       db_postgres:
         condition: service_healthy
-        required: false
-      db_mysql:
-        condition: service_healthy
-        required: false
-      oceanbase:
-        condition: service_healthy
-        required: false
-      seekdb:
-        condition: service_healthy
-        required: false
       redis:
         condition: service_started
     networks:
@@ -867,6 +839,17 @@ services:
       ENABLE_WEBSITE_JINAREADER: ${ENABLE_WEBSITE_JINAREADER:-true}
       ENABLE_WEBSITE_FIRECRAWL: ${ENABLE_WEBSITE_FIRECRAWL:-true}
       ENABLE_WEBSITE_WATERCRAWL: ${ENABLE_WEBSITE_WATERCRAWL:-true}
+
+  ietfdata_service:
+    build:
+      context: ../tools/ietfdata_service
+    restart: always
+    environment:
+      IETFDATA_SQLITE_FILE: /data/ietfdata.sqlite
+      IETFDATA_RFC_CACHE_DIR: /data/cache
+      IETFDATA_LOGLEVEL: ${IETFDATA_LOGLEVEL:-INFO}
+    volumes:
+      - ./volumes/ietfdata:/data
 
   # The PostgreSQL database.
   db_postgres:
@@ -1037,16 +1020,6 @@ services:
     depends_on:
       db_postgres:
         condition: service_healthy
-        required: false
-      db_mysql:
-        condition: service_healthy
-        required: false
-      oceanbase:
-        condition: service_healthy
-        required: false
-      seekdb:
-        condition: service_healthy
-        required: false
 
   # ssrf_proxy server
   # for more information, please refer to
@@ -1165,6 +1138,8 @@ services:
       ENABLE_TOKENIZER_GSE: ${WEAVIATE_ENABLE_TOKENIZER_GSE:-false}
       ENABLE_TOKENIZER_KAGOME_JA: ${WEAVIATE_ENABLE_TOKENIZER_KAGOME_JA:-false}
       ENABLE_TOKENIZER_KAGOME_KR: ${WEAVIATE_ENABLE_TOKENIZER_KAGOME_KR:-false}
+      DISK_USE_READONLY_PERCENTAGE: ${WEAVIATE_DISK_USE_READONLY_PERCENTAGE:-99}
+      DISK_USE_WARNING_PERCENTAGE: ${WEAVIATE_DISK_USE_WARNING_PERCENTAGE:-98}
 
   # OceanBase vector database
   oceanbase:

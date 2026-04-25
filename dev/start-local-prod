@@ -1,0 +1,64 @@
+#!/bin/bash
+# Build and run Next.js in production mode from local source.
+# Backend stays in Docker; frontend is built and served locally on port 3000.
+# This gives you the latest code changes without dev-mode UI overlays.
+#
+# Usage: ./dev/start-local-prod [--no-build] [--no-backend-build]
+#   --no-build          Skip `pnpm build` and re-use the previous .next build output.
+#   --no-backend-build  Skip rebuilding backend Docker services.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+REPO_ROOT="${SCRIPT_DIR}/.."
+
+NO_BUILD=false
+BACKEND_BUILD=true
+for arg in "$@"; do
+  case "$arg" in
+    --no-build) NO_BUILD=true ;;
+    --no-backend-build) BACKEND_BUILD=false ;;
+  esac
+done
+
+# Stop any existing local Next.js server on port 3000.
+pkill -f "next" 2>/dev/null || true
+
+cd "${REPO_ROOT}/docker"
+
+# Stop docker-managed frontend; keep backend running.
+docker compose stop web nginx >/dev/null 2>&1 || true
+if [ "$BACKEND_BUILD" = true ]; then
+  docker compose up -d --build api worker worker_beat ietfdata_service weaviate
+else
+  docker compose up -d api worker worker_beat ietfdata_service weaviate
+fi
+
+cd "${REPO_ROOT}/web"
+
+# Bootstrap env if missing.
+if [ ! -f .env.local ]; then
+  cp .env.example .env.local
+  echo "Created web/.env.local from .env.example"
+fi
+
+run_pnpm() {
+  if command -v pnpm >/dev/null 2>&1; then
+    pnpm "$@"
+  else
+    corepack pnpm "$@"
+  fi
+}
+
+run_pnpm install --frozen-lockfile 2>/dev/null || run_pnpm install
+
+if [ "$NO_BUILD" = false ]; then
+  echo "Building production bundle from current source..."
+  run_pnpm build
+fi
+
+echo ""
+echo "Starting production server on http://localhost:3000"
+echo "(Latest source, no dev-mode overlays)"
+echo ""
+run_pnpm start

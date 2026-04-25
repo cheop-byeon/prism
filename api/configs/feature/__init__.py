@@ -260,6 +260,20 @@ class PluginConfig(BaseSettings):
         default=15728640 * 12,
     )
 
+
+class IetfDataConfig(BaseSettings):
+    """Configuration for the external IETF data sidecar service."""
+
+    IETFDATA_SERVICE_URL: HttpUrl = Field(
+        description="Base URL for the IETF data sidecar service used for mailarchive and RFC imports",
+        default=HttpUrl("http://ietfdata_service:8010"),
+    )
+
+    IETFDATA_SERVICE_TIMEOUT: PositiveFloat | None = Field(
+        description="Timeout in seconds for requests to the IETF data sidecar service (set to None to disable)",
+        default=60.0,
+    )
+
     PLUGIN_MODEL_SCHEMA_CACHE_TTL: PositiveInt = Field(
         description="TTL in seconds for caching plugin model schemas in Redis",
         default=60 * 60,
@@ -1381,6 +1395,7 @@ class FeatureConfig(
     FileAccessConfig,
     FileUploadConfig,
     HttpConfig,
+    IetfDataConfig,
     InnerAPIConfig,
     IndexingConfig,
     LoggingConfig,

@@ -1,0 +1,1 @@
+"""Sidecar package exposing `ietfdata` as a small HTTP service."""

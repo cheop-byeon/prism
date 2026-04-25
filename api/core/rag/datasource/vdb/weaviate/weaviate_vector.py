@@ -98,6 +98,19 @@ class WeaviateVector(BaseVector):
     """
 
     _DOCUMENT_ID_PROPERTY = "document_id"
+    # Weaviate reserves `id` and `vector` at object level. They must never be
+    # present inside object properties, even when incoming metadata contains
+    # similarly named keys.
+    _RESERVED_PROPERTY_KEYS: set[str] = {"id", "vector"}
+    # Canonical metadata fields consumed by SegmentService.get_chunk_metadata.
+    _DISPLAY_METADATA_ALIASES: dict[str, tuple[str, ...]] = {
+        "email_id": ("email_id", "emailId", "message_id", "messageId", "id"),
+        "url": ("url", "source_url", "sourceURL", "link"),
+        "subject_line": ("subject_line", "subject-line", "subject", "title"),
+        "date": ("date", "sent_at", "sentAt", "timestamp"),
+        "subject": ("subject",),
+    }
+    _DISPLAY_METADATA_PROPERTIES: tuple[str, ...] = tuple(_DISPLAY_METADATA_ALIASES.keys())
 
     def __init__(self, collection_name: str, config: WeaviateConfig, attributes: list):
         """
@@ -214,19 +227,26 @@ class WeaviateVector(BaseVector):
                         if dify_config.WEAVIATE_TOKENIZATION
                         else wc.Tokenization.WORD
                     )
+                    base_properties = [
+                        wc.Property(
+                            name=Field.TEXT_KEY.value,
+                            data_type=wc.DataType.TEXT,
+                            tokenization=tokenization,
+                        ),
+                        wc.Property(name="document_id", data_type=wc.DataType.TEXT),
+                        wc.Property(name="doc_id", data_type=wc.DataType.TEXT),
+                        wc.Property(name="doc_type", data_type=wc.DataType.TEXT),
+                        wc.Property(name="chunk_index", data_type=wc.DataType.INT),
+                        wc.Property(name="email_id", data_type=wc.DataType.TEXT),
+                        wc.Property(name="url", data_type=wc.DataType.TEXT),
+                        wc.Property(name="subject_line", data_type=wc.DataType.TEXT),
+                        wc.Property(name="date", data_type=wc.DataType.TEXT),
+                        wc.Property(name="subject", data_type=wc.DataType.TEXT),
+                    ]
+                    properties = [p for p in base_properties if not self._is_reserved_property_key(p.name)]
                     self._client.collections.create(
                         name=self._collection_name,
-                        properties=[
-                            wc.Property(
-                                name=Field.TEXT_KEY.value,
-                                data_type=wc.DataType.TEXT,
-                                tokenization=tokenization,
-                            ),
-                            wc.Property(name="document_id", data_type=wc.DataType.TEXT),
-                            wc.Property(name="doc_id", data_type=wc.DataType.TEXT),
-                            wc.Property(name="doc_type", data_type=wc.DataType.TEXT),
-                            wc.Property(name="chunk_index", data_type=wc.DataType.INT),
-                        ],
+                        properties=properties,
                         vector_config=wc.Configure.Vectors.self_provided(),
                     )
 
@@ -258,8 +278,13 @@ class WeaviateVector(BaseVector):
             to_add.append(wc.Property(name="doc_type", data_type=wc.DataType.TEXT))
         if "chunk_index" not in existing:
             to_add.append(wc.Property(name="chunk_index", data_type=wc.DataType.INT))
+        for key in self._DISPLAY_METADATA_PROPERTIES:
+            if key not in existing:
+                to_add.append(wc.Property(name=key, data_type=wc.DataType.TEXT))
 
         for prop in to_add:
+            if self._is_reserved_property_key(prop.name):
+                continue
             try:
                 col.config.add_property(prop)
             except Exception as e:
@@ -298,7 +323,17 @@ class WeaviateVector(BaseVector):
             props: dict[str, Any] = {Field.TEXT_KEY.value: text}
             meta = metadatas[i] or {}
             for k, v in meta.items():
+                if self._is_reserved_property_key(k):
+                    continue
                 props[k] = self._json_serializable(v)
+            for k, v in self._canonicalize_display_metadata(meta).items():
+                if self._is_reserved_property_key(k):
+                    continue
+                props[k] = v
+
+            # Final safety net for any non-canonical metadata keys that resolve
+            # to Weaviate-reserved property names after normalization.
+            props = {k: v for k, v in props.items() if not self._is_reserved_property_key(k)}
 
             candidate = uuids[i] if uuids else None
             uid = candidate if (candidate and self._is_uuid(candidate)) else str(_uuid.uuid4())
@@ -322,6 +357,22 @@ class WeaviateVector(BaseVector):
 
         return ids_out
 
+    def _canonicalize_display_metadata(self, metadata: dict[str, Any]) -> dict[str, Any]:
+        """Normalize metadata aliases into canonical keys for display."""
+        canonical: dict[str, Any] = {}
+        for output_key, candidates in self._DISPLAY_METADATA_ALIASES.items():
+            value = None
+            for candidate in candidates:
+                candidate_value = metadata.get(candidate)
+                if candidate_value in (None, ""):
+                    continue
+                value = candidate_value
+                break
+            if value is None:
+                continue
+            canonical[output_key] = self._json_serializable(value)
+        return canonical
+
     def _is_uuid(self, val: str) -> bool:
         """Validates whether a string is a valid UUID format."""
         try:
@@ -329,6 +380,11 @@ class WeaviateVector(BaseVector):
             return True
         except Exception:
             return False
+
+    def _is_reserved_property_key(self, key: Any) -> bool:
+        """Check Weaviate-reserved keys using case/whitespace normalization."""
+        normalized_key = str(key).strip().lower()
+        return normalized_key in self._RESERVED_PROPERTY_KEYS
 
     def delete_by_metadata_field(self, key: str, value: str) -> None:
         """Deletes all objects matching a specific metadata field value."""
@@ -374,6 +430,59 @@ class WeaviateVector(BaseVector):
             except UnexpectedStatusCodeError as e:
                 if getattr(e, "status_code", None) != 404:
                     raise
+
+    def get_by_ids(self, ids: list[str]) -> list[Document]:
+        """
+        Fetches documents by object UUIDs or `doc_id` metadata values.
+
+        This is used by the dataset chunk drawer to display chunk metadata.
+        """
+        if not ids:
+            return []
+
+        if not self._client.collections.exists(self._collection_name):
+            return []
+
+        col = self._client.collections.use(self._collection_name)
+
+        # Most segment index_node_id values are stored as Weaviate object UUIDs.
+        # Keep a doc_id fallback for older data that used doc_id lookup.
+        objects = []
+        seen_ids: set[str] = set()
+
+        for uid in ids:
+            by_uuid = col.query.fetch_objects(
+                filters=Filter.by_id().equal(uid),
+                limit=1,
+            )
+            for obj in by_uuid.objects:
+                key = str(getattr(obj, "uuid", ""))
+                if key and key in seen_ids:
+                    continue
+                if key:
+                    seen_ids.add(key)
+                objects.append(obj)
+
+        if len(objects) < len(ids):
+            by_doc_id = col.query.fetch_objects(
+                filters=Filter.by_property("doc_id").contains_any(ids),
+                limit=len(ids),
+            )
+            for obj in by_doc_id.objects:
+                key = str(getattr(obj, "uuid", ""))
+                if key and key in seen_ids:
+                    continue
+                if key:
+                    seen_ids.add(key)
+                objects.append(obj)
+
+        docs: list[Document] = []
+        for obj in objects:
+            properties = dict(obj.properties or {})
+            text = properties.pop(Field.TEXT_KEY.value, "")
+            docs.append(Document(page_content=text, metadata=properties))
+
+        return docs
 
     def search_by_vector(self, query_vector: list[float], **kwargs: Any) -> list[Document]:
         """

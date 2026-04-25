@@ -79,7 +79,9 @@ class ParagraphIndexProcessor(BaseIndexProcessor):
             max_tokens=rules.segmentation.max_tokens,
             chunk_overlap=rules.segmentation.chunk_overlap,
             separator=rules.segmentation.separator,
+            chunk_strategy=rules.segmentation.chunk_strategy,
             embedding_model_instance=kwargs.get("embedding_model_instance"),
+            strategy_params=rules.segmentation.strategy_params,
         )
         all_documents = []
         for document in documents:

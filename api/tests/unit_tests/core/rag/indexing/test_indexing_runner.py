@@ -1186,6 +1186,7 @@ class TestIndexingRunnerSplitter:
                 max_tokens=500,
                 chunk_overlap=50,
                 separator="\\n\\n",
+                chunk_strategy=None,
                 embedding_model_instance=mock_embedding_instance,
             )
 
@@ -1210,6 +1211,7 @@ class TestIndexingRunnerSplitter:
                 max_tokens=500,
                 chunk_overlap=50,
                 separator="",
+                chunk_strategy=None,
                 embedding_model_instance=mock_embedding_instance,
             )
 
@@ -1226,6 +1228,7 @@ class TestIndexingRunnerSplitter:
                 max_tokens=30,  # Below minimum of 50
                 chunk_overlap=10,
                 separator="\\n",
+                chunk_strategy=None,
                 embedding_model_instance=mock_embedding_instance,
             )
 
@@ -1242,6 +1245,7 @@ class TestIndexingRunnerSplitter:
                     max_tokens=10000,  # Above maximum
                     chunk_overlap=100,
                     separator="\\n",
+                    chunk_strategy=None,
                     embedding_model_instance=mock_embedding_instance,
                 )
 

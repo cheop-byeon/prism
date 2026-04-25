@@ -158,6 +158,17 @@ services:
       ENABLE_WEBSITE_FIRECRAWL: ${ENABLE_WEBSITE_FIRECRAWL:-true}
       ENABLE_WEBSITE_WATERCRAWL: ${ENABLE_WEBSITE_WATERCRAWL:-true}
 
+  ietfdata_service:
+    build:
+      context: ../tools/ietfdata_service
+    restart: always
+    environment:
+      IETFDATA_SQLITE_FILE: /data/ietfdata.sqlite
+      IETFDATA_RFC_CACHE_DIR: /data/cache
+      IETFDATA_LOGLEVEL: ${IETFDATA_LOGLEVEL:-INFO}
+    volumes:
+      - ./volumes/ietfdata:/data
+
   # The PostgreSQL database.
   db_postgres:
     image: postgres:15-alpine

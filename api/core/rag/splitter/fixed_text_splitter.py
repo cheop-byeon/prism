@@ -13,6 +13,7 @@ from core.rag.splitter.text_splitter import (
     Literal,
     RecursiveCharacterTextSplitter,
     Set,
+    TextSplitter,
     Union,
 )
 from dify_graph.model_runtime.model_providers.__base.tokenizers.gpt2_tokenizer import GPT2Tokenizer
@@ -151,3 +152,96 @@ class FixedRecursiveCharacterTextSplitter(EnhanceRecursiveCharacterTextSplitter)
                 final_chunks.append(current_part)
 
         return final_chunks
+
+
+class SemanticTextSplitter(TextSplitter):
+    """Groups sentences into chunks by embedding cosine-similarity.
+
+    Adjacent sentences whose similarity exceeds *similarity_threshold* are
+    merged into the same chunk.  When no embedding model is available the
+    splitter falls back to paragraph boundaries.
+    """
+
+    def __init__(
+        self,
+        embedding_model_instance: ModelInstance | None,
+        similarity_threshold: float = 0.5,
+    ) -> None:
+        super().__init__(chunk_size=10_000_000, chunk_overlap=0)
+        self._embedding_model_instance = embedding_model_instance
+        self._similarity_threshold = similarity_threshold
+
+    # ------------------------------------------------------------------
+    # TextSplitter interface
+    # ------------------------------------------------------------------
+
+    def split_text(self, text: str) -> list[str]:
+        sentences = self._sentence_tokenize(text)
+        if len(sentences) <= 1:
+            return [s for s in sentences if s]
+
+        if self._embedding_model_instance is None:
+            # No model → fall back to paragraph splitting
+            return [c.strip() for c in re.split(r"\n\n+", text) if c.strip()]
+
+        embeddings = self._embedding_model_instance.invoke_text_embedding(texts=sentences).embeddings
+        chunks: list[str] = []
+        current: list[str] = [sentences[0]]
+
+        for i in range(1, len(sentences)):
+            sim = self._cosine_similarity(embeddings[i - 1], embeddings[i])
+            if sim >= self._similarity_threshold:
+                current.append(sentences[i])
+            else:
+                chunks.append(" ".join(current))
+                current = [sentences[i]]
+
+        if current:
+            chunks.append(" ".join(current))
+
+        return chunks
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _sentence_tokenize(text: str) -> list[str]:
+        try:
+            import nltk
+            try:
+                return nltk.sent_tokenize(text)
+            except LookupError:
+                nltk.download("punkt_tab", quiet=True)
+                return nltk.sent_tokenize(text)
+        except Exception:
+            # Simple regex fallback when NLTK is unavailable
+            return [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+
+    @staticmethod
+    def _cosine_similarity(a: list[float], b: list[float]) -> float:
+        import math
+        dot = sum(x * y for x, y in zip(a, b))
+        norm_a = math.sqrt(sum(x * x for x in a))
+        norm_b = math.sqrt(sum(y * y for y in b))
+        if norm_a == 0.0 or norm_b == 0.0:
+            return 0.0
+        return dot / (norm_a * norm_b)
+
+
+class ParagraphSplitter(TextSplitter):
+    """Splits on blank-line boundaries without enforcing a size limit.
+
+    Each double-newline-separated paragraph becomes one chunk. Long paragraphs
+    are kept intact rather than being sub-split, since the user explicitly chose
+    a boundary-based strategy.
+    """
+
+    def __init__(self) -> None:
+        # chunk_size must be > chunk_overlap; use a sentinel large value so the
+        # base-class guard passes while we never actually enforce it.
+        super().__init__(chunk_size=10_000_000, chunk_overlap=0)
+
+    def split_text(self, text: str) -> list[str]:
+        chunks = re.split(r"\n\n+", text)
+        return [c.strip() for c in chunks if c.strip()]
