@@ -161,6 +161,47 @@ export const useSegmentBatchImport = () => {
   })
 }
 
+export const useChunkMetadataKey = [NAME_SPACE, 'chunkMetadata']
+
+export const useSegmentMetadata = (
+  payload: {
+    datasetId: string
+    documentId: string
+    segmentId: string
+  },
+  disable?: boolean,
+) => {
+  const { datasetId, documentId, segmentId } = payload
+
+  return useQuery<{ data: SegmentDetailModel }>({
+    queryKey: [...useChunkMetadataKey, 'segment', datasetId, documentId, segmentId],
+    queryFn: () => {
+      return get<{ data: SegmentDetailModel }>(`/datasets/${datasetId}/documents/${documentId}/segments/${segmentId}`)
+    },
+    enabled: !disable,
+  })
+}
+
+export const useChildChunkMetadata = (
+  payload: {
+    datasetId: string
+    documentId: string
+    segmentId: string
+    childChunkId: string
+  },
+  disable?: boolean,
+) => {
+  const { datasetId, documentId, segmentId, childChunkId } = payload
+
+  return useQuery<{ data: ChildChunkDetail }>({
+    queryKey: [...useChunkMetadataKey, 'child', datasetId, documentId, segmentId, childChunkId],
+    queryFn: () => {
+      return get<{ data: ChildChunkDetail }>(`/datasets/${datasetId}/documents/${documentId}/segments/${segmentId}/child_chunks/${childChunkId}`)
+    },
+    enabled: !disable,
+  })
+}
+
 export const useCheckSegmentBatchImportProgress = () => {
   return useMutation({
     mutationKey: [NAME_SPACE, 'batchImport', 'checkProgress'],

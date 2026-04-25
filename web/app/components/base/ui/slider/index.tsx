@@ -1,17 +1,24 @@
 'use client'
 
-import { Slider as BaseSlider } from '@base-ui/react/slider'
 import * as React from 'react'
 import { cn } from '@/utils/classnames'
 
-type SliderRootProps = BaseSlider.Root.Props<number>
-type SliderThumbProps = BaseSlider.Thumb.Props
+type SliderOnValueChange = (
+  value: number,
+  event: React.SyntheticEvent<HTMLInputElement> | React.KeyboardEvent<HTMLInputElement>,
+) => void
 
 type SliderBaseProps = Pick<
-  SliderRootProps,
-  'onValueChange' | 'min' | 'max' | 'step' | 'disabled' | 'name'
-> & Pick<SliderThumbProps, 'aria-label' | 'aria-labelledby'> & {
-  className?: string
+  React.InputHTMLAttributes<HTMLInputElement>,
+  'disabled' | 'name'
+> & {
+  'min'?: number
+  'max'?: number
+  'step'?: number
+  'onValueChange'?: SliderOnValueChange
+  'aria-label'?: string
+  'aria-labelledby'?: string
+  'className'?: string
 }
 
 type ControlledSliderProps = SliderBaseProps & {
@@ -27,29 +34,21 @@ type UncontrolledSliderProps = SliderBaseProps & {
 export type SliderProps = ControlledSliderProps | UncontrolledSliderProps
 
 const sliderRootClassName = 'group/slider relative inline-flex w-full data-[disabled]:opacity-30'
-const sliderControlClassName = cn(
-  'relative flex h-5 w-full touch-none select-none items-center',
-  'data-[disabled]:cursor-not-allowed',
-)
-const sliderTrackClassName = cn(
-  'relative h-1 w-full overflow-hidden rounded-full',
-  'bg-[var(--slider-track,var(--color-components-slider-track))]',
-)
-const sliderIndicatorClassName = cn(
-  'h-full rounded-full',
-  'bg-[var(--slider-range,var(--color-components-slider-range))]',
-)
-const sliderThumbClassName = cn(
-  'block h-5 w-2 shrink-0 rounded-[3px] border-[0.5px]',
-  'border-[var(--slider-knob-border,var(--color-components-slider-knob-border))]',
-  'bg-[var(--slider-knob,var(--color-components-slider-knob))] shadow-sm',
-  'transition-[background-color,border-color,box-shadow,opacity] motion-reduce:transition-none',
-  'hover:bg-[var(--slider-knob-hover,var(--color-components-slider-knob-hover))]',
+const sliderInputClassName = cn(
+  'h-5 w-full cursor-pointer appearance-none bg-transparent',
   'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-components-slider-knob-border-hover focus-visible:ring-offset-0',
-  'active:shadow-md',
-  'group-data-[disabled]/slider:bg-[var(--slider-knob-disabled,var(--color-components-slider-knob-disabled))]',
-  'group-data-[disabled]/slider:border-[var(--slider-knob-border,var(--color-components-slider-knob-border))]',
-  'group-data-[disabled]/slider:shadow-none',
+  'disabled:cursor-not-allowed',
+  '[&::-webkit-slider-runnable-track]:h-1 [&::-webkit-slider-runnable-track]:rounded-full',
+  '[&::-webkit-slider-runnable-track]:bg-[var(--slider-track,var(--color-components-slider-track))]',
+  '[&::-webkit-slider-thumb]:-mt-2 [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-2 [&::-webkit-slider-thumb]:appearance-none',
+  '[&::-webkit-slider-thumb]:rounded-[3px] [&::-webkit-slider-thumb]:border-[0.5px]',
+  '[&::-webkit-slider-thumb]:border-[var(--slider-knob-border,var(--color-components-slider-knob-border))]',
+  '[&::-webkit-slider-thumb]:bg-[var(--slider-knob,var(--color-components-slider-knob))] [&::-webkit-slider-thumb]:shadow-sm',
+  '[&::-moz-range-track]:h-1 [&::-moz-range-track]:rounded-full',
+  '[&::-moz-range-track]:bg-[var(--slider-track,var(--color-components-slider-track))]',
+  '[&::-moz-range-thumb]:h-5 [&::-moz-range-thumb]:w-2 [&::-moz-range-thumb]:rounded-[3px] [&::-moz-range-thumb]:border-[0.5px]',
+  '[&::-moz-range-thumb]:border-[var(--slider-knob-border,var(--color-components-slider-knob-border))]',
+  '[&::-moz-range-thumb]:bg-[var(--slider-knob,var(--color-components-slider-knob))] [&::-moz-range-thumb]:shadow-sm',
 )
 
 const getSafeValue = (value: number | undefined, min: number) => {
@@ -72,29 +71,61 @@ export function Slider({
   'aria-label': ariaLabel,
   'aria-labelledby': ariaLabelledby,
 }: SliderProps) {
+  const safeValue = getSafeValue(value, min)
+  const safeDefaultValue = getSafeValue(defaultValue, min)
+  const [internalValue, setInternalValue] = React.useState<number>(safeDefaultValue ?? min)
+
+  const currentValue = safeValue ?? internalValue
+
+  const emitChange = (
+    nextValue: number,
+    event: React.SyntheticEvent<HTMLInputElement> | React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (safeValue === undefined)
+      setInternalValue(nextValue)
+    onValueChange?.(nextValue, event)
+  }
+
+  const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    emitChange(event.currentTarget.valueAsNumber, event)
+  }
+
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    if (disabled)
+      return
+
+    const stepSize = step ?? 1
+    let delta = 0
+
+    if (event.key === 'ArrowRight' || event.key === 'ArrowUp')
+      delta = stepSize
+    else if (event.key === 'ArrowLeft' || event.key === 'ArrowDown')
+      delta = -stepSize
+    else
+      return
+
+    event.preventDefault()
+    const nextValue = Math.min(max, Math.max(min, currentValue + delta))
+    emitChange(nextValue, event)
+  }
+
   return (
-    <BaseSlider.Root
-      value={getSafeValue(value, min)}
-      defaultValue={getSafeValue(defaultValue, min)}
-      onValueChange={onValueChange}
-      min={min}
-      max={max}
-      step={step}
-      disabled={disabled}
-      name={name}
-      thumbAlignment="edge"
-      className={cn(sliderRootClassName, className)}
-    >
-      <BaseSlider.Control className={sliderControlClassName}>
-        <BaseSlider.Track className={sliderTrackClassName}>
-          <BaseSlider.Indicator className={sliderIndicatorClassName} />
-        </BaseSlider.Track>
-        <BaseSlider.Thumb
-          aria-label={ariaLabel}
-          aria-labelledby={ariaLabelledby}
-          className={sliderThumbClassName}
-        />
-      </BaseSlider.Control>
-    </BaseSlider.Root>
+    <div className={cn(sliderRootClassName, className)} data-disabled={disabled ? '' : undefined}>
+      <input
+        type="range"
+        value={currentValue}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
+        name={name}
+        aria-label={ariaLabel}
+        aria-labelledby={ariaLabelledby}
+        aria-valuenow={currentValue}
+        className={sliderInputClassName}
+        onChange={handleChange}
+        onKeyDown={handleKeyDown}
+      />
+    </div>
   )
 }

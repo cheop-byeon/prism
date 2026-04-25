@@ -1,11 +1,6 @@
 import type { FC } from 'react'
 import type { FileEntity } from '@/app/components/datasets/common/image-uploader/types'
 import type { SegmentDetailModel } from '@/models/datasets'
-import {
-  RiCloseLine,
-  RiCollapseDiagonalLine,
-  RiExpandDiagonalLine,
-} from '@remixicon/react'
 import * as React from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -16,6 +11,7 @@ import { IndexingType } from '@/app/components/datasets/create/step-two'
 import { useDatasetDetailContextWithSelector } from '@/context/dataset-detail'
 import { useEventEmitterContextContext } from '@/context/event-emitter'
 import { ChunkingMode } from '@/models/datasets'
+import { useSegmentMetadata } from '@/service/knowledge/use-segment'
 import { cn } from '@/utils/classnames'
 import { formatNumber } from '@/utils/format'
 import { useDocumentContext } from '../context'
@@ -78,9 +74,34 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
   const [showRegenerationModal, setShowRegenerationModal] = useState(false)
   const fullScreen = useSegmentListContext(s => s.fullScreen)
   const toggleFullScreen = useSegmentListContext(s => s.toggleFullScreen)
+  const datasetId = useDocumentContext(s => s.datasetId)
+  const documentId = useDocumentContext(s => s.documentId)
   const parentMode = useDocumentContext(s => s.parentMode)
   const indexingTechnique = useDatasetDetailContextWithSelector(s => s.dataset?.indexing_technique)
   const runtimeMode = useDatasetDetailContextWithSelector(s => s.dataset?.runtime_mode)
+
+  const { data: metadataResponse } = useSegmentMetadata(
+    {
+      datasetId: datasetId || '',
+      documentId: documentId || '',
+      segmentId: segInfo?.id || '',
+    },
+    !datasetId || !documentId || !segInfo?.id,
+  )
+
+  const metadata = metadataResponse?.data?.metadata || {}
+  const resolvedMetadata = {
+    url: metadata.url,
+    subject: metadata.subject_line || metadata.subject,
+    id: metadata.email_id || metadata.id,
+    date: metadata.date,
+  }
+  const metadataItems = [
+    { key: 'url', label: t('segment.metadataUrl', { ns: 'datasetDocuments' }) },
+    { key: 'subject', label: t('segment.metadataSubject', { ns: 'datasetDocuments' }) },
+    { key: 'id', label: t('segment.metadataId', { ns: 'datasetDocuments' }) },
+    { key: 'date', label: t('segment.metadataDate', { ns: 'datasetDocuments' }) },
+  ]
 
   eventEmitter?.useSubscription((v) => {
     if (v === 'update-segment')
@@ -141,11 +162,11 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
       )}
       >
         <div className="flex flex-col">
-          <div className="system-xl-semibold text-text-primary">{titleText}</div>
+          <div className="text-text-primary system-xl-semibold">{titleText}</div>
           <div className="flex items-center gap-x-2">
             <SegmentIndexTag positionId={segInfo?.position || ''} label={isFullDocMode ? labelPrefix : ''} labelPrefix={labelPrefix} />
             <Dot />
-            <span className="system-xs-medium text-text-tertiary">{wordCountText}</span>
+            <span className="text-text-tertiary system-xs-medium">{wordCountText}</span>
           </div>
         </div>
         <div className="flex items-center">
@@ -164,12 +185,12 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
           <div className="mr-1 flex h-8 w-8 cursor-pointer items-center justify-center p-1.5" onClick={toggleFullScreen}>
             {
               fullScreen
-                ? <RiCollapseDiagonalLine className="h-4 w-4 text-text-tertiary" />
-                : <RiExpandDiagonalLine className="h-4 w-4 text-text-tertiary" />
+                ? <span className="i-ri-collapse-diagonal-line h-4 w-4 text-text-tertiary" />
+                : <span className="i-ri-expand-diagonal-line h-4 w-4 text-text-tertiary" />
             }
           </div>
           <div className="flex h-8 w-8 cursor-pointer items-center justify-center p-1.5" onClick={onCancel}>
-            <RiCloseLine className="h-4 w-4 text-text-tertiary" />
+            <span className="i-ri-close-line h-4 w-4 text-text-tertiary" />
           </div>
         </div>
       </div>
@@ -195,6 +216,17 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
         </div>
 
         <div className={cn('flex shrink-0 flex-col', fullScreen ? 'w-[320px] gap-y-2' : 'w-full gap-y-1')}>
+          <div className="rounded-xl border border-components-panel-border bg-components-panel-bg px-3 py-2">
+            <div className="mb-2 text-text-tertiary system-xs-semibold-uppercase">{t('segment.metadata', { ns: 'datasetDocuments' })}</div>
+            <div className="space-y-2">
+              {metadataItems.map(item => (
+                <div key={item.key} className="space-y-1">
+                  <div className="text-text-tertiary system-2xs-medium-uppercase">{item.label}</div>
+                  <div className="break-all text-text-primary system-xs-regular">{resolvedMetadata[item.key as keyof typeof resolvedMetadata] || '-'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
           <ImageUploaderInChunk
             disabled={!isEditMode}
             value={attachments}

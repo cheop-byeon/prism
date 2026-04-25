@@ -1,7 +1,7 @@
-import type { ParentMode, PreProcessingRule, ProcessRule, Rules, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
+import type { ChunkStrategy, ParentMode, PreProcessingRule, ProcessRule, Rules, StrategyProvider, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
 import { useCallback, useRef, useState } from 'react'
 import { env } from '@/env'
-import { ChunkingMode, ProcessMode } from '@/models/datasets'
+import { ChunkingMode, DEFAULT_CUSTOM_STRATEGY, DEFAULT_LANGCHAIN_STRATEGY, DEFAULT_LLAMAINDEX_STRATEGY, getStrategyCategory, getStrategyProvider, ProcessMode, STRATEGY_PARAM_SCHEMAS } from '@/models/datasets'
 import escape from './escape'
 import unescape from './unescape'
 
@@ -9,6 +9,7 @@ import unescape from './unescape'
 export const DEFAULT_SEGMENT_IDENTIFIER = '\\n\\n'
 export const DEFAULT_MAXIMUM_CHUNK_LENGTH = 1024
 export const DEFAULT_OVERLAP = 50
+export const DEFAULT_CHUNK_STRATEGY: ChunkStrategy = DEFAULT_CUSTOM_STRATEGY
 export const MAXIMUM_CHUNK_TOKEN_LENGTH = env.NEXT_PUBLIC_INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH
 
 export type ParentChildConfig = {
@@ -40,6 +41,21 @@ export type UseSegmentationStateOptions = {
   initialSummaryIndexSetting?: SummaryIndexSettingType
 }
 
+function getDefaultStrategyForProvider(provider: StrategyProvider): ChunkStrategy {
+  if (provider === 'llamaindex')
+    return DEFAULT_LLAMAINDEX_STRATEGY
+  if (provider === 'langchain')
+    return DEFAULT_LANGCHAIN_STRATEGY
+  return DEFAULT_CUSTOM_STRATEGY
+}
+
+function buildDefaultStrategyParams(strategy: ChunkStrategy): Record<string, unknown> {
+  const schema = STRATEGY_PARAM_SCHEMAS[strategy]
+  if (!schema)
+    return {}
+  return Object.fromEntries(schema.params.map(p => [p.key, p.defaultValue]))
+}
+
 export const useSegmentationState = (options: UseSegmentationStateOptions = {}) => {
   const { initialSegmentationType, initialSummaryIndexSetting } = options
 
@@ -49,10 +65,31 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
   )
 
   // General chunking settings
-  const [segmentIdentifier, doSetSegmentIdentifier] = useState(DEFAULT_SEGMENT_IDENTIFIER)
+  const [segmentIdentifier, setSegmentIdentifier] = useState(DEFAULT_SEGMENT_IDENTIFIER)
   const [maxChunkLength, setMaxChunkLength] = useState(DEFAULT_MAXIMUM_CHUNK_LENGTH)
   const [limitMaxChunkLength, setLimitMaxChunkLength] = useState(MAXIMUM_CHUNK_TOKEN_LENGTH)
   const [overlap, setOverlap] = useState(DEFAULT_OVERLAP)
+  const [chunkStrategy, setChunkStrategy] = useState<ChunkStrategy>(DEFAULT_CHUNK_STRATEGY)
+  const [strategyProviderState, setStrategyProviderState] = useState<StrategyProvider>('custom')
+  const [strategyParams, setStrategyParams] = useState<Record<string, unknown>>(
+    () => buildDefaultStrategyParams(DEFAULT_CHUNK_STRATEGY),
+  )
+
+  const setStrategyProvider = useCallback((provider: StrategyProvider) => {
+    setStrategyProviderState(provider)
+    const newStrategy = getDefaultStrategyForProvider(provider)
+    setChunkStrategy(newStrategy)
+    setStrategyParams(buildDefaultStrategyParams(newStrategy))
+  }, [])
+
+  const handleStrategyChange = useCallback((strategy: ChunkStrategy) => {
+    setChunkStrategy(strategy)
+    setStrategyParams(buildDefaultStrategyParams(strategy))
+  }, [])
+
+  const handleStrategyParamChange = useCallback((key: string, value: unknown) => {
+    setStrategyParams(prev => ({ ...prev, [key]: value }))
+  }, [])
 
   // Pre-processing rules
   const [rules, setRules] = useState<PreProcessingRule[]>([])
@@ -71,12 +108,12 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
   const [parentChildConfig, setParentChildConfig] = useState<ParentChildConfig>(defaultParentChildConfig)
 
   // Escaped segment identifier setter
-  const setSegmentIdentifier = useCallback((value: string, canEmpty?: boolean) => {
+  const updateSegmentIdentifier = useCallback((value: string, canEmpty?: boolean) => {
     if (value) {
-      doSetSegmentIdentifier(escape(value))
+      setSegmentIdentifier(escape(value))
     }
     else {
-      doSetSegmentIdentifier(canEmpty ? '' : DEFAULT_SEGMENT_IDENTIFIER)
+      setSegmentIdentifier(canEmpty ? '' : DEFAULT_SEGMENT_IDENTIFIER)
     }
   }, [])
 
@@ -90,23 +127,37 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
   // Reset to defaults
   const resetToDefaults = useCallback(() => {
     if (defaultConfig) {
-      setSegmentIdentifier(defaultConfig.segmentation.separator)
-      setMaxChunkLength(defaultConfig.segmentation.max_tokens)
-      setOverlap(defaultConfig.segmentation.chunk_overlap!)
+      updateSegmentIdentifier(defaultConfig.segmentation.separator ?? '')
+      setMaxChunkLength(defaultConfig.segmentation.max_tokens ?? DEFAULT_MAXIMUM_CHUNK_LENGTH)
+      setOverlap(defaultConfig.segmentation.chunk_overlap ?? DEFAULT_OVERLAP)
+      const strategy = defaultConfig.segmentation.chunk_strategy || DEFAULT_CHUNK_STRATEGY
+      setChunkStrategy(strategy)
+      setStrategyParams(
+        defaultConfig.segmentation.strategy_params as Record<string, unknown>
+        ?? buildDefaultStrategyParams(strategy),
+      )
+      setStrategyProviderState(getStrategyProvider(strategy))
       setRules(defaultConfig.pre_processing_rules)
     }
     setParentChildConfig(defaultParentChildConfig)
-  }, [defaultConfig, setSegmentIdentifier])
+  }, [defaultConfig, updateSegmentIdentifier])
 
   // Apply config from document detail
   const applyConfigFromRules = useCallback((rulesConfig: Rules, isHierarchical: boolean) => {
     const separator = rulesConfig.segmentation.separator
     const max = rulesConfig.segmentation.max_tokens
     const chunkOverlap = rulesConfig.segmentation.chunk_overlap
+    const strategy = rulesConfig.segmentation.chunk_strategy || DEFAULT_CHUNK_STRATEGY
 
-    setSegmentIdentifier(separator)
-    setMaxChunkLength(max)
-    setOverlap(chunkOverlap!)
+    updateSegmentIdentifier(separator ?? '')
+    setMaxChunkLength(max ?? DEFAULT_MAXIMUM_CHUNK_LENGTH)
+    setOverlap(chunkOverlap ?? DEFAULT_OVERLAP)
+    setChunkStrategy(strategy)
+    setStrategyParams(
+      rulesConfig.segmentation.strategy_params as Record<string, unknown>
+      ?? buildDefaultStrategyParams(strategy),
+    )
+    setStrategyProviderState(getStrategyProvider(strategy))
     setRules(rulesConfig.pre_processing_rules)
     setDefaultConfig(rulesConfig)
 
@@ -114,19 +165,23 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
       setParentChildConfig({
         chunkForContext: rulesConfig.parent_mode || 'paragraph',
         parent: {
-          delimiter: escape(rulesConfig.segmentation.separator),
-          maxLength: rulesConfig.segmentation.max_tokens,
+          delimiter: escape(rulesConfig.segmentation.separator ?? '\\n\\n'),
+          maxLength: rulesConfig.segmentation.max_tokens ?? 1024,
         },
         child: {
-          delimiter: escape(rulesConfig.subchunk_segmentation!.separator),
-          maxLength: rulesConfig.subchunk_segmentation!.max_tokens,
+          delimiter: escape(rulesConfig.subchunk_segmentation?.separator ?? '\\n'),
+          maxLength: rulesConfig.subchunk_segmentation?.max_tokens ?? 512,
         },
       })
     }
-  }, [setSegmentIdentifier])
+  }, [updateSegmentIdentifier])
 
   // Get process rule for API
   const getProcessRule = useCallback((docForm: ChunkingMode): ProcessRule => {
+    const category = getStrategyCategory(chunkStrategy)
+    const isBoundary = category === 'boundary'
+    const isFramework = category === 'framework'
+
     if (docForm === ChunkingMode.parentChild) {
       return {
         rules: {
@@ -134,11 +189,13 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
           segmentation: {
             separator: unescape(parentChildConfig.parent.delimiter),
             max_tokens: parentChildConfig.parent.maxLength,
+            chunk_strategy: chunkStrategy,
           },
           parent_mode: parentChildConfig.chunkForContext,
           subchunk_segmentation: {
             separator: unescape(parentChildConfig.child.delimiter),
             max_tokens: parentChildConfig.child.maxLength,
+            chunk_strategy: chunkStrategy,
           },
         },
         mode: 'hierarchical',
@@ -146,19 +203,34 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
       } as ProcessRule
     }
 
+    let segmentation: Segmentation
+    if (isFramework) {
+      segmentation = {
+        chunk_strategy: chunkStrategy,
+        strategy_params: strategyParams,
+      }
+    }
+    else if (isBoundary) {
+      segmentation = { chunk_strategy: chunkStrategy }
+    }
+    else {
+      segmentation = {
+        separator: unescape(segmentIdentifier),
+        max_tokens: maxChunkLength,
+        chunk_overlap: overlap,
+        chunk_strategy: chunkStrategy,
+      }
+    }
+
     return {
       rules: {
         pre_processing_rules: rules,
-        segmentation: {
-          separator: unescape(segmentIdentifier),
-          max_tokens: maxChunkLength,
-          chunk_overlap: overlap,
-        },
+        segmentation,
       },
       mode: segmentationType,
       summary_index_setting: summaryIndexSettingRef.current,
     } as ProcessRule
-  }, [rules, parentChildConfig, segmentIdentifier, maxChunkLength, overlap, segmentationType])
+  }, [rules, parentChildConfig, segmentIdentifier, maxChunkLength, overlap, segmentationType, chunkStrategy, strategyParams])
 
   // Update parent config field
   const updateParentConfig = useCallback((field: 'delimiter' | 'maxLength', value: string | number) => {
@@ -200,13 +272,19 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
     segmentationType,
     setSegmentationType,
     segmentIdentifier,
-    setSegmentIdentifier,
+    setSegmentIdentifier: updateSegmentIdentifier,
     maxChunkLength,
     setMaxChunkLength,
     limitMaxChunkLength,
     setLimitMaxChunkLength,
     overlap,
     setOverlap,
+    chunkStrategy,
+    setChunkStrategy: handleStrategyChange,
+    strategyProvider: strategyProviderState,
+    setStrategyProvider,
+    strategyParams,
+    handleStrategyParamChange,
 
     // Rules
     rules,
@@ -229,6 +307,15 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
     applyConfigFromRules,
     getProcessRule,
   }
+}
+
+// Local alias to avoid import cycle — mirrors Segmentation from models/datasets
+type Segmentation = {
+  separator?: string
+  max_tokens?: number
+  chunk_overlap?: number
+  chunk_strategy?: ChunkStrategy
+  strategy_params?: Record<string, unknown>
 }
 
 export type SegmentationState = ReturnType<typeof useSegmentationState>

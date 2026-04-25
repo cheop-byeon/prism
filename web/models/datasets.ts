@@ -290,9 +290,228 @@ export type PreProcessingRule = {
 }
 
 export type Segmentation = {
-  separator: string
-  max_tokens: number
+  separator?: string
+  max_tokens?: number
   chunk_overlap?: number
+  chunk_strategy?: ChunkStrategy
+  strategy_params?: Record<string, unknown>
+}
+
+export type CustomChunkStrategy
+  = | 'recursive'
+    | 'paragraph'
+    | 'sentence'
+    | 'markdown'
+    | 'html'
+    | 'json'
+    | 'code'
+    | 'latex'
+    | 'token'
+    | 'semantic'
+
+export type LlamaIndexChunkStrategy
+  = | 'li_sentence'
+    | 'li_token'
+    | 'li_fixed'
+    | 'li_semantic'
+    | 'li_markdown'
+    | 'li_html'
+    | 'li_code'
+
+export type LangChainChunkStrategy
+  = | 'lc_recursive'
+    | 'lc_character'
+    | 'lc_token'
+    | 'lc_markdown_header'
+    | 'lc_html_header'
+    | 'lc_semantic'
+    | 'lc_python'
+
+export type ChunkStrategy = CustomChunkStrategy | LlamaIndexChunkStrategy | LangChainChunkStrategy
+
+export type StrategyProvider = 'custom' | 'llamaindex' | 'langchain'
+
+export const CUSTOM_STRATEGIES: CustomChunkStrategy[] = [
+  'recursive',
+  'paragraph',
+  'sentence',
+  'markdown',
+  'html',
+  'json',
+  'code',
+  'latex',
+  'token',
+  'semantic',
+]
+
+export const LLAMAINDEX_STRATEGIES: LlamaIndexChunkStrategy[] = [
+  'li_sentence',
+  'li_token',
+  'li_fixed',
+  'li_semantic',
+  'li_markdown',
+  'li_html',
+  'li_code',
+]
+
+export const LANGCHAIN_STRATEGIES: LangChainChunkStrategy[] = [
+  'lc_recursive',
+  'lc_character',
+  'lc_token',
+  'lc_markdown_header',
+  'lc_html_header',
+  'lc_semantic',
+  'lc_python',
+]
+
+export const DEFAULT_CUSTOM_STRATEGY: CustomChunkStrategy = 'recursive'
+export const DEFAULT_LLAMAINDEX_STRATEGY: LlamaIndexChunkStrategy = 'li_sentence'
+export const DEFAULT_LANGCHAIN_STRATEGY: LangChainChunkStrategy = 'lc_recursive'
+
+export type StrategyCategory = 'character' | 'token' | 'boundary' | 'framework'
+
+const STRATEGY_CATEGORY_MAP: Record<ChunkStrategy, StrategyCategory> = {
+  // Custom
+  recursive: 'character',
+  sentence: 'character',
+  markdown: 'character',
+  html: 'character',
+  json: 'character',
+  code: 'character',
+  latex: 'character',
+  token: 'token',
+  paragraph: 'boundary',
+  semantic: 'boundary',
+  // LlamaIndex
+  li_sentence: 'framework',
+  li_token: 'framework',
+  li_fixed: 'framework',
+  li_semantic: 'framework',
+  li_markdown: 'framework',
+  li_html: 'framework',
+  li_code: 'framework',
+  // LangChain
+  lc_recursive: 'framework',
+  lc_character: 'framework',
+  lc_token: 'framework',
+  lc_markdown_header: 'framework',
+  lc_html_header: 'framework',
+  lc_semantic: 'framework',
+  lc_python: 'framework',
+}
+
+export function getStrategyCategory(strategy: ChunkStrategy): StrategyCategory {
+  return STRATEGY_CATEGORY_MAP[strategy] ?? 'character'
+}
+
+export function getStrategyProvider(strategy: ChunkStrategy): StrategyProvider {
+  if ((LLAMAINDEX_STRATEGIES as ChunkStrategy[]).includes(strategy))
+    return 'llamaindex'
+  if ((LANGCHAIN_STRATEGIES as ChunkStrategy[]).includes(strategy))
+    return 'langchain'
+  return 'custom'
+}
+
+// ---- Strategy parameter schemas ----
+
+export type StrategyParamType = 'int' | 'float' | 'string' | 'select'
+
+export type StrategyParamSchema = {
+  key: string
+  type: StrategyParamType
+  labelKey: string
+  defaultValue: number | string
+  required: boolean
+  options?: string[]
+  min?: number
+  max?: number
+}
+
+export type StrategySchemaEntry = {
+  params: StrategyParamSchema[]
+}
+
+export const STRATEGY_PARAM_SCHEMAS: Partial<Record<ChunkStrategy, StrategySchemaEntry>> = {
+  // LlamaIndex
+  li_sentence: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
+      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+    ],
+  },
+  li_token: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
+      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 20, required: false, min: 0 },
+    ],
+  },
+  li_fixed: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
+    ],
+  },
+  li_semantic: {
+    params: [
+      { key: 'buffer_size', type: 'int', labelKey: 'stepTwo.paramBufferSize', defaultValue: 1, required: false, min: 1 },
+      { key: 'breakpoint_percentile', type: 'int', labelKey: 'stepTwo.paramBreakpointPercentile', defaultValue: 95, required: false, min: 1, max: 100 },
+    ],
+  },
+  li_markdown: { params: [] },
+  li_html: { params: [] },
+  li_code: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
+      {
+        key: 'language',
+        type: 'select',
+        labelKey: 'stepTwo.paramLanguage',
+        defaultValue: 'python',
+        required: true,
+        options: ['python', 'javascript', 'typescript', 'java', 'c', 'cpp', 'go', 'rust', 'ruby', 'php'],
+      },
+    ],
+  },
+  // LangChain
+  lc_recursive: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
+      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+    ],
+  },
+  lc_character: {
+    params: [
+      { key: 'separator', type: 'string', labelKey: 'stepTwo.delimiter', defaultValue: '\\n\\n', required: false },
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
+      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+    ],
+  },
+  lc_token: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
+      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 0, required: false, min: 0 },
+    ],
+  },
+  lc_markdown_header: { params: [] },
+  lc_html_header: { params: [] },
+  lc_semantic: {
+    params: [
+      {
+        key: 'breakpoint_threshold_type',
+        type: 'select',
+        labelKey: 'stepTwo.paramBreakpointThresholdType',
+        defaultValue: 'percentile',
+        required: false,
+        options: ['percentile', 'standard_deviation', 'interquartile', 'gradient'],
+      },
+      { key: 'breakpoint_threshold_amount', type: 'float', labelKey: 'stepTwo.paramBreakpointThresholdAmount', defaultValue: 95, required: false, min: 0 },
+    ],
+  },
+  lc_python: {
+    params: [
+      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
+      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+    ],
+  },
 }
 
 export const DocumentIndexingStatusList = [
@@ -592,6 +811,7 @@ export type SegmentDetailModel = {
   stopped_at: number
   answer?: string
   summary?: string
+  metadata?: ChunkMetadata
   child_chunks?: ChildChunkDetail[]
   updated_at: number
   attachments: Attachment[]
@@ -766,6 +986,15 @@ export const DEFAULT_WEIGHTED_SCORE = {
 
 export type ChildChunkType = 'automatic' | 'customized'
 
+export type ChunkMetadata = Partial<{
+  email_id: string
+  url: string
+  subject_line: string
+  subject: string
+  id: string
+  date: string
+}>
+
 export type ChildChunkDetail = {
   id: string
   position: number
@@ -775,6 +1004,7 @@ export type ChildChunkDetail = {
   created_at: number
   updated_at: number
   type: ChildChunkType
+  metadata?: ChunkMetadata
 }
 
 export type ChildSegmentsResponse = {

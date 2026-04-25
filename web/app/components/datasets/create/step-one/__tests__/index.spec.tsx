@@ -6,6 +6,17 @@ import { Plan } from '@/app/components/billing/type'
 import { DataSourceType } from '@/models/datasets'
 import StepOne from '../index'
 
+vi.mock('@/service/common', () => ({
+  uploadIetfPreprocessedFile: vi.fn(async () => ({
+    id: 'ietf-upload-id',
+    name: 'ietf-preprocessed.jsonl',
+    size: 128,
+    extension: 'jsonl',
+    mime_type: 'application/x-ndjson',
+    url: 'http://example.com/file',
+  })),
+}))
+
 // Mock config for website crawl features
 vi.mock('@/config', () => ({
   ENABLE_WEBSITE_FIRECRAWL: true,
@@ -42,6 +53,56 @@ vi.mock('../../file-uploader', () => ({
       <span data-testid="file-count">{fileList.length}</span>
       <button data-testid="preview-file" onClick={() => onPreview(new File(['test'], 'test.txt'))}>
         Preview
+      </button>
+    </div>
+  ),
+}))
+
+vi.mock('../../ietf-importer', () => ({
+  default: ({ onSelectedYearsChange }: { onSelectedYearsChange?: (items: { year: number, saved_path: string | null, host_path_hint: string | null, processed_path: string | null, processed_host_path_hint: string | null, total_emails: number, discarded_emails: number, preview_lines: string[] }[]) => void }) => (
+    <div data-testid="ietf-importer">
+      IETF Importer
+      <button
+        data-testid="select-ietf-year"
+        onClick={() => onSelectedYearsChange?.([{
+          year: 2017,
+          saved_path: '/tmp/2017.mbox',
+          host_path_hint: 'docker/volumes/app/storage/ietf-downloads/2017.mbox',
+          processed_path: '/tmp/2017.jsonl',
+          processed_host_path_hint: 'docker/volumes/app/storage/ietf-downloads/preprocessed/2017.jsonl',
+          total_emails: 100,
+          discarded_emails: 3,
+          preview_lines: [],
+        }])}
+      >
+        Select IETF Year
+      </button>
+      <button
+        data-testid="select-two-ietf-years"
+        onClick={() => onSelectedYearsChange?.([
+          {
+            year: 2017,
+            saved_path: '/tmp/2017.mbox',
+            host_path_hint: 'docker/volumes/app/storage/ietf-downloads/2017.mbox',
+            processed_path: '/tmp/2017.jsonl',
+            processed_host_path_hint: 'docker/volumes/app/storage/ietf-downloads/preprocessed/2017.jsonl',
+            total_emails: 100,
+            discarded_emails: 3,
+            preview_lines: [],
+          },
+          {
+            year: 2018,
+            saved_path: '/tmp/2018.mbox',
+            host_path_hint: 'docker/volumes/app/storage/ietf-downloads/2018.mbox',
+            processed_path: '/tmp/2018.jsonl',
+            processed_host_path_hint: 'docker/volumes/app/storage/ietf-downloads/preprocessed/2018.jsonl',
+            total_emails: 90,
+            discarded_emails: 2,
+            preview_lines: [],
+          },
+        ])}
+      >
+        Select Two IETF Years
       </button>
     </div>
   ),
@@ -237,6 +298,7 @@ describe('StepOne', () => {
       render(<StepOne {...defaultProps} dataSourceType={DataSourceType.FILE} />)
 
       expect(screen.getByTestId('file-uploader')).toBeInTheDocument()
+      expect(screen.getByTestId('ietf-importer')).toBeInTheDocument()
     })
 
     it('should render NotionConnector when dataSourceType is NOTION and not authenticated', () => {
@@ -353,6 +415,14 @@ describe('StepOne', () => {
       expect(screen.getByRole('button', { name: /datasetCreation.stepOne.button/i })).not.toBeDisabled()
     })
 
+    it('should enable next button when one IETF year is selected and no file is uploaded', () => {
+      render(<StepOne {...defaultProps} files={[]} />)
+
+      fireEvent.click(screen.getByTestId('select-ietf-year'))
+
+      expect(screen.getByRole('button', { name: /datasetCreation.stepOne.button/i })).not.toBeDisabled()
+    })
+
     it('should correctly compute fileNextDisabled when some files are not uploaded', () => {
       // Arrange - Create a file item without id (not yet uploaded)
       const file = new File(['test'], 'test.txt', { type: 'text/plain' })
@@ -386,6 +456,17 @@ describe('StepOne', () => {
       const files = [createMockFileItem(), createMockFileItem()]
       render(<StepOne {...defaultProps} files={files} />)
 
+      fireEvent.click(screen.getByRole('button', { name: /datasetCreation.stepOne.button/i }))
+
+      expect(screen.getByTestId('plan-upgrade-modal')).toBeInTheDocument()
+    })
+
+    it('should show plan upgrade modal when batch upload not supported and multiple IETF years are selected', () => {
+      mockEnableBilling = true
+      mockPlan.type = Plan.sandbox
+
+      render(<StepOne {...defaultProps} files={[]} />)
+      fireEvent.click(screen.getByTestId('select-two-ietf-years'))
       fireEvent.click(screen.getByRole('button', { name: /datasetCreation.stepOne.button/i }))
 
       expect(screen.getByTestId('plan-upgrade-modal')).toBeInTheDocument()

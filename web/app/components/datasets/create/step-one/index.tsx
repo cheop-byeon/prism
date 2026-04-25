@@ -2,21 +2,25 @@
 
 import type { DataSourceAuth } from '@/app/components/header/account-setting/data-source-page-new/types'
 import type { DataSourceProvider, NotionPage } from '@/models/common'
-import type { CrawlOptions, CrawlResultItem, FileItem } from '@/models/datasets'
-import { RiFolder6Line } from '@remixicon/react'
+import type { CrawlOptions, CrawlResultItem, CustomFile, FileItem } from '@/models/datasets'
+import type { IetfYearPreprocessResult, UploadedConsoleFile } from '@/service/common'
 import { useBoolean } from 'ahooks'
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import NotionConnector from '@/app/components/base/notion-connector'
 import { NotionPageSelector } from '@/app/components/base/notion-page-selector'
+import { toast } from '@/app/components/base/ui/toast'
 import { Plan } from '@/app/components/billing/type'
 import VectorSpaceFull from '@/app/components/billing/vector-space-full'
 import { useDatasetDetailContextWithSelector } from '@/context/dataset-detail'
 import { useProviderContext } from '@/context/provider-context'
 import { DataSourceType } from '@/models/datasets'
+import { uploadIetfPreprocessedFile } from '@/service/common'
 import { cn } from '@/utils/classnames'
 import EmptyDatasetCreationModal from '../empty-dataset-creation-modal'
 import FileUploader from '../file-uploader'
+import { PROGRESS_COMPLETE } from '../file-uploader/constants'
+import IetfImporter from '../ietf-importer'
 import Website from '../website'
 import { DataSourceTypeSelector, NextStepButton, PreviewPanel } from './components'
 import { usePreviewState } from './hooks'
@@ -64,6 +68,12 @@ const MULTIPLE_ITEMS_CHECK: Record<DataSourceType, (props: { files: FileItem[], 
   [DataSourceType.WEB]: ({ websitePages }) => websitePages.length > 1,
 }
 
+const toFileItem = (file: UploadedConsoleFile): FileItem => ({
+  fileID: `ietf-${file.id}`,
+  file: file as unknown as CustomFile,
+  progress: PROGRESS_COMPLETE,
+})
+
 const StepOne = ({
   datasetId,
   dataSourceType: inCreatePageDataSourceType,
@@ -91,6 +101,7 @@ const StepOne = ({
   const { plan, enableBilling } = useProviderContext()
 
   // Preview state management
+  // eslint-disable-next-line react/use-state
   const {
     currentFile,
     currentNotionPage,
@@ -104,10 +115,16 @@ const StepOne = ({
   } = usePreviewState()
 
   // Empty dataset modal state
-  const [showModal, { setTrue: openModal, setFalse: closeModal }] = useBoolean(false)
+  const showModalState = useBoolean(false)
+  const showModal = showModalState[0]
+  const { setTrue: openModal, setFalse: closeModal } = showModalState[1]
 
   // Plan upgrade modal state
-  const [isShowPlanUpgradeModal, { setTrue: showPlanUpgradeModal, setFalse: hidePlanUpgradeModal }] = useBoolean(false)
+  const planUpgradeModalState = useBoolean(false)
+  const isShowPlanUpgradeModal = planUpgradeModalState[0]
+  const { setTrue: showPlanUpgradeModal, setFalse: hidePlanUpgradeModal } = planUpgradeModalState[1]
+  const [selectedIetfYears, setSelectedIetfYears] = useState<IetfYearPreprocessResult[]>([])
+  const [isPreparingIetfFiles, setIsPreparingIetfFiles] = useState(false)
 
   // Computed values
   const shouldShowDataSourceTypeList = !datasetId || (datasetId && !dataset?.data_source_type)
@@ -127,12 +144,17 @@ const StepOne = ({
   const notionCredentialList = useMemo(() => getNotionCredentialList(authedDataSourceList), [authedDataSourceList])
 
   const fileNextDisabled = useMemo(() => {
-    if (!files.length)
+    if (isShowVectorSpaceFull)
       return true
-    if (files.some(file => !file.file.id))
+
+    if (isPreparingIetfFiles)
       return true
-    return isShowVectorSpaceFull
-  }, [files, isShowVectorSpaceFull])
+
+    if (files.length > 0)
+      return files.some(file => !file.file.id)
+
+    return selectedIetfYears.length === 0
+  }, [files, isPreparingIetfFiles, isShowVectorSpaceFull, selectedIetfYears.length])
 
   // Clear previews when switching data source type
   const handleClearPreviews = useCallback((newType: DataSourceType) => {
@@ -145,16 +167,54 @@ const StepOne = ({
   }, [hideFilePreview, hideNotionPagePreview, hideWebsitePreview])
 
   // Handle step change with batch upload check
-  const onStepChange = useCallback(() => {
+  const onStepChange = useCallback(async () => {
     if (!supportBatchUpload && dataSourceType) {
-      const checkFn = MULTIPLE_ITEMS_CHECK[dataSourceType]
-      if (checkFn?.({ files, notionPages, websitePages })) {
+      const hasMultipleItems = dataSourceType === DataSourceType.FILE
+        ? files.length + selectedIetfYears.length > 1
+        : MULTIPLE_ITEMS_CHECK[dataSourceType]?.({ files, notionPages, websitePages })
+
+      if (hasMultipleItems) {
         showPlanUpgradeModal()
         return
       }
     }
+
+    if (dataSourceType === DataSourceType.FILE && files.length === 0 && selectedIetfYears.length > 0) {
+      const validSelections = selectedIetfYears.filter(item => item.processed_path)
+      if (!validSelections.length) {
+        toast.error(t('stepOne.ietf.importFailed', { ns: 'datasetCreation' }))
+        return
+      }
+
+      setIsPreparingIetfFiles(true)
+      try {
+        const uploaded = await Promise.all(
+          validSelections.map(item => uploadIetfPreprocessedFile({ processed_path: item.processed_path! })),
+        )
+        updateFileList(uploaded.map(toFileItem))
+      }
+      catch {
+        toast.error(t('stepOne.ietf.importFailed', { ns: 'datasetCreation' }))
+        return
+      }
+      finally {
+        setIsPreparingIetfFiles(false)
+      }
+    }
+
     doOnStepChange()
-  }, [dataSourceType, doOnStepChange, files, supportBatchUpload, notionPages, showPlanUpgradeModal, websitePages])
+  }, [
+    dataSourceType,
+    doOnStepChange,
+    files,
+    notionPages,
+    selectedIetfYears,
+    showPlanUpgradeModal,
+    supportBatchUpload,
+    t,
+    updateFileList,
+    websitePages,
+  ])
 
   return (
     <div className="h-full w-full overflow-x-auto">
@@ -180,6 +240,13 @@ const StepOne = ({
               {/* File Data Source */}
               {dataSourceType === DataSourceType.FILE && (
                 <>
+                  <IetfImporter
+                    fileList={files}
+                    onFileListUpdate={updateFileList}
+                    onSelectedYearsChange={setSelectedIetfYears}
+                    disabled={isShowVectorSpaceFull}
+                    supportBatchUpload={supportBatchUpload}
+                  />
                   <FileUploader
                     fileList={files}
                     titleClassName={!shouldShowDataSourceTypeList ? 'mt-[30px] !mb-[44px] !text-lg' : undefined}
@@ -269,7 +336,7 @@ const StepOne = ({
                     className="inline-flex cursor-pointer items-center text-[13px] leading-4 text-text-accent"
                     onClick={openModal}
                   >
-                    <RiFolder6Line className="mr-1 size-4" />
+                    <span className="i-ri-folder-6-line mr-1 size-4" />
                     {t('stepOne.emptyDatasetCreation', { ns: 'datasetCreation' })}
                   </span>
                 </>

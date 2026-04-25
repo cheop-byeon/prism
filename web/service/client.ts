@@ -20,6 +20,42 @@ const getMarketplaceHeaders = () => new Headers({
   'X-Dify-Version': !IS_MARKETPLACE ? APP_VERSION : '999.0.0',
 })
 
+const abortErrorMessages = [
+  'aborted',
+  'signal is aborted without reason',
+]
+
+const isAbortLikeError = (error: unknown): boolean => {
+  if (!error)
+    return false
+
+  if (typeof error === 'object') {
+    const maybeError = error as {
+      name?: unknown
+      message?: unknown
+      cause?: unknown
+    }
+
+    if (maybeError.name === 'AbortError')
+      return true
+
+    if (typeof maybeError.message === 'string') {
+      const normalizedMessage = maybeError.message.toLowerCase()
+      if (abortErrorMessages.some(message => normalizedMessage.includes(message)))
+        return true
+    }
+
+    return isAbortLikeError(maybeError.cause)
+  }
+
+  if (typeof error === 'string') {
+    const normalizedError = error.toLowerCase()
+    return abortErrorMessages.some(message => normalizedError.includes(message))
+  }
+
+  return false
+}
+
 function isURL(path: string) {
   try {
     // eslint-disable-next-line no-new
@@ -56,6 +92,8 @@ const marketplaceLink = new OpenAPILink(marketplaceRouterContract, {
   },
   interceptors: [
     onError((error) => {
+      if (isAbortLikeError(error))
+        return
       console.error(error)
     }),
   ],
@@ -78,6 +116,8 @@ const consoleLink = new OpenAPILink(consoleRouterContract, {
   },
   interceptors: [
     onError((error) => {
+      if (isAbortLikeError(error))
+        return
       console.error(error)
     }),
   ],

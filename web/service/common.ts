@@ -336,6 +336,139 @@ export const uploadRemoteFileInfo = (url: string, isPublic?: boolean, silent?: b
   return post<{ id: string, name: string, size: number, mime_type: string, url: string }>('/remote-files/upload', { body: { url } }, { isPublicAPI: isPublic, silent })
 }
 
+export type UploadedConsoleFile = {
+  id: string
+  name: string
+  size: number
+  extension?: string
+  mime_type: string
+  url: string
+  created_by?: string
+  created_at?: number
+}
+
+export type IetfMailarchiveImportRequest = {
+  mailing_list: string
+  sent_after: string
+  sent_before: string
+  from_addr?: string
+  subject?: string
+  offset: number
+  limit: number
+  output_format: 'markdown' | 'mbox_text'
+  fetch_all: boolean
+  refresh: boolean
+}
+
+export type IetfRfcImportRequest = {
+  rfc_ids: string[]
+  since?: string
+  until?: string
+  stream?: string
+  wg?: string
+  status?: string
+  limit: number
+}
+
+export type IetfRfcSuggestion = {
+  doc_id: string
+  title: string
+  draft_names: string[]
+  since?: string | null
+  stream?: string | null
+  wg?: string | null
+  area?: string | null
+  status?: string | null
+  draft_base_name?: string | null
+  draft_max_version?: number | null
+  draft_versions?: Array<{
+    name: string
+    version: number
+    since?: string | null
+    until?: string | null
+  }>
+}
+
+export type IetfMailarchiveLocalDownloadResponse = {
+  saved_path: string
+  host_path_hint: string
+  filename: string
+  size: number
+  message_count: number
+}
+
+export type IetfYearPreprocessResult = {
+  year: number
+  saved_path: string | null
+  host_path_hint: string | null
+  processed_path: string | null
+  processed_host_path_hint: string | null
+  total_emails: number
+  discarded_emails: number
+  preview_lines: string[]
+}
+
+export type IetfPreprocessResponse = {
+  years: IetfYearPreprocessResult[]
+}
+
+export type IetfMailarchivePreprocessRequest = {
+  mailing_list: string
+  sent_after: string
+  sent_before: string
+  from_addr?: string
+  subject?: string
+  refresh: boolean
+}
+
+export type IetfPreprocessedUploadRequest = {
+  processed_path: string
+}
+
+export const importIetfMailarchiveFile = (body: IetfMailarchiveImportRequest): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/mailarchive', { body })
+}
+
+export const importIetfMailarchiveAsMbox = (body: IetfMailarchiveImportRequest): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/mailarchive/mbox', { body })
+}
+
+export const downloadIetfMailarchiveAsMboxToLocal = (
+  body: IetfMailarchiveImportRequest,
+): Promise<IetfMailarchiveLocalDownloadResponse> => {
+  return post<IetfMailarchiveLocalDownloadResponse>('/ietf/imports/mailarchive/mbox/download', { body })
+}
+
+export const downloadAndPreprocessMailarchiveYears = (
+  body: IetfMailarchivePreprocessRequest,
+): Promise<IetfPreprocessResponse> => {
+  return post<IetfPreprocessResponse>('/ietf/imports/mailarchive/mbox/preprocess', { body })
+}
+
+export const uploadIetfPreprocessedFile = (body: IetfPreprocessedUploadRequest): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/mailarchive/preprocessed/upload', { body })
+}
+
+export const importIetfRfcFile = (body: IetfRfcImportRequest): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/rfcs', { body })
+}
+
+export type IetfDraftImportRequest = {
+  draft_names: string[]
+}
+
+export const importIetfDraftFile = (body: IetfDraftImportRequest): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/drafts', { body })
+}
+
+export const fetchIetfMailingLists = (): Promise<{ lists: string[] }> => {
+  return get<{ lists: string[] }>('/ietf/mailarchive/lists')
+}
+
+export const fetchIetfRfcSuggestions = (params: { query?: string, limit?: number }): Promise<{ suggestions: IetfRfcSuggestion[] }> => {
+  return get<{ suggestions: IetfRfcSuggestion[] }>('/ietf/rfcs/suggestions', { params })
+}
+
 export const sendEMailLoginCode = (email: string, language = 'en-US'): Promise<CommonResponse & { data: string }> =>
   post<CommonResponse & { data: string }>('/email-code-login', { body: { email, language } })
 

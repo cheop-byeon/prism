@@ -63,6 +63,7 @@ const StepTwo: FC<StepTwoProps> = ({
   const currentDocForm = currentDataset?.doc_form || docForm
 
   // Custom hooks
+  // eslint-disable-next-line react/use-state
   const segmentation = useSegmentationState({
     initialSegmentationType: currentDataset?.doc_form === ChunkingMode.parentChild ? ProcessMode.parentChild : ProcessMode.general,
     initialSummaryIndexSetting: currentDataset?.summary_index_setting,
@@ -75,6 +76,7 @@ const StepTwo: FC<StepTwoProps> = ({
     isAPIKeySet,
     hasSetIndexType,
   })
+  // eslint-disable-next-line react/use-state
   const preview = usePreviewState({ dataSourceType, files, notionPages, websitePages, documentDetail, datasetId })
   const creation = useDocumentCreation({
     datasetId,
@@ -115,9 +117,9 @@ const StepTwo: FC<StepTwoProps> = ({
   // Fetch default process rule
   const fetchDefaultProcessRuleMutation = useFetchDefaultProcessRule({
     onSuccess(data) {
-      segmentation.setSegmentIdentifier(data.rules.segmentation.separator)
-      segmentation.setMaxChunkLength(data.rules.segmentation.max_tokens)
-      segmentation.setOverlap(data.rules.segmentation.chunk_overlap!)
+      segmentation.setSegmentIdentifier(data.rules.segmentation.separator ?? '')
+      segmentation.setMaxChunkLength(data.rules.segmentation.max_tokens ?? 1024)
+      segmentation.setOverlap(data.rules.segmentation.chunk_overlap ?? 0)
       segmentation.setRules(data.rules.pre_processing_rules)
       segmentation.setDefaultConfig(data.rules)
       segmentation.setLimitMaxChunkLength(data.limits.indexing_max_segmentation_tokens_length)
@@ -187,7 +189,7 @@ const StepTwo: FC<StepTwoProps> = ({
       segmentation.applyConfigFromRules(rules, isHierarchical)
       segmentation.setSegmentationType(documentDetail.dataset_process_rule.mode)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react/exhaustive-deps
   }, [])
 
   // Show options conditions
@@ -203,6 +205,9 @@ const StepTwo: FC<StepTwoProps> = ({
             segmentIdentifier={segmentation.segmentIdentifier}
             maxChunkLength={segmentation.maxChunkLength}
             overlap={segmentation.overlap}
+            chunkStrategy={segmentation.chunkStrategy}
+            strategyProvider={segmentation.strategyProvider}
+            strategyParams={segmentation.strategyParams}
             rules={segmentation.rules}
             currentDocForm={currentDocForm}
             docLanguage={docLanguage}
@@ -213,6 +218,9 @@ const StepTwo: FC<StepTwoProps> = ({
             onSegmentIdentifierChange={value => segmentation.setSegmentIdentifier(value, true)}
             onMaxChunkLengthChange={segmentation.setMaxChunkLength}
             onOverlapChange={segmentation.setOverlap}
+            onChunkStrategyChange={segmentation.setChunkStrategy}
+            onStrategyProviderChange={segmentation.setStrategyProvider}
+            onStrategyParamChange={segmentation.handleStrategyParamChange}
             onRuleToggle={segmentation.toggleRule}
             onDocFormChange={handleDocFormChange}
             onDocLanguageChange={setDocLanguage}

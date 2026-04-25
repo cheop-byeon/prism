@@ -1,0 +1,776 @@
+'use client'
+
+import type { CustomFile, FileItem } from '@/models/datasets'
+import type {
+  IetfDraftImportRequest,
+  IetfPreprocessResponse,
+  IetfRfcImportRequest,
+  IetfRfcSuggestion,
+  IetfYearPreprocessResult,
+  UploadedConsoleFile,
+} from '@/service/common'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import Button from '@/app/components/base/button'
+import Input from '@/app/components/base/input'
+import SegmentedControl from '@/app/components/base/segmented-control'
+import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitle } from '@/app/components/base/ui/dialog'
+import { toast } from '@/app/components/base/ui/toast'
+import {
+  downloadAndPreprocessMailarchiveYears,
+  fetchIetfMailingLists,
+  fetchIetfRfcSuggestions,
+  importIetfDraftFile,
+  importIetfRfcFile,
+} from '@/service/common'
+import { useFileUploadConfig } from '@/service/use-common'
+import { PROGRESS_COMPLETE } from '../file-uploader/constants'
+
+type IetfImporterProps = {
+  fileList: FileItem[]
+  onFileListUpdate: (files: FileItem[]) => void
+  onSelectedYearsChange?: (items: IetfYearPreprocessResult[]) => void
+  disabled?: boolean
+  supportBatchUpload: boolean
+}
+
+type IetfImportMode = 'mailarchive' | 'rfcs'
+
+type MailarchiveFormState = {
+  mailingList: string
+  sentAfter: string
+  sentBefore: string
+  fromAddr: string
+  subject: string
+  refresh: boolean
+}
+
+type RfcFormState = {
+  rfcId: string
+}
+
+const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
+  mailingList: '',
+  sentAfter: '1970-01-01T00:00:00',
+  sentBefore: '2038-01-19T03:14:07',
+  fromAddr: '',
+  subject: '',
+  refresh: false,
+}
+
+const DEFAULT_RFC_FORM: RfcFormState = {
+  rfcId: '',
+}
+
+const IETF_IMPORT_FILE_LIMIT = 500
+
+const trimOrUndefined = (value: string) => {
+  const trimmed = value.trim()
+  return trimmed || undefined
+}
+
+const normalizeRfcToken = (value: string): string => {
+  const trimmed = value.trim()
+  if (!trimmed)
+    return ''
+  if (/^\d+$/.test(trimmed))
+    return `RFC${trimmed}`
+  if (/^rfc\d+$/i.test(trimmed))
+    return `RFC${trimmed.slice(3)}`
+  return trimmed
+}
+
+const getCurrentRfcQuery = (value: string): string => {
+  return value.trim()
+}
+
+const isNoResultsMessage = (message: string) => /No messages matched/i.test(message)
+
+const isFileTooLargeMessage = (message: string) => /file too large|file size exceeded|maximum is \d+mb|filetoolarge|max(?:imum)? file size/i.test(message)
+
+const extractErrorMessage = async (error: unknown): Promise<string> => {
+  if (error instanceof Error && error.message)
+    return error.message
+
+  if (typeof error === 'string')
+    return error
+
+  if (error instanceof Response) {
+    try {
+      const data = await error.clone().json() as { message?: unknown, detail?: unknown }
+      if (typeof data.message === 'string' && data.message)
+        return data.message
+      if (typeof data.detail === 'string' && data.detail)
+        return data.detail
+    }
+    catch {
+      try {
+        const text = await error.clone().text()
+        if (text)
+          return text
+      }
+      catch {
+      }
+    }
+  }
+
+  if (error && typeof error === 'object') {
+    const maybeError = error as { message?: unknown, detail?: unknown }
+    if (typeof maybeError.message === 'string' && maybeError.message)
+      return maybeError.message
+    if (typeof maybeError.detail === 'string' && maybeError.detail)
+      return maybeError.detail
+  }
+
+  return ''
+}
+
+const toFileItem = (file: UploadedConsoleFile): FileItem => ({
+  fileID: `ietf-${file.id}`,
+  file: file as unknown as CustomFile,
+  progress: PROGRESS_COMPLETE,
+})
+
+function IetfImporter({
+  fileList,
+  onFileListUpdate,
+  onSelectedYearsChange,
+  disabled = false,
+  supportBatchUpload,
+}: IetfImporterProps) {
+  const { t } = useTranslation()
+  const { data: fileUploadConfig } = useFileUploadConfig()
+
+  const [open, setOpen] = useState(false)
+  const [mode, setMode] = useState<IetfImportMode>('mailarchive')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [mailarchiveForm, setMailarchiveForm] = useState(DEFAULT_MAILARCHIVE_FORM)
+  const [rfcForm, setRfcForm] = useState(DEFAULT_RFC_FORM)
+  const [availableMailingLists, setAvailableMailingLists] = useState<string[]>([])
+  const [showMailingListDropdown, setShowMailingListDropdown] = useState(false)
+  const [rfcSuggestions, setRfcSuggestions] = useState<IetfRfcSuggestion[]>([])
+  const [showRfcSuggestions, setShowRfcSuggestions] = useState(false)
+  const [selectedRfc, setSelectedRfc] = useState<IetfRfcSuggestion | null>(null)
+  const [importType, setImportType] = useState<'rfc' | 'draft'>('rfc')
+  const [selectedDraftVersion, setSelectedDraftVersion] = useState<number | null>(null)
+  const [preprocessResults, setPreprocessResults] = useState<IetfYearPreprocessResult[] | null>(null)
+  const [selectedPreprocessYears, setSelectedPreprocessYears] = useState<number[]>([])
+  const mailingListDropdownRef = useRef<HTMLDivElement>(null)
+  const rfcDropdownRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = mailingListDropdownRef
+  const selectedPreprocessResults = useMemo(
+    () => preprocessResults?.filter(item => selectedPreprocessYears.includes(item.year)) ?? [],
+    [preprocessResults, selectedPreprocessYears],
+  )
+
+  useEffect(() => {
+    onSelectedYearsChange?.(selectedPreprocessResults)
+  }, [onSelectedYearsChange, selectedPreprocessResults])
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (mailingListDropdownRef.current && !mailingListDropdownRef.current.contains(event.target as Node)) {
+        setShowMailingListDropdown(false)
+      }
+      if (rfcDropdownRef.current && !rfcDropdownRef.current.contains(event.target as Node))
+        setShowRfcSuggestions(false)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    const loadMailingLists = async () => {
+      try {
+        const result = await fetchIetfMailingLists()
+        setAvailableMailingLists(result.lists)
+      }
+      catch (error) {
+        console.error('Failed to fetch mailing lists:', error)
+      }
+    }
+    if (open)
+      loadMailingLists()
+  }, [open])
+
+  useEffect(() => {
+    if (!open || mode !== 'rfcs')
+      return
+
+    const query = getCurrentRfcQuery(rfcForm.rfcId)
+
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await fetchIetfRfcSuggestions({ query, limit: 20 })
+        setRfcSuggestions(result.suggestions)
+      }
+      catch {
+        setRfcSuggestions([])
+      }
+    }, 250)
+
+    return () => window.clearTimeout(timer)
+  }, [mode, open, rfcForm.rfcId])
+
+  const availableDraftVersions = useMemo(() => {
+    if (!selectedRfc)
+      return []
+    if (selectedRfc.draft_versions?.length)
+      return [...selectedRfc.draft_versions].sort((a, b) => a.version - b.version)
+    if (selectedRfc.draft_base_name && selectedRfc.draft_max_version != null) {
+      return Array.from({ length: selectedRfc.draft_max_version + 1 }, (_, version) => ({
+        name: `${selectedRfc.draft_base_name}-${String(version).padStart(2, '0')}`,
+        version,
+        since: null,
+        until: null,
+      }))
+    }
+    return []
+  }, [selectedRfc])
+
+  const selectedDraftMetadata = useMemo(
+    () => availableDraftVersions.find(item => item.version === selectedDraftVersion) ?? null,
+    [availableDraftVersions, selectedDraftVersion],
+  )
+
+  const selectedMetadata = useMemo(() => {
+    if (!selectedRfc)
+      return null
+    if (importType === 'draft' && selectedDraftMetadata) {
+      return {
+        since: selectedDraftMetadata.since,
+        until: selectedDraftMetadata.until,
+        stream: selectedRfc.stream,
+        wg: selectedRfc.wg,
+        status: selectedRfc.status,
+        area: selectedRfc.area,
+      }
+    }
+
+    return {
+      since: selectedRfc.since,
+      until: null,
+      stream: selectedRfc.stream,
+      wg: selectedRfc.wg,
+      status: selectedRfc.status,
+      area: selectedRfc.area,
+    }
+  }, [importType, selectedDraftMetadata, selectedRfc])
+
+  const fileLimit = useMemo(() => {
+    if (!supportBatchUpload)
+      return 1
+    return Math.max(fileUploadConfig?.file_upload_limit ?? 5, IETF_IMPORT_FILE_LIMIT)
+  }, [fileUploadConfig?.file_upload_limit, supportBatchUpload])
+
+  const isLimitReached = fileList.length >= fileLimit
+  const openDisabled = disabled || isLimitReached
+
+  const closeDialog = () => {
+    if (isSubmitting)
+      return
+    setOpen(false)
+  }
+
+  const handleImportedFile = (file: UploadedConsoleFile) => {
+    onFileListUpdate([...fileList, toFileItem(file)])
+    toast.success(t('stepOne.ietf.importSuccess', { ns: 'datasetCreation', fileName: file.name }))
+    setOpen(false)
+  }
+
+  const handleRequestError = async (error: unknown) => {
+    const fallbackMessage = t('stepOne.ietf.importFailed', { ns: 'datasetCreation' })
+    const parsedMessage = await extractErrorMessage(error)
+    if (isNoResultsMessage(parsedMessage)) {
+      toast.error(t('stepOne.ietf.importNoResults', { ns: 'datasetCreation' }))
+      return
+    }
+    if (isFileTooLargeMessage(parsedMessage)) {
+      toast.error(t('stepOne.ietf.importFileTooLarge', { ns: 'datasetCreation' }))
+      return
+    }
+    const errorMessage = parsedMessage || fallbackMessage
+    toast.error(errorMessage)
+  }
+
+  const submitMailarchiveImport = async () => {
+    const mailingList = mailarchiveForm.mailingList.trim()
+    if (!mailingList) {
+      toast.error(t('stepOne.ietf.validation.mailarchiveRequired', { ns: 'datasetCreation' }))
+      return
+    }
+
+    const sentAfter = mailarchiveForm.sentAfter.trim() || DEFAULT_MAILARCHIVE_FORM.sentAfter
+    const sentBefore = mailarchiveForm.sentBefore.trim() || DEFAULT_MAILARCHIVE_FORM.sentBefore
+
+    setPreprocessResults(null)
+    setSelectedPreprocessYears([])
+    setIsSubmitting(true)
+    try {
+      const result: IetfPreprocessResponse = await downloadAndPreprocessMailarchiveYears({
+        mailing_list: mailingList,
+        sent_after: sentAfter,
+        sent_before: sentBefore,
+        from_addr: trimOrUndefined(mailarchiveForm.fromAddr),
+        subject: trimOrUndefined(mailarchiveForm.subject),
+        refresh: mailarchiveForm.refresh,
+      })
+      setPreprocessResults(result.years)
+      setOpen(false)
+    }
+    catch (error) {
+      await handleRequestError(error)
+    }
+    finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const submitRfcs = async () => {
+    if (importType === 'draft') {
+      if (!selectedRfc?.draft_base_name || selectedDraftVersion == null) {
+        toast.error(t('stepOne.ietf.validation.draftVersionRequired', { ns: 'datasetCreation' }))
+        return
+      }
+      const draftNames = [`${selectedRfc.draft_base_name}-${String(selectedDraftVersion).padStart(2, '0')}`]
+      const payload: IetfDraftImportRequest = { draft_names: draftNames }
+      setIsSubmitting(true)
+      try {
+        const file = await importIetfDraftFile(payload)
+        handleImportedFile(file)
+      }
+      catch (error) {
+        await handleRequestError(error)
+      }
+      finally {
+        setIsSubmitting(false)
+      }
+      return
+    }
+
+    const normalizedRfcId = selectedRfc?.doc_id ?? normalizeRfcToken(rfcForm.rfcId)
+
+    const payload: IetfRfcImportRequest = {
+      rfc_ids: normalizedRfcId ? [normalizedRfcId] : [],
+      limit: 20,
+    }
+
+    if (!payload.rfc_ids.length) {
+      toast.error(t('stepOne.ietf.validation.rfcQueryRequired', { ns: 'datasetCreation' }))
+      return
+    }
+
+    setIsSubmitting(true)
+    try {
+      const file = await importIetfRfcFile(payload)
+      handleImportedFile(file)
+    }
+    catch (error) {
+      await handleRequestError(error)
+    }
+    finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  return (
+    <>
+      <div className="mb-5 flex max-w-[640px] items-center justify-between gap-4 rounded-2xl border border-divider-subtle bg-background-default-subtle px-4 py-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold leading-5 text-text-secondary">
+            {t('stepOne.ietf.title', { ns: 'datasetCreation' })}
+          </div>
+          <div className="mt-1 text-xs leading-4 text-text-tertiary">
+            {t('stepOne.ietf.description', { ns: 'datasetCreation' })}
+          </div>
+          {isLimitReached && (
+            <div className="mt-1 text-xs leading-4 text-text-warning">
+              {t('stepOne.ietf.limitReached', { ns: 'datasetCreation' })}
+            </div>
+          )}
+        </div>
+        <Button
+          variant="secondary"
+          onClick={() => setOpen(true)}
+          disabled={openDisabled}
+          data-testid="ietf-import-open"
+        >
+          {t('stepOne.ietf.open', { ns: 'datasetCreation' })}
+        </Button>
+      </div>
+
+      {preprocessResults && preprocessResults.length > 0 && (
+        <div className="mb-5 max-w-[720px] rounded-2xl border border-divider-subtle bg-background-default-subtle p-4" data-testid="ietf-preprocess-results-panel">
+          <div className="text-sm font-semibold leading-5 text-text-secondary">
+            {t('stepOne.ietf.preprocessResults', { ns: 'datasetCreation' })}
+          </div>
+          <div className="mt-1 text-xs leading-4 text-text-tertiary">
+            {t('stepOne.ietf.preprocessResultsHint', { ns: 'datasetCreation' })}
+          </div>
+          <div className="mt-1 text-xs leading-4 text-text-tertiary">
+            {t('stepOne.ietf.preprocessSelectedCount', {
+              ns: 'datasetCreation',
+              count: selectedPreprocessYears.length,
+            })}
+          </div>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {preprocessResults.map(item => (
+              <button
+                key={item.year}
+                type="button"
+                className={`rounded-xl border px-3 py-2 text-left text-xs transition-colors ${selectedPreprocessYears.includes(item.year) ? 'border-primary-600 bg-primary-50 text-text-primary' : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'}`}
+                onClick={() => {
+                  setSelectedPreprocessYears((prev) => {
+                    if (prev.includes(item.year))
+                      return prev.filter(year => year !== item.year)
+                    return [...prev, item.year].sort((a, b) => a - b)
+                  })
+                }}
+                data-testid={`ietf-preprocess-year-${item.year}`}
+              >
+                {t('stepOne.ietf.preprocessYearSummary', {
+                  ns: 'datasetCreation',
+                  year: item.year,
+                  count: item.total_emails,
+                  discarded: item.discarded_emails,
+                })}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <Dialog
+        open={open}
+        onOpenChange={nextOpen => nextOpen ? setOpen(true) : closeDialog()}
+      >
+        <DialogContent className="w-[720px] max-w-[calc(100vw-2rem)] p-0">
+          <div className="border-b border-divider-subtle px-6 py-5">
+            <DialogCloseButton data-testid="ietf-import-close" className="right-5 top-5" />
+            <DialogTitle className="pr-10 text-text-primary title-2xl-semi-bold">
+              {t('stepOne.ietf.open', { ns: 'datasetCreation' })}
+            </DialogTitle>
+            <DialogDescription className="mt-2 pr-10 text-sm leading-5 text-text-tertiary">
+              {t('stepOne.ietf.modeDescription', { ns: 'datasetCreation' })}
+            </DialogDescription>
+          </div>
+
+          <div className="space-y-5 px-6 py-5">
+            <div className="flex gap-2">
+              <Button
+                variant={mode === 'mailarchive' ? 'primary' : 'secondary'}
+                onClick={() => setMode('mailarchive')}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="i-ri-mail-download-line size-4" />
+                  {t('stepOne.ietf.mailarchive', { ns: 'datasetCreation' })}
+                </span>
+              </Button>
+              <Button
+                variant={mode === 'rfcs' ? 'primary' : 'secondary'}
+                onClick={() => {
+                  setMode('rfcs')
+                  setShowRfcSuggestions(true)
+                }}
+              >
+                {' '}
+                <span className="flex items-center gap-1.5">
+                  <span className="i-ri-article-line size-4" />
+                  {t('stepOne.ietf.rfcs', { ns: 'datasetCreation' })}
+                </span>
+              </Button>
+            </div>
+
+            {mode === 'mailarchive' && (
+              <div className="space-y-4" data-testid="ietf-mailarchive-form">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.mailingList', { ns: 'datasetCreation' })}
+                    </div>
+                    <div ref={dropdownRef} className="relative">
+                      <Input
+                        value={mailarchiveForm.mailingList}
+                        onChange={(e) => {
+                          setMailarchiveForm(prev => ({ ...prev, mailingList: e.target.value }))
+                          setShowMailingListDropdown(true)
+                        }}
+                        onFocus={() => setShowMailingListDropdown(true)}
+                        placeholder={t('stepOne.ietf.mailarchiveHint', { ns: 'datasetCreation' }) || ''}
+                      />
+                      {showMailingListDropdown && availableMailingLists.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
+                          {availableMailingLists
+                            .filter(list => list.toLowerCase().includes(mailarchiveForm.mailingList.toLowerCase()))
+                            .map(list => (
+                              <div
+                                key={list}
+                                onClick={() => {
+                                  setMailarchiveForm(prev => ({ ...prev, mailingList: list }))
+                                  setShowMailingListDropdown(false)
+                                }}
+                                className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-components-panel-border"
+                              >
+                                {list}
+                              </div>
+                            ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.sentAfter', { ns: 'datasetCreation' })}
+                    </div>
+                    <Input
+                      value={mailarchiveForm.sentAfter}
+                      onChange={e => setMailarchiveForm(prev => ({ ...prev, sentAfter: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.sentBefore', { ns: 'datasetCreation' })}
+                    </div>
+                    <Input
+                      value={mailarchiveForm.sentBefore}
+                      onChange={e => setMailarchiveForm(prev => ({ ...prev, sentBefore: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.fromAddr', { ns: 'datasetCreation' })}
+                    </div>
+                    <Input
+                      value={mailarchiveForm.fromAddr}
+                      onChange={e => setMailarchiveForm(prev => ({ ...prev, fromAddr: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.subject', { ns: 'datasetCreation' })}
+                    </div>
+                    <Input
+                      value={mailarchiveForm.subject}
+                      onChange={e => setMailarchiveForm(prev => ({ ...prev, subject: e.target.value }))}
+                    />
+                  </div>
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.refresh', { ns: 'datasetCreation' })}
+                    </div>
+                    <label className="flex min-h-[40px] items-center gap-2 rounded-xl border border-components-panel-border bg-components-panel-bg px-3 py-2 text-sm text-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={mailarchiveForm.refresh}
+                        onChange={e => setMailarchiveForm(prev => ({ ...prev, refresh: e.target.checked }))}
+                      />
+                      <span>{t('stepOne.ietf.refresh', { ns: 'datasetCreation' })}</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="text-xs text-text-tertiary">
+                  {t('stepOne.ietf.preprocessImportHint', { ns: 'datasetCreation' })}
+                </div>
+              </div>
+            )}
+
+            {mode === 'rfcs' && (
+              <div className="space-y-4" data-testid="ietf-rfc-form">
+                <div className="text-xs leading-4 text-text-tertiary">
+                  {t('stepOne.ietf.rfcFiltersHint', { ns: 'datasetCreation' })}
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.rfcId', { ns: 'datasetCreation' })}
+                    </div>
+                    <div ref={rfcDropdownRef} className="relative">
+                      <Input
+                        value={rfcForm.rfcId}
+                        onChange={(e) => {
+                          setRfcForm({ rfcId: e.target.value })
+                          setSelectedRfc(null)
+                          setImportType('rfc')
+                          setSelectedDraftVersion(null)
+                          setShowRfcSuggestions(true)
+                        }}
+                        onFocus={() => setShowRfcSuggestions(true)}
+                        placeholder={t('stepOne.ietf.rfcIdHint', { ns: 'datasetCreation' }) || ''}
+                      />
+                      {showRfcSuggestions && rfcSuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
+                          {rfcSuggestions.map(item => (
+                            <button
+                              key={item.doc_id}
+                              type="button"
+                              className="block w-full px-3 py-2 text-left hover:bg-components-panel-border"
+                              onClick={() => {
+                                setRfcForm({ rfcId: item.doc_id })
+                                setSelectedRfc(item)
+                                setImportType('rfc')
+                                const latestVersion = item.draft_versions?.length
+                                  ? item.draft_versions[item.draft_versions.length - 1].version
+                                  : item.draft_max_version ?? null
+                                setSelectedDraftVersion(latestVersion)
+                                setShowRfcSuggestions(false)
+                              }}
+                            >
+                              <div className="text-sm text-text-primary">{item.doc_id}</div>
+                              <div className="text-xs text-text-tertiary">{item.title}</div>
+                              {item.draft_names.length > 0 && (
+                                <div className="mt-0.5 text-xs text-text-tertiary">
+                                  {item.draft_names.join(', ')}
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {selectedRfc && (
+                  <div className="space-y-4 rounded-2xl border border-divider-subtle bg-background-default-subtle p-4">
+                    <div className="space-y-1">
+                      <div className="text-xs font-medium text-text-tertiary">
+                        {selectedRfc.doc_id}
+                      </div>
+                      <div className="text-base font-semibold leading-6 text-text-primary">
+                        {t('stepOne.ietf.selectedRfcTitle', { ns: 'datasetCreation' })}
+                      </div>
+                      <div className="text-sm leading-5 text-text-secondary">{selectedRfc.title}</div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-text-secondary">
+                        {t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
+                      </div>
+                      <SegmentedControl
+                        options={[
+                          { value: 'rfc', text: selectedRfc.doc_id },
+                          {
+                            value: 'draft',
+                            text: t('stepOne.ietf.importTypeInternetDraft', { ns: 'datasetCreation' }),
+                            disabled: !availableDraftVersions.length,
+                          },
+                        ]}
+                        value={importType}
+                        onChange={value => setImportType(value as 'rfc' | 'draft')}
+                        className="w-fit"
+                      />
+                    </div>
+
+                    {importType === 'draft' && selectedRfc.draft_base_name && availableDraftVersions.length > 0 && (
+                      <div className="space-y-3 rounded-xl border border-divider-subtle bg-background-default p-3">
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.draftBaseName', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 text-sm text-text-primary">
+                            {selectedRfc.draft_base_name}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.draftVersion', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {availableDraftVersions.map(item => (
+                              <button
+                                key={item.version}
+                                type="button"
+                                onClick={() => setSelectedDraftVersion(item.version)}
+                                className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs transition-colors ${
+                                  selectedDraftVersion === item.version
+                                    ? 'border-primary-600 bg-primary-50 text-primary-700'
+                                    : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'
+                                }`}
+                              >
+                                {String(item.version).padStart(2, '0')}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
+
+                    {selectedMetadata && (
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.since', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
+                            {selectedMetadata.since || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.until', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
+                            {selectedMetadata.until || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.stream', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
+                            {selectedMetadata.stream || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.wg', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
+                            {selectedMetadata.wg || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.status', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
+                            {selectedMetadata.status || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.area', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
+                            {selectedMetadata.area || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-divider-subtle px-6 py-4">
+            <Button variant="secondary" onClick={closeDialog} disabled={isSubmitting}>
+              {t('stepOne.ietf.cancel', { ns: 'datasetCreation' })}
+            </Button>
+            <Button
+              variant="primary"
+              loading={isSubmitting}
+              onClick={mode === 'mailarchive' ? submitMailarchiveImport : submitRfcs}
+              data-testid="ietf-import-submit"
+            >
+              {t('stepOne.ietf.import', { ns: 'datasetCreation' })}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  )
+}
+
+export default IetfImporter

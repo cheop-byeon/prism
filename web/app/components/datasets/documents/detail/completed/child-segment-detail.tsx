@@ -1,18 +1,15 @@
 import type { FC } from 'react'
 import type { ChildChunkDetail, ChunkingMode } from '@/models/datasets'
-import {
-  RiCloseLine,
-  RiCollapseDiagonalLine,
-  RiExpandDiagonalLine,
-} from '@remixicon/react'
 import * as React from 'react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Divider from '@/app/components/base/divider'
 import { useEventEmitterContextContext } from '@/context/event-emitter'
+import { useChildChunkMetadata } from '@/service/knowledge/use-segment'
 import { cn } from '@/utils/classnames'
 import { formatNumber } from '@/utils/format'
 import { formatTime } from '@/utils/time'
+import { useDocumentContext } from '../context'
 import ActionButtons from './common/action-buttons'
 import ChunkContent from './common/chunk-content'
 import Dot from './common/dot'
@@ -43,6 +40,32 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
   const [loading, setLoading] = useState(false)
   const fullScreen = useSegmentListContext(s => s.fullScreen)
   const toggleFullScreen = useSegmentListContext(s => s.toggleFullScreen)
+  const datasetId = useDocumentContext(s => s.datasetId)
+  const documentId = useDocumentContext(s => s.documentId)
+
+  const { data: metadataResponse } = useChildChunkMetadata(
+    {
+      datasetId: datasetId || '',
+      documentId: documentId || '',
+      segmentId: chunkId,
+      childChunkId: childChunkInfo?.id || '',
+    },
+    !datasetId || !documentId || !chunkId || !childChunkInfo?.id,
+  )
+
+  const metadata = metadataResponse?.data?.metadata || {}
+  const resolvedMetadata = {
+    url: metadata.url,
+    subject: metadata.subject_line || metadata.subject,
+    id: metadata.email_id || metadata.id,
+    date: metadata.date,
+  }
+  const metadataItems = [
+    { key: 'url', label: t('segment.metadataUrl', { ns: 'datasetDocuments' }) },
+    { key: 'subject', label: t('segment.metadataSubject', { ns: 'datasetDocuments' }) },
+    { key: 'id', label: t('segment.metadataId', { ns: 'datasetDocuments' }) },
+    { key: 'date', label: t('segment.metadataDate', { ns: 'datasetDocuments' }) },
+  ]
 
   eventEmitter?.useSubscription((v) => {
     if (v === 'update-child-segment')
@@ -62,7 +85,7 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
   const wordCountText = useMemo(() => {
     const count = content.length
     return `${formatNumber(count)} ${t('segment.characters', { ns: 'datasetDocuments', count })}`
-  }, [content.length])
+  }, [content.length, t])
 
   const EditTimeText = useMemo(() => {
     const timeText = formatTime({
@@ -70,19 +93,19 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
       dateFormat: `${t('segment.dateTimeFormat', { ns: 'datasetDocuments' })}`,
     })
     return `${t('segment.editedAt', { ns: 'datasetDocuments' })} ${timeText}`
-  }, [childChunkInfo?.updated_at])
+  }, [childChunkInfo?.updated_at, t])
 
   return (
     <div className="flex h-full flex-col">
       <div className={cn('flex items-center justify-between', fullScreen ? 'border border-divider-subtle py-3 pl-6 pr-4' : 'pl-4 pr-3 pt-3')}>
         <div className="flex flex-col">
-          <div className="system-xl-semibold text-text-primary">{t('segment.editChildChunk', { ns: 'datasetDocuments' })}</div>
+          <div className="text-text-primary system-xl-semibold">{t('segment.editChildChunk', { ns: 'datasetDocuments' })}</div>
           <div className="flex items-center gap-x-2">
             <SegmentIndexTag positionId={childChunkInfo?.position || ''} labelPrefix={t('segment.childChunk', { ns: 'datasetDocuments' }) as string} />
             <Dot />
-            <span className="system-xs-medium text-text-tertiary">{wordCountText}</span>
+            <span className="text-text-tertiary system-xs-medium">{wordCountText}</span>
             <Dot />
-            <span className="system-xs-medium text-text-tertiary">
+            <span className="text-text-tertiary system-xs-medium">
               {EditTimeText}
             </span>
           </div>
@@ -100,21 +123,34 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
             </>
           )}
           <div className="mr-1 flex h-8 w-8 cursor-pointer items-center justify-center p-1.5" onClick={toggleFullScreen}>
-            {fullScreen ? <RiCollapseDiagonalLine className="h-4 w-4 text-text-tertiary" /> : <RiExpandDiagonalLine className="h-4 w-4 text-text-tertiary" />}
+            {fullScreen ? <span className="i-ri-collapse-diagonal-line h-4 w-4 text-text-tertiary" /> : <span className="i-ri-expand-diagonal-line h-4 w-4 text-text-tertiary" />}
           </div>
           <div className="flex h-8 w-8 cursor-pointer items-center justify-center p-1.5" onClick={onCancel}>
-            <RiCloseLine className="h-4 w-4 text-text-tertiary" />
+            <span className="i-ri-close-line h-4 w-4 text-text-tertiary" />
           </div>
         </div>
       </div>
-      <div className={cn('flex w-full grow', fullScreen ? 'flex-row justify-center px-6 pt-6' : 'px-4 py-3')}>
-        <div className={cn('h-full overflow-hidden whitespace-pre-line break-all', fullScreen ? 'w-1/2' : 'w-full')}>
+      <div className={cn('flex w-full grow', fullScreen ? 'flex-row justify-center gap-x-8 px-6 pt-6' : 'flex-col gap-y-3 px-4 py-3')}>
+        <div className={cn('overflow-hidden whitespace-pre-line break-all', fullScreen ? 'h-full w-1/2' : 'h-0 grow')}>
           <ChunkContent
             docForm={docForm}
             question={content}
             onQuestionChange={content => setContent(content)}
             isEditMode={true}
           />
+        </div>
+        <div className={cn('shrink-0', fullScreen ? 'w-[320px]' : 'w-full')}>
+          <div className="rounded-xl border border-components-panel-border bg-components-panel-bg px-3 py-2">
+            <div className="mb-2 text-text-tertiary system-xs-semibold-uppercase">{t('segment.metadata', { ns: 'datasetDocuments' })}</div>
+            <div className="space-y-2">
+              {metadataItems.map(item => (
+                <div key={item.key} className="space-y-1">
+                  <div className="text-text-tertiary system-2xs-medium-uppercase">{item.label}</div>
+                  <div className="break-all text-text-primary system-xs-regular">{resolvedMetadata[item.key as keyof typeof resolvedMetadata] || '-'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
       {!fullScreen && (
