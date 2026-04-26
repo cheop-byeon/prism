@@ -71,6 +71,10 @@ class Vector:
                 from core.rag.datasource.vdb.chroma.chroma_vector import ChromaVectorFactory
 
                 return ChromaVectorFactory
+            case VectorType.FAISS:
+                from core.rag.datasource.vdb.faiss.faiss_vector import FaissVectorFactory
+
+                return FaissVectorFactory
             case VectorType.MILVUS:
                 from core.rag.datasource.vdb.milvus.milvus_vector import MilvusVectorFactory
 
