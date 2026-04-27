@@ -144,7 +144,13 @@ class LIMarkdownNodeParser(TextSplitter):
 
 
 class LIHTMLNodeParser(TextSplitter):
-    """HTMLNodeParser from llama-index."""
+    """HTMLNodeParser from llama-index.
+
+    NOTE: Dify's extraction pipeline converts HTML files to plain text before splitting,
+    so this splitter only produces meaningful HTML-aware chunks when the input text still
+    contains HTML markup (e.g. raw HTML string passed directly).  For plain-text input the
+    output falls back to non-empty paragraphs split on blank lines.
+    """
 
     def __init__(self, **kwargs: Any) -> None:
         _require_llamaindex()
@@ -154,7 +160,11 @@ class LIHTMLNodeParser(TextSplitter):
 
     def split_text(self, text: str) -> list[str]:
         nodes = self._splitter.get_nodes_from_documents([LISentenceSplitter._make_document(text)])
-        return [n.get_content() for n in nodes if n.get_content().strip()]
+        chunks = [n.get_content() for n in nodes if n.get_content().strip()]
+        if not chunks:
+            # Plain text: Dify already stripped HTML tags; fall back to paragraph splitting.
+            chunks = [c.strip() for c in re.split(r"\n\n+", text) if c.strip()]
+        return chunks
 
 
 class LICodeSplitter(TextSplitter):

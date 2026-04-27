@@ -40,7 +40,7 @@ class IetfMailarchiveImportRequest(BaseModel):
 
 
 class IetfRfcImportRequest(BaseModel):
-    """Input payload for importing one or more RFC documents as markdown."""
+    """Input payload for importing one or more RFC documents."""
 
     rfc_ids: list[str] = Field(default_factory=list, description="Explicit RFC identifiers such as RFC9000")
     since: str | None = Field(default=None, description="Lower month bound in YYYY-MM format for filtered RFC queries")
@@ -49,6 +49,7 @@ class IetfRfcImportRequest(BaseModel):
     wg: str | None = Field(default=None, description="Optional working group acronym filter")
     status: str | None = Field(default=None, description="Optional current status filter")
     limit: PositiveInt = Field(default=20, le=100, description="Maximum number of RFCs to include for filtered queries")
+    format: str = Field(default="txt", description="Download format: txt, html, pdf, or xml")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -99,6 +100,7 @@ class IetfDraftImportRequest(BaseModel):
         default_factory=list,
         description="Full IETF draft names, e.g. draft-ietf-quic-transport-34",
     )
+    format: str = Field(default="txt", description="Download format: txt, html, or xml")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -108,6 +110,18 @@ class IetfDraftImportRequest(BaseModel):
         if not isinstance(value, list):
             return []
         return [str(item).strip() for item in value if str(item).strip()]
+
+
+class IetfRfcFormatsQuery(BaseModel):
+    rfc_id: str = Field(..., min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class IetfDraftFormatsQuery(BaseModel):
+    draft_name: str = Field(..., min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
 
 
 @console_ns.route("/ietf/imports/mailarchive")
@@ -191,7 +205,23 @@ class IetfDraftImportApi(Resource):
     @login_required
     def post(self):
         payload = IetfDraftImportRequest.model_validate(console_ns.payload)
-        return IetfImportService.import_drafts({"draft_names": payload.draft_names})
+        return IetfImportService.import_drafts({"draft_names": payload.draft_names, "format": payload.format})
+
+
+@console_ns.route("/ietf/rfcs/formats")
+class IetfRfcFormatsApi(Resource):
+    @login_required
+    def get(self):
+        query = IetfRfcFormatsQuery.model_validate(request.args.to_dict(flat=True))  # type: ignore[arg-type]
+        return IetfImportService.get_rfc_formats(rfc_id=query.rfc_id)
+
+
+@console_ns.route("/ietf/drafts/formats")
+class IetfDraftFormatsApi(Resource):
+    @login_required
+    def get(self):
+        query = IetfDraftFormatsQuery.model_validate(request.args.to_dict(flat=True))  # type: ignore[arg-type]
+        return IetfImportService.get_draft_formats(draft_name=query.draft_name)
 
 
 @console_ns.route("/ietf/mailarchive/lists")

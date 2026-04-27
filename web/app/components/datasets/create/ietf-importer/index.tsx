@@ -3,6 +3,7 @@
 import type { CustomFile, FileItem } from '@/models/datasets'
 import type {
   IetfDraftImportRequest,
+  IetfFormatInfo,
   IetfPreprocessResponse,
   IetfRfcImportRequest,
   IetfRfcSuggestion,
@@ -18,7 +19,9 @@ import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitl
 import { toast } from '@/app/components/base/ui/toast'
 import {
   downloadAndPreprocessMailarchiveYears,
+  fetchIetfDraftFormats,
   fetchIetfMailingLists,
+  fetchIetfRfcFormats,
   fetchIetfRfcSuggestions,
   importIetfDraftFile,
   importIetfRfcFile,
@@ -155,6 +158,9 @@ function IetfImporter({
   const [selectedDraftVersion, setSelectedDraftVersion] = useState<number | null>(null)
   const [preprocessResults, setPreprocessResults] = useState<IetfYearPreprocessResult[] | null>(null)
   const [selectedPreprocessYears, setSelectedPreprocessYears] = useState<number[]>([])
+  const [availableFormats, setAvailableFormats] = useState<IetfFormatInfo[]>([])
+  const [selectedFormat, setSelectedFormat] = useState<string>('txt')
+  const [isFetchingFormats, setIsFetchingFormats] = useState(false)
   const mailingListDropdownRef = useRef<HTMLDivElement>(null)
   const rfcDropdownRef = useRef<HTMLDivElement>(null)
   const dropdownRef = mailingListDropdownRef
@@ -232,6 +238,41 @@ function IetfImporter({
     () => availableDraftVersions.find(item => item.version === selectedDraftVersion) ?? null,
     [availableDraftVersions, selectedDraftVersion],
   )
+
+  useEffect(() => {
+    if (!selectedRfc)
+      return
+
+    const fetchFormats = async () => {
+      setIsFetchingFormats(true)
+      setAvailableFormats([])
+      setSelectedFormat('txt')
+      try {
+        if (importType === 'draft' && selectedDraftMetadata) {
+          const result = await fetchIetfDraftFormats(selectedDraftMetadata.name)
+          const formats = result.formats.length ? result.formats : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
+          setAvailableFormats(formats)
+          setSelectedFormat(formats[0].key)
+        }
+        else if (importType === 'rfc') {
+          const result = await fetchIetfRfcFormats(selectedRfc.doc_id)
+          const formats = result.formats.length ? result.formats : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
+          setAvailableFormats(formats)
+          setSelectedFormat(formats[0].key)
+        }
+      }
+      catch {
+        toast.error(t('stepOne.ietf.docFormatFetchError', { ns: 'datasetCreation' }))
+        setAvailableFormats([{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }])
+        setSelectedFormat('txt')
+      }
+      finally {
+        setIsFetchingFormats(false)
+      }
+    }
+
+    fetchFormats()
+  }, [selectedRfc, importType, selectedDraftMetadata, t])
 
   const selectedMetadata = useMemo(() => {
     if (!selectedRfc)
@@ -333,7 +374,7 @@ function IetfImporter({
         return
       }
       const draftNames = [`${selectedRfc.draft_base_name}-${String(selectedDraftVersion).padStart(2, '0')}`]
-      const payload: IetfDraftImportRequest = { draft_names: draftNames }
+      const payload: IetfDraftImportRequest = { draft_names: draftNames, format: selectedFormat }
       setIsSubmitting(true)
       try {
         const file = await importIetfDraftFile(payload)
@@ -353,6 +394,7 @@ function IetfImporter({
     const payload: IetfRfcImportRequest = {
       rfc_ids: normalizedRfcId ? [normalizedRfcId] : [],
       limit: 20,
+      format: selectedFormat,
     }
 
     if (!payload.rfc_ids.length) {
@@ -695,6 +737,35 @@ function IetfImporter({
 
                       </div>
                     )}
+
+                    {/* Format picker — shown once formats are loaded */}
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-text-secondary">
+                        {t('stepOne.ietf.docFormat', { ns: 'datasetCreation' })}
+                      </div>
+                      {isFetchingFormats
+                        ? (
+                            <div className="text-xs text-text-tertiary">…</div>
+                          )
+                        : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {availableFormats.map(fmt => (
+                                <button
+                                  key={fmt.key}
+                                  type="button"
+                                  onClick={() => setSelectedFormat(fmt.key)}
+                                  className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                                    selectedFormat === fmt.key
+                                      ? 'border-primary-600 bg-primary-50 text-primary-700'
+                                      : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'
+                                  }`}
+                                >
+                                  {fmt.label}
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                    </div>
 
                     {selectedMetadata && (
                       <div className="grid grid-cols-2 gap-3">

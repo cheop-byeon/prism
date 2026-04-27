@@ -83,8 +83,43 @@ class RfcSuggestionsResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class FormatInfo(BaseModel):
+    key: str       # "txt", "html", "pdf", "xml"
+    label: str     # human-readable label
+    mime_type: str
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RfcFormatEntry(BaseModel):
+    rfc_id: str
+    formats: list[FormatInfo]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RfcFormatsResponse(BaseModel):
+    entries: list[RfcFormatEntry]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DraftFormatEntry(BaseModel):
+    draft_name: str
+    formats: list[FormatInfo]
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DraftFormatsResponse(BaseModel):
+    entries: list[DraftFormatEntry]
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class DraftImportRequest(BaseModel):
     draft_names: list[str] = Field(default_factory=list)
+    format: str = Field(default="txt", description="Preferred download format: txt, html, xml")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -112,6 +147,19 @@ class RfcImportRequest(BaseModel):
     wg: str | None = None
     status: str | None = None
     limit: int = Field(default=20, ge=1, le=100)
+    format: str = Field(default="txt", description="Preferred download format: txt, html, pdf, xml")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class RfcFormatsRequest(BaseModel):
+    rfc_ids: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class DraftFormatsRequest(BaseModel):
+    draft_names: list[str] = Field(default_factory=list)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -137,6 +185,38 @@ MONTH_NAME_TO_NUM: dict[str, int] = {
 }
 
 IETF_DRAFT_BASE_URL = "https://www.ietf.org/archive/id"
+
+# Maps user-facing format key → ietfdata content_url() format strings (tried in order).
+_RFC_FORMAT_CONTENT_KEYS: dict[str, list[str]] = {
+    "txt": ["ASCII", "TEXT"],
+    "html": ["HTML"],
+    "pdf": ["PDF"],
+    "xml": ["XML"],
+}
+
+_FORMAT_LABELS: dict[str, str] = {
+    "txt": "Plain Text",
+    "html": "HTML",
+    "pdf": "PDF",
+    "xml": "XML",
+}
+
+_FORMAT_MIME_TYPES: dict[str, str] = {
+    "txt": "text/plain",
+    "html": "text/html",
+    "pdf": "application/pdf",
+    "xml": "application/xml",
+}
+
+_FORMAT_EXTENSIONS: dict[str, str] = {
+    "txt": "txt",
+    "html": "html",
+    "pdf": "pdf",
+    "xml": "xml",
+}
+
+# Draft formats we can attempt; txt is almost always present.
+_DRAFT_FORMAT_ORDER = ["txt", "html", "xml"]
 
 _SECTION_HEADING_RE = re.compile(r"^\s*(\d+(?:\.\d+)*)\.?\s+(?P<title>.+?)\s*$")
 _NON_TECHNICAL_SECTION_RE = re.compile(
@@ -540,6 +620,57 @@ def _compact_date_for_filename(value: str) -> str:
     return re.sub(r"[^0-9]", "", value)[:8] or "date"
 
 
+def _rfc_content_url_for_format(entry: object, fmt: str) -> str | None:
+    """Return the first non-None content URL for the requested format key."""
+    keys = _RFC_FORMAT_CONTENT_KEYS.get(fmt, ["ASCII", "TEXT"])
+    for key in keys:
+        try:
+            url = entry.content_url(key)  # type: ignore[union-attr]
+            if url:
+                return str(url)
+        except Exception:  # noqa: BLE001
+            continue
+    return None
+
+
+def _available_rfc_formats(entry: object) -> list[FormatInfo]:
+    formats: list[FormatInfo] = []
+    for fmt in ("txt", "html", "pdf", "xml"):
+        if _rfc_content_url_for_format(entry, fmt):
+            formats.append(FormatInfo(
+                key=fmt,
+                label=_FORMAT_LABELS[fmt],
+                mime_type=_FORMAT_MIME_TYPES[fmt],
+            ))
+    return formats
+
+
+def _available_draft_formats(draft_name: str) -> list[FormatInfo]:
+    """Check which formats exist for a draft by probing the IETF archive."""
+    session = requests.Session()
+    formats: list[FormatInfo] = []
+    try:
+        for fmt in _DRAFT_FORMAT_ORDER:
+            ext = _FORMAT_EXTENSIONS[fmt]
+            url = f"{IETF_DRAFT_BASE_URL}/{draft_name}.{ext}"
+            try:
+                resp = session.head(url, timeout=10, allow_redirects=True)
+                if resp.status_code == 200:
+                    formats.append(FormatInfo(
+                        key=fmt,
+                        label=_FORMAT_LABELS[fmt],
+                        mime_type=_FORMAT_MIME_TYPES[fmt],
+                    ))
+            except Exception:  # noqa: BLE001
+                continue
+    finally:
+        session.close()
+    # Always include txt as a fallback even if HEAD failed.
+    if not any(f.key == "txt" for f in formats):
+        formats.insert(0, FormatInfo(key="txt", label="Plain Text", mime_type="text/plain"))
+    return formats
+
+
 def _as_sidecar_file(filename: str, markdown: str) -> SidecarFileResponse:
     content_base64 = base64.b64encode(markdown.encode("utf-8")).decode("ascii")
     return SidecarFileResponse(filename=filename, mime_type="text/markdown", content_base64=content_base64)
@@ -587,37 +718,91 @@ def get_rfc_suggestions(query: str = "", limit: int = 20) -> RfcSuggestionsRespo
     return RfcSuggestionsResponse(suggestions=suggestions)
 
 
+@app.post("/api/v1/rfcs/formats")
+def get_rfc_formats(payload: RfcFormatsRequest) -> RfcFormatsResponse:
+    """Return available download formats for each requested RFC ID."""
+    index = _rfc_index()
+    entries: list[RfcFormatEntry] = []
+    for rfc_id in payload.rfc_ids:
+        normalized = _normalize_rfc_id(rfc_id)
+        try:
+            entry = index.rfc(normalized)
+        except KeyError:
+            entries.append(RfcFormatEntry(rfc_id=normalized, formats=[]))
+            continue
+        entries.append(RfcFormatEntry(rfc_id=normalized, formats=_available_rfc_formats(entry)))
+    return RfcFormatsResponse(entries=entries)
+
+
+@app.post("/api/v1/drafts/formats")
+def get_draft_formats(payload: DraftFormatsRequest) -> DraftFormatsResponse:
+    """Return available download formats for each requested Internet-Draft name."""
+    entries: list[DraftFormatEntry] = []
+    for draft_name in payload.draft_names:
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "", draft_name.strip())
+        if not safe:
+            continue
+        entries.append(DraftFormatEntry(draft_name=safe, formats=_available_draft_formats(safe)))
+    return DraftFormatsResponse(entries=entries)
+
+
 @app.post("/api/v1/import/drafts")
 def import_drafts(payload: DraftImportRequest) -> SidecarFileResponse:
-    """Download IETF internet-drafts by full name and return them as a markdown file."""
+    """Download IETF internet-drafts by full name and return them as a dataset file."""
     if not payload.draft_names:
         raise HTTPException(status_code=400, detail="draft_names must not be empty")
 
-    sections: list[str] = []
-    for draft_name in payload.draft_names:
-        # Sanitize: only allow alphanumeric, dots, hyphens in draft names.
-        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "", draft_name.strip())
+    fmt = payload.format if payload.format in _FORMAT_EXTENSIONS else "txt"
+    ext = _FORMAT_EXTENSIONS[fmt]
+    mime_type = _FORMAT_MIME_TYPES[fmt]
+
+    # Single draft: download raw bytes and return as-is.
+    if len(payload.draft_names) == 1:
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "", payload.draft_names[0].strip())
         if not safe_name:
-            continue
-        url = f"{IETF_DRAFT_BASE_URL}/{safe_name}.txt"
+            raise HTTPException(status_code=400, detail="Invalid draft name")
+        url = f"{IETF_DRAFT_BASE_URL}/{safe_name}.{ext}"
         try:
             resp = requests.get(url, timeout=30)
         except Exception as exc:  # noqa: BLE001
             raise HTTPException(status_code=502, detail=f"Failed to fetch draft {safe_name}: {exc}") from exc
         if resp.status_code == 404:
-            raise HTTPException(status_code=404, detail=f"Draft not found: {safe_name}")
+            raise HTTPException(status_code=404, detail=f"Draft not found in {fmt} format: {safe_name}")
         if not resp.ok:
             raise HTTPException(status_code=502, detail=f"IETF returned {resp.status_code} for {safe_name}")
-        header = f"# {safe_name}\n\nSource: {url}\n\n"
-        sections.append(header + _extract_technical_body_text(resp.text))
+        return SidecarFileResponse(
+            filename=f"{_sanitize_filename(safe_name)}.{ext}",
+            mime_type=mime_type,
+            content_base64=base64.b64encode(resp.content).decode("ascii"),
+        )
 
-    if not sections:
+    # Multiple drafts: concatenate raw bytes with plain separators.
+    parts: list[bytes] = []
+    for draft_name in payload.draft_names:
+        safe_name = re.sub(r"[^a-zA-Z0-9._-]", "", draft_name.strip())
+        if not safe_name:
+            continue
+        url = f"{IETF_DRAFT_BASE_URL}/{safe_name}.{ext}"
+        try:
+            resp = requests.get(url, timeout=30)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=502, detail=f"Failed to fetch draft {safe_name}: {exc}") from exc
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail=f"Draft not found in {fmt} format: {safe_name}")
+        if not resp.ok:
+            raise HTTPException(status_code=502, detail=f"IETF returned {resp.status_code} for {safe_name}")
+        separator = f"\n\n{'='*72}\n{safe_name}\n{'='*72}\n\n".encode()
+        parts.append(separator + resp.content)
+
+    if not parts:
         raise HTTPException(status_code=400, detail="No valid draft names provided")
 
-    combined = "\n\n---\n\n".join(sections)
     name_part = payload.draft_names[0] if len(payload.draft_names) == 1 else f"drafts-{len(payload.draft_names)}"
-    filename = f"{_sanitize_filename(name_part)}.md"
-    return _as_sidecar_file(filename, combined)
+    return SidecarFileResponse(
+        filename=f"{_sanitize_filename(name_part)}.{ext}",
+        mime_type=mime_type,
+        content_base64=base64.b64encode(b"".join(parts)).decode("ascii"),
+    )
 
 
 @app.post("/api/v1/import/mailarchive")
@@ -802,13 +987,14 @@ def import_mailarchive_as_mbox(payload: MailarchiveImportRequest) -> SidecarFile
 @app.post("/api/v1/import/rfcs")
 def import_rfcs(payload: RfcImportRequest) -> SidecarFileResponse:
     index = _rfc_index()
+    fmt = payload.format if payload.format in _FORMAT_EXTENSIONS else "txt"
 
-    entries = []
+    rfc_entries = []
     if payload.rfc_ids:
         for rfc_id in payload.rfc_ids[: payload.limit]:
             normalized = _normalize_rfc_id(rfc_id)
             try:
-                entries.append(index.rfc(normalized))
+                rfc_entries.append(index.rfc(normalized))
             except KeyError as exc:
                 raise HTTPException(status_code=404, detail=f"Unknown RFC: {normalized}") from exc
     else:
@@ -819,38 +1005,60 @@ def import_rfcs(payload: RfcImportRequest) -> SidecarFileResponse:
             wg=payload.wg,
             status=payload.status,
         ):
-            entries.append(entry)
-            if len(entries) >= payload.limit:
+            rfc_entries.append(entry)
+            if len(rfc_entries) >= payload.limit:
                 break
 
-    if not entries:
+    if not rfc_entries:
         raise HTTPException(status_code=404, detail="No RFCs matched the provided filters")
 
-    sections = ["# IETF RFC Export", f"- RFC count: {len(entries)}"]
+    ext = _FORMAT_EXTENSIONS[fmt]
+    mime_type = _FORMAT_MIME_TYPES[fmt]
+
+    # Single RFC: download raw bytes and return as-is.
+    if len(rfc_entries) == 1:
+        entry = rfc_entries[0]
+        content_url = _rfc_content_url_for_format(entry, fmt)
+        if not content_url:
+            raise HTTPException(
+                status_code=404,
+                detail=f"{entry.doc_id} is not available in {_FORMAT_LABELS.get(fmt, fmt)} format",
+            )
+        session = requests.Session()
+        try:
+            response = session.get(content_url, timeout=30)
+        finally:
+            session.close()
+        if response.status_code != 200:
+            raise HTTPException(status_code=502, detail=f"Failed to fetch {entry.doc_id} from RFC Editor")
+        filename = f"ietf-{_sanitize_filename(entry.doc_id)}.{ext}"
+        return SidecarFileResponse(
+            filename=filename,
+            mime_type=mime_type,
+            content_base64=base64.b64encode(response.content).decode("ascii"),
+        )
+
+    # Multiple RFCs (filter-based query, txt only): concatenate with plain separators.
+    parts: list[bytes] = []
     session = requests.Session()
     try:
-        for entry in entries:
-            content_url = entry.content_url("ASCII") or entry.content_url("TEXT")
+        for entry in rfc_entries:
+            content_url = _rfc_content_url_for_format(entry, fmt)
             if not content_url:
-                sections.append("\n---\n")
-                sections.append(f"## {entry.doc_id}: {entry.title}")
-                sections.append("No downloadable ASCII/TEXT representation is available.")
+                parts.append(f"\n\n{'='*72}\n{entry.doc_id}: {entry.title}\n(not available in {fmt} format)\n".encode())
                 continue
-
             response = session.get(content_url, timeout=30)
             if response.status_code != 200:
                 raise HTTPException(status_code=502, detail=f"Failed to fetch {entry.doc_id} from RFC Editor")
-
-            sections.append("\n---\n")
-            sections.append(f"## {entry.doc_id}: {entry.title}")
-            sections.append(f"- Stream: {entry.stream}")
-            sections.append(f"- Status: {entry.curr_status}")
-            sections.append(f"- Date: {entry.date()}")
-            sections.append(f"- Source: {content_url}")
-            sections.append("")
-            sections.append(_extract_technical_body_text(response.text))
+            separator = f"\n\n{'='*72}\n{entry.doc_id}: {entry.title}\n{'='*72}\n\n".encode()
+            parts.append(separator + response.content)
     finally:
         session.close()
 
-    filename = "ietf-rfcs.md" if not payload.rfc_ids else f"ietf-{'-'.join(map(_sanitize_filename, payload.rfc_ids[:3]))}.md"
-    return _as_sidecar_file(filename, "\n".join(sections))
+    combined = b"".join(parts)
+    filename = f"ietf-rfcs.{ext}"
+    return SidecarFileResponse(
+        filename=filename,
+        mime_type=mime_type,
+        content_base64=base64.b64encode(combined).decode("ascii"),
+    )

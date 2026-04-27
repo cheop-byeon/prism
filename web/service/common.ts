@@ -360,6 +360,22 @@ export type IetfMailarchiveImportRequest = {
   refresh: boolean
 }
 
+export type IetfFormatInfo = {
+  key: string // "txt" | "html" | "pdf" | "xml"
+  label: string // "Plain Text" | "HTML" | "PDF" | "XML"
+  mime_type: string
+}
+
+export type IetfRfcFormatsResponse = {
+  rfc_id: string
+  formats: IetfFormatInfo[]
+}
+
+export type IetfDraftFormatsResponse = {
+  draft_name: string
+  formats: IetfFormatInfo[]
+}
+
 export type IetfRfcImportRequest = {
   rfc_ids: string[]
   since?: string
@@ -368,6 +384,7 @@ export type IetfRfcImportRequest = {
   wg?: string
   status?: string
   limit: number
+  format?: string
 }
 
 export type IetfRfcSuggestion = {
@@ -455,6 +472,7 @@ export const importIetfRfcFile = (body: IetfRfcImportRequest): Promise<UploadedC
 
 export type IetfDraftImportRequest = {
   draft_names: string[]
+  format?: string
 }
 
 export const importIetfDraftFile = (body: IetfDraftImportRequest): Promise<UploadedConsoleFile> => {
@@ -467,6 +485,14 @@ export const fetchIetfMailingLists = (): Promise<{ lists: string[] }> => {
 
 export const fetchIetfRfcSuggestions = (params: { query?: string, limit?: number }): Promise<{ suggestions: IetfRfcSuggestion[] }> => {
   return get<{ suggestions: IetfRfcSuggestion[] }>('/ietf/rfcs/suggestions', { params })
+}
+
+export const fetchIetfRfcFormats = (rfcId: string): Promise<IetfRfcFormatsResponse> => {
+  return get<IetfRfcFormatsResponse>('/ietf/rfcs/formats', { params: { rfc_id: rfcId } })
+}
+
+export const fetchIetfDraftFormats = (draftName: string): Promise<IetfDraftFormatsResponse> => {
+  return get<IetfDraftFormatsResponse>('/ietf/drafts/formats', { params: { draft_name: draftName } })
 }
 
 export const sendEMailLoginCode = (email: string, language = 'en-US'): Promise<CommonResponse & { data: string }> =>

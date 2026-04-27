@@ -67,10 +67,18 @@ class IetfRfcImportPayload(TypedDict):
     wg: str | None
     status: str | None
     limit: int
+    format: str
 
 
 class IetfDraftImportPayload(TypedDict):
     draft_names: list[str]
+    format: str
+
+
+class IetfFormatInfo(TypedDict):
+    key: str
+    label: str
+    mime_type: str
 
 
 class IetfRfcSuggestionRecord(TypedDict, total=False):
@@ -189,6 +197,60 @@ class IetfImportService:
         source_hint = ",".join(payload["draft_names"]) if payload["draft_names"] else "drafts"
         source_url = f"ietfdata://draft/{source_hint}"
         return IetfImportService._upload_sidecar_payload(sidecar_payload, source_url=source_url)
+
+    @staticmethod
+    def get_rfc_formats(*, rfc_id: str) -> dict:
+        """Return available download formats for a single RFC from the sidecar."""
+        url = str(ietfdata_service_url / "api/v1/rfcs/formats")
+        try:
+            with httpx.Client(timeout=dify_config.IETFDATA_SERVICE_TIMEOUT) as client:
+                response = client.post(url, json={"rfc_ids": [rfc_id]})
+        except httpx.RequestError as exc:
+            logger.warning("ietfdata sidecar request failed for %s: %s", url, exc)
+            raise RemoteFileUploadError(f"Failed to contact the IETF data service: {exc}") from exc
+
+        if response.status_code != httpx.codes.OK:
+            logger.warning("ietfdata sidecar returned %s for %s: %s", response.status_code, url, response.text)
+            raise RemoteFileUploadError(f"IETF data service error: {response.text}")
+
+        data = response.json()
+        entries = data.get("entries", [])
+        formats: list[IetfFormatInfo] = []
+        if entries:
+            for fmt in entries[0].get("formats", []):
+                formats.append({
+                    "key": str(fmt.get("key", "")),
+                    "label": str(fmt.get("label", "")),
+                    "mime_type": str(fmt.get("mime_type", "")),
+                })
+        return {"rfc_id": rfc_id, "formats": formats}, 200
+
+    @staticmethod
+    def get_draft_formats(*, draft_name: str) -> dict:
+        """Return available download formats for a single Internet-Draft from the sidecar."""
+        url = str(ietfdata_service_url / "api/v1/drafts/formats")
+        try:
+            with httpx.Client(timeout=dify_config.IETFDATA_SERVICE_TIMEOUT) as client:
+                response = client.post(url, json={"draft_names": [draft_name]})
+        except httpx.RequestError as exc:
+            logger.warning("ietfdata sidecar request failed for %s: %s", url, exc)
+            raise RemoteFileUploadError(f"Failed to contact the IETF data service: {exc}") from exc
+
+        if response.status_code != httpx.codes.OK:
+            logger.warning("ietfdata sidecar returned %s for %s: %s", response.status_code, url, response.text)
+            raise RemoteFileUploadError(f"IETF data service error: {response.text}")
+
+        data = response.json()
+        entries = data.get("entries", [])
+        formats: list[IetfFormatInfo] = []
+        if entries:
+            for fmt in entries[0].get("formats", []):
+                formats.append({
+                    "key": str(fmt.get("key", "")),
+                    "label": str(fmt.get("label", "")),
+                    "mime_type": str(fmt.get("mime_type", "")),
+                })
+        return {"draft_name": draft_name, "formats": formats}, 200
 
     @staticmethod
     def get_mailing_lists() -> list[str]:

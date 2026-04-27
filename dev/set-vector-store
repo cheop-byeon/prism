@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Usage: dev/set-vector-store <store>
+# Example: dev/set-vector-store faiss
+# Sets VECTOR_STORE in docker/.env and rebuilds the backend.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+ENV_FILE="${SCRIPT_DIR}/../docker/.env"
+
+STORE="${1:-}"
+if [[ -z "$STORE" ]]; then
+  echo "Usage: $0 <store>"
+  echo "  e.g. $0 faiss"
+  echo "  e.g. $0 weaviate"
+  exit 1
+fi
+
+# Update VECTOR_STORE in-place.
+sed -i.bak "s/^VECTOR_STORE=.*/VECTOR_STORE=${STORE}/" "$ENV_FILE"
+echo "==> Set VECTOR_STORE=${STORE} in docker/.env"
+
+# For FAISS, ensure FAISS_INDEX_PATH is present.
+if [[ "$STORE" == "faiss" ]]; then
+  if ! grep -q "^FAISS_INDEX_PATH=" "$ENV_FILE"; then
+    echo "FAISS_INDEX_PATH=storage/vector_index/faiss" >> "$ENV_FILE"
+    echo "==> Added FAISS_INDEX_PATH to docker/.env"
+  fi
+fi
+
+# Rebuild and restart backend with the new config.
+"${SCRIPT_DIR}/rebuild-backend"

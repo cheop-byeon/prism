@@ -38,7 +38,7 @@ class FaissVector(BaseVector):
     # ------------------------------------------------------------------
 
     def _load(self) -> None:
-        import faiss  # noqa: PLC0415
+        import faiss
 
         if self._index_file.exists() and self._meta_file.exists():
             self._index = faiss.read_index(str(self._index_file))
@@ -46,7 +46,7 @@ class FaissVector(BaseVector):
                 self._meta = json.load(f)
 
     def _save(self) -> None:
-        import faiss  # noqa: PLC0415
+        import faiss
 
         if self._index is not None:
             faiss.write_index(self._index, str(self._index_file))
@@ -78,7 +78,7 @@ class FaissVector(BaseVector):
             self.add_texts(texts, embeddings, **kwargs)
 
     def add_texts(self, documents: list[Document], embeddings: list[list[float]], **kwargs) -> list[str]:
-        import faiss  # noqa: PLC0415
+        import faiss
 
         if not documents:
             return []
@@ -149,7 +149,7 @@ class FaissVector(BaseVector):
 
     def _rebuild(self, keep: list[int]) -> None:
         """Reconstruct the FAISS index retaining only the given positional indices."""
-        import faiss  # noqa: PLC0415
+        import faiss
 
         if not keep or self._index is None:
             self._index = None

@@ -21,6 +21,8 @@
   "stepOne.ietf.autoReducedBatchSize": "Batch size was automatically reduced to {{size}} to stay within file size limits.",
   "stepOne.ietf.cancel": "Cancel",
   "stepOne.ietf.description": "Pull IETF mailing-list messages or RFCs.",
+  "stepOne.ietf.docFormat": "Document format",
+  "stepOne.ietf.docFormatFetchError": "Could not fetch available formats — defaulting to Plain Text.",
   "stepOne.ietf.downloadAndPreprocess": "Download & Preprocess",
   "stepOne.ietf.downloadOnly": "Download only (.mbox to local folder)",
   "stepOne.ietf.downloadOnlySuccess": "Downloaded {{count}} emails to {{path}}",
