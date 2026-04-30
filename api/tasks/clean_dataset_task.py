@@ -3,7 +3,7 @@ import time
 
 import click
 from celery import shared_task
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 
 from core.db.session_factory import session_factory
 from core.rag.index_processor.index_processor_factory import IndexProcessorFactory
@@ -88,12 +88,38 @@ def clean_dataset_task(
                     )
                 )
 
-            # Add exception handling around IndexProcessorFactory.clean() to prevent single point of failure
-            # This ensures Document/Segment deletion can continue even if vector database cleanup fails
+            # Determine whether the collection binding is still referenced by other datasets.
+            # When multiple datasets share the same Weaviate collection (same embedding model),
+            # deleting the entire collection would destroy the other datasets' vectors too.
+            # In that case we only remove this dataset's own vectors via metadata filtering.
+            other_datasets_using_binding = collection_binding_id is not None and bool(
+                session.scalar(
+                    select(func.count())
+                    .select_from(Dataset)
+                    .where(Dataset.collection_binding_id == collection_binding_id)
+                )
+            )
+
             try:
-                index_processor = IndexProcessorFactory(doc_form).init_index_processor()
-                index_processor.clean(dataset, None, with_keywords=True, delete_child_chunks=True)
-                logger.info(click.style(f"Successfully cleaned vector database for dataset: {dataset_id}", fg="green"))
+                if other_datasets_using_binding:
+                    # Shared collection: remove only vectors tagged with this dataset_id.
+                    from core.rag.datasource.vdb.vector_factory import Vector
+
+                    vector = Vector(dataset)
+                    vector.delete_by_metadata_field("dataset_id", dataset_id)
+                    logger.info(
+                        click.style(
+                            f"Removed vectors for dataset {dataset_id} from shared collection "
+                            f"(binding {collection_binding_id} still used by other datasets)",
+                            fg="green",
+                        )
+                    )
+                else:
+                    index_processor = IndexProcessorFactory(doc_form).init_index_processor()
+                    index_processor.clean(dataset, None, with_keywords=True, delete_child_chunks=True)
+                    logger.info(
+                        click.style(f"Successfully cleaned vector database for dataset: {dataset_id}", fg="green")
+                    )
             except Exception:
                 logger.exception(click.style(f"Failed to clean vector database for dataset {dataset_id}", fg="red"))
                 # Continue with document and segment deletion even if vector cleanup fails
