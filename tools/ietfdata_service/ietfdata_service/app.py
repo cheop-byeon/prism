@@ -18,8 +18,11 @@ import base64
 import json
 import os
 import re
+import shlex
 import socket as _socket
 from datetime import datetime, timezone
+from email import message_from_bytes as _email_message_from_bytes
+from email import policy as _email_policy
 from email.message import Message
 from typing import Literal
 
@@ -130,11 +133,11 @@ class MailarchiveImportRequest(BaseModel):
     sent_before: str = Field(default="2038-01-19T03:14:07")
     from_addr: str | None = None
     subject: str | None = None
+    search_in: list[Literal["subject", "body"]] = Field(default=["subject"])
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=100, ge=1)
     output_format: Literal["mbox_text", "jsonl"] = "jsonl"
     fetch_all: bool = False
-    refresh: bool = False
 
     model_config = ConfigDict(extra="forbid")
 
@@ -167,6 +170,33 @@ class DraftFormatsRequest(BaseModel):
 def _mailarchive() -> MailArchive:
     sqlite_file = os.getenv("IETFDATA_SQLITE_FILE", "ietfdata.sqlite")
     return MailArchive(sqlite_file=sqlite_file)
+
+
+# In-process cache of known mailing list names (avoids IMAP connection on every request).
+# Populated on first call to get_mailing_lists or import_mailarchive.
+_mailing_list_names_cache: set[str] | None = None
+
+
+def _get_mailing_list_names(archive: MailArchive, *, force_refresh: bool = False) -> set[str]:
+    """Return known mailing list names, hitting IMAP only when the local DB is empty."""
+    global _mailing_list_names_cache
+    if force_refresh or _mailing_list_names_cache is None:
+        # Read what is already in SQLite (fast, no IMAP).
+        local_names = set(archive.mailing_list_names())
+        if not local_names or force_refresh:
+            # DB is empty or caller wants fresh data — sync once from IMAP.
+            archive.update_mailing_list_names()
+            local_names = set(archive.mailing_list_names())
+        _mailing_list_names_cache = local_names
+    return _mailing_list_names_cache
+
+
+def _is_mailing_list_populated(archive: MailArchive, name: str) -> bool:
+    """Return True if the list already has messages synced from IMAP (uidvalidity is set)."""
+    try:
+        return archive.mailing_list(name).uidvalidity() > 0
+    except (TypeError, AttributeError, Exception):
+        return False
 
 
 def _rfc_index() -> RFCIndex:
@@ -574,6 +604,15 @@ def _search_rfc_suggestions(index: RFCIndex, query: str, limit: int) -> list[Rfc
     return suggestions[:limit]
 
 
+def _decode_bytes(data: bytes, charset: str | None) -> str:
+    for enc in (charset or "utf-8", "utf-8", "latin-1"):
+        try:
+            return data.decode(enc, errors="replace")
+        except (LookupError, TypeError):
+            continue
+    return data.decode("latin-1", errors="replace")
+
+
 def _extract_message_text(message: Message) -> str:
     body_parts: list[str] = []
     if message.is_multipart():
@@ -583,13 +622,11 @@ def _extract_message_text(message: Message) -> str:
             if content_type == "text/plain" and "attachment" not in disposition:
                 payload = part.get_payload(decode=True)
                 if isinstance(payload, bytes):
-                    charset = part.get_content_charset() or "utf-8"
-                    body_parts.append(payload.decode(charset, errors="replace"))
+                    body_parts.append(_decode_bytes(payload, part.get_content_charset()))
     else:
         payload = message.get_payload(decode=True)
         if isinstance(payload, bytes):
-            charset = message.get_content_charset() or "utf-8"
-            body_parts.append(payload.decode(charset, errors="replace"))
+            body_parts.append(_decode_bytes(payload, message.get_content_charset()))
 
     return "\n\n".join(part.strip() for part in body_parts if part and part.strip())
 
@@ -689,11 +726,91 @@ def _as_jsonl_sidecar_file(filename: str, records: list[dict]) -> SidecarFileRes
     )
 
 
+def _query_message_headers(
+    archive: MailArchive,
+    ml_name: str,
+    uidvalidity: int,
+    rx_after: str,
+    rx_before: str,
+) -> list[tuple]:
+    """Return (message_num, from_name, from_addr, subject, message_id, date) rows via a single
+    JOIN query WITHOUT loading the message blob.
+
+    Deduplicates by Message-ID: the IETF IMAP server often stores each email twice
+    (direct delivery + list relay), so we keep only the lowest message_num per
+    Message-ID, matching the deduplication that the mailarchive website applies.
+    Messages with no Message-ID header are kept as-is (grouped by message_num).
+    """
+    sql = """
+        SELECT MIN(m.message_num), h.from_name, h.from_addr, h.subject, h.message_id, h.date
+        FROM   ietf_ma_msg  m
+        LEFT JOIN ietf_ma_hdr h ON h.message_num = m.message_num
+        WHERE  m.mailing_list  = ?
+          AND  m.uidvalidity   = ?
+          AND  m.date_received > ?
+          AND  m.date_received < ?
+        GROUP BY COALESCE(h.message_id, CAST(m.message_num AS TEXT))
+    """
+    return archive._db.cursor().execute(sql, (ml_name, uidvalidity, rx_after, rx_before)).fetchall()
+
+
+def _fetch_message_raw(archive: MailArchive, message_num: int) -> bytes | None:
+    """Fetch only the raw RFC822 bytes for a specific message_num (no other columns)."""
+    res = archive._db.cursor().execute(
+        "SELECT message FROM ietf_ma_msg WHERE message_num = ?;", (message_num,)
+    ).fetchone()
+    return bytes(res[0]) if res and res[0] is not None else None
+
+
 def _parse_iso_datetime(value: str) -> datetime:
     parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if parsed.tzinfo is None:
         return parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _parse_boolean_query(query: str) -> list[list[str]]:
+    """Parse a boolean query string into OR clauses of AND terms.
+
+    Supports quoted phrases, OR and AND keywords (AND is also the default
+    when no keyword separates two adjacent terms).
+
+    Examples:
+        "rfc8205"                                    → [["rfc8205"]]
+        "rfc8205 OR draft-ietf"                      → [["rfc8205"], ["draft-ietf"]]
+        "rfc8205 OR \"draft-ietf-sidr-bgpsec\""      → [["rfc8205"], ["draft-ietf-sidr-bgpsec"]]
+        "rfc8205 AND security"                        → [["rfc8205", "security"]]
+    """
+    if not query.strip():
+        return []
+    try:
+        tokens = shlex.split(query)
+    except ValueError:
+        tokens = query.split()
+
+    or_clauses: list[list[str]] = []
+    current_clause: list[str] = []
+    for token in tokens:
+        upper = token.upper()
+        if upper == "OR":
+            if current_clause:
+                or_clauses.append(current_clause)
+            current_clause = []
+        elif upper == "AND":
+            pass  # AND is implicit between adjacent terms
+        else:
+            current_clause.append(token.lower())
+    if current_clause:
+        or_clauses.append(current_clause)
+    return or_clauses
+
+
+def _match_boolean_query(or_clauses: list[list[str]], text: str) -> bool:
+    """Return True if text matches any OR clause (each clause requires all AND terms)."""
+    if not or_clauses:
+        return True
+    text_lower = text.lower()
+    return any(all(term in text_lower for term in clause) for clause in or_clauses)
 
 
 @app.get("/health")
@@ -705,9 +822,88 @@ def health() -> dict[str, str]:
 def get_mailing_lists() -> MailingListsResponse:
     """Fetch available mailing list names from IETF IMAP server."""
     archive = _mailarchive()
-    archive.update_mailing_list_names()
-    lists = sorted(archive.mailing_list_names())
-    return MailingListsResponse(lists=lists)
+    names = _get_mailing_list_names(archive, force_refresh=True)
+    return MailingListsResponse(lists=sorted(names))
+
+
+class SyncStatusResponse(BaseModel):
+    name: str
+    status: Literal["ready", "syncing", "not_found"]
+    message_count: int = 0
+
+    model_config = ConfigDict(extra="forbid")
+
+
+# Track which lists are currently syncing (set of list names)
+_syncing: set[str] = set()
+
+
+def _resolve_mailing_list(archive: MailArchive, list_name: str) -> bool:
+    """Return True if list_name is a known IETF mailing list.
+
+    Checks the local cache first (fast), then falls back to a force-refresh
+    from IMAP if the name isn't found — so lists that haven't been synced yet
+    are still discoverable without requiring a separate list-fetch step.
+    """
+    if list_name in _get_mailing_list_names(archive):
+        return True
+    # Not in cache — refresh from IMAP once and check again.
+    refreshed = _get_mailing_list_names(archive, force_refresh=True)
+    return list_name in refreshed
+
+
+@app.get("/api/v1/mailarchive/{list_name}/status")
+def get_mailarchive_status(list_name: str) -> SyncStatusResponse:
+    """Return sync status for a specific mailing list."""
+    archive = _mailarchive()
+    if not _resolve_mailing_list(archive, list_name):
+        raise HTTPException(status_code=404, detail=f"Unknown mailing list: {list_name}")
+    if list_name in _syncing:
+        return SyncStatusResponse(name=list_name, status="syncing")
+    if not _is_mailing_list_populated(archive, list_name):
+        return SyncStatusResponse(name=list_name, status="syncing" if list_name in _syncing else "not_found")
+    count = archive._db.cursor().execute(
+        "SELECT COUNT(*) FROM ietf_ma_msg WHERE mailing_list = ?;", (list_name,)
+    ).fetchone()[0]
+    return SyncStatusResponse(name=list_name, status="ready", message_count=count)
+
+
+@app.post("/api/v1/mailarchive/{list_name}/sync")
+def sync_mailing_list(list_name: str) -> SyncStatusResponse:
+    """Start an IMAP sync for a specific mailing list in the background.
+
+    Returns immediately.  Poll GET /api/v1/mailarchive/{name}/status to check
+    when the sync is complete (status == "ready").
+    """
+    import threading
+
+    archive = _mailarchive()
+    if not _resolve_mailing_list(archive, list_name):
+        raise HTTPException(status_code=404, detail=f"Unknown mailing list: {list_name}")
+
+    if _is_mailing_list_populated(archive, list_name):
+        count = archive._db.cursor().execute(
+            "SELECT COUNT(*) FROM ietf_ma_msg WHERE mailing_list = ?;", (list_name,)
+        ).fetchone()[0]
+        return SyncStatusResponse(name=list_name, status="ready", message_count=count)
+
+    if list_name in _syncing:
+        return SyncStatusResponse(name=list_name, status="syncing")
+
+    _syncing.add(list_name)
+
+    def _do_sync() -> None:
+        try:
+            bg_archive = _mailarchive()
+            bg_archive.update_mailing_list(list_name)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).exception("Background sync failed for %s", list_name)
+        finally:
+            _syncing.discard(list_name)
+
+    threading.Thread(target=_do_sync, daemon=True, name=f"sync-{list_name}").start()
+    return SyncStatusResponse(name=list_name, status="syncing")
 
 
 @app.get("/api/v1/rfcs/suggestions")
@@ -808,32 +1004,67 @@ def import_drafts(payload: DraftImportRequest) -> SidecarFileResponse:
 @app.post("/api/v1/import/mailarchive")
 def import_mailarchive(payload: MailarchiveImportRequest) -> SidecarFileResponse:
     archive = _mailarchive()
-    archive.update_mailing_list_names()
-    mailing_lists = set(archive.mailing_list_names())
+    mailing_lists = _get_mailing_list_names(archive)
     if payload.mailing_list not in mailing_lists:
         raise HTTPException(status_code=404, detail=f"Unknown mailing list: {payload.mailing_list}")
 
-    # Always update the mailing list to populate uidvalidity from IMAP.
-    # This is required even on first import; payload.refresh can force a full re-fetch.
-    archive.update_mailing_list(payload.mailing_list)
+    # If local data is not yet available, start a background sync and return 503
+    # so the caller can poll /status and retry — avoids blocking for minutes.
+    if not _is_mailing_list_populated(archive, payload.mailing_list):
+        if payload.mailing_list not in _syncing:
+            _syncing.add(payload.mailing_list)
+            import threading as _threading
+            def _bg() -> None:
+                try:
+                    _mailarchive().update_mailing_list(payload.mailing_list)
+                except Exception:
+                    import logging as _logging
+                    _logging.getLogger(__name__).exception("Background sync failed for %s", payload.mailing_list)
+                finally:
+                    _syncing.discard(payload.mailing_list)
+            _threading.Thread(target=_bg, daemon=True, name=f"sync-{payload.mailing_list}").start()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Mailing list '{payload.mailing_list}' is not yet synced. "
+                   f"A background sync has been started — retry in a few minutes, "
+                   f"or check GET /api/v1/mailarchive/{payload.mailing_list}/status.",
+        )
 
     mailing_list = archive.mailing_list(payload.mailing_list)
     received_after = _parse_iso_datetime(payload.sent_after)
     received_before = _parse_iso_datetime(payload.sent_before)
+    subject_query = _parse_boolean_query(payload.subject or "")
+    search_in = set(payload.search_in) if payload.search_in else {"subject"}
+
+    rows = _query_message_headers(
+        archive, mailing_list.name(), mailing_list.uidvalidity(),
+        received_after.isoformat(), received_before.isoformat(),
+    )
 
     message_sections: list[str] = []
     jsonl_records: list[dict] = []
     matched_count = 0
     selected_count = 0
     skipped_count = 0
-    for envelope in mailing_list.messages(received_after=received_after, received_before=received_before):
-        from_value = _safe_string(envelope.from_(), "")
-        subject_value = _safe_string(envelope.subject(), "")
+    for (message_num, from_name, from_addr, subject, message_id, date_str) in rows:
+        from_value = f"{from_name} <{from_addr}>" if from_name else (from_addr or "")
+        subject_value = subject or ""
 
         if payload.from_addr and payload.from_addr.lower() not in from_value.lower():
             continue
-        if payload.subject and payload.subject.lower() not in subject_value.lower():
-            continue
+
+        # Query matching — check subject first (cheap), then body blob only if needed.
+        prefetched_raw: bytes | None = None
+        prefetched_message: Message | None = None
+        if subject_query:
+            matched = "subject" in search_in and _match_boolean_query(subject_query, subject_value)
+            if not matched and "body" in search_in:
+                prefetched_raw = _fetch_message_raw(archive, message_num)
+                if prefetched_raw is not None:
+                    prefetched_message = _email_message_from_bytes(prefetched_raw, policy=_email_policy.default)
+                    matched = _match_boolean_query(subject_query, _extract_message_text(prefetched_message))
+            if not matched:
+                continue
 
         if matched_count < payload.offset:
             matched_count += 1
@@ -841,7 +1072,11 @@ def import_mailarchive(payload: MailarchiveImportRequest) -> SidecarFileResponse
         matched_count += 1
 
         try:
-            message = envelope.contents()
+            raw = prefetched_raw if prefetched_raw is not None else _fetch_message_raw(archive, message_num)
+            if raw is None:
+                skipped_count += 1
+                continue
+            message = prefetched_message if prefetched_message is not None else _email_message_from_bytes(raw, policy=_email_policy.default)
             if payload.output_format == "jsonl":
                 body = _extract_message_text(message) or _extract_raw_message_text(message)
                 if not body or not body.strip():
@@ -849,23 +1084,23 @@ def import_mailarchive(payload: MailarchiveImportRequest) -> SidecarFileResponse
                     continue
                 archived_at = message.get("Archived-At", "").strip().strip("<>").strip()
                 url = archived_at or ""
-                msg_id = url.rstrip("/").split("/")[-1] if url else _safe_string(envelope.message_id(), "")
+                msg_id = url.rstrip("/").split("/")[-1] if url else (message_id or "")
                 jsonl_records.append(
                     {
                         "id": msg_id,
                         "url": url,
                         "subject": subject_value,
                         "from": from_value,
-                        "date": _safe_string(envelope.date(), ""),
+                        "date": date_str or "",
                         "body": body.strip(),
                     }
                 )
             else:
                 message_text = _extract_raw_message_text(message)
                 message_sections.append("")
-                message_sections.append(f"From ietfdata-export {_safe_string(envelope.date(), 'unknown')}")
+                message_sections.append(f"From ietfdata-export {date_str or 'unknown'}")
                 message_sections.append(f"X-IETF-Mailing-List: {payload.mailing_list}")
-                message_sections.append(f"X-IETF-Message-Id: {_safe_string(envelope.message_id(), 'unknown')}")
+                message_sections.append(f"X-IETF-Message-Id: {message_id or 'unknown'}")
                 message_sections.append(message_text or "(raw message unavailable)")
             selected_count += 1
         except Exception:  # noqa: BLE001
@@ -914,38 +1149,75 @@ def import_mailarchive(payload: MailarchiveImportRequest) -> SidecarFileResponse
 def import_mailarchive_as_mbox(payload: MailarchiveImportRequest) -> SidecarFileResponse:
     """Export entire mailarchive as RFC4155 mbox format (no partitioning, single file)."""
     archive = _mailarchive()
-    archive.update_mailing_list_names()
-    mailing_lists = set(archive.mailing_list_names())
+    mailing_lists = _get_mailing_list_names(archive)
     if payload.mailing_list not in mailing_lists:
         raise HTTPException(status_code=404, detail=f"Unknown mailing list: {payload.mailing_list}")
 
-    archive.update_mailing_list(payload.mailing_list)
+    if not _is_mailing_list_populated(archive, payload.mailing_list):
+        if payload.mailing_list not in _syncing:
+            _syncing.add(payload.mailing_list)
+            import threading as _threading
+            def _bg2() -> None:
+                try:
+                    _mailarchive().update_mailing_list(payload.mailing_list)
+                except Exception:
+                    import logging as _logging
+                    _logging.getLogger(__name__).exception("Background sync failed for %s", payload.mailing_list)
+                finally:
+                    _syncing.discard(payload.mailing_list)
+            _threading.Thread(target=_bg2, daemon=True, name=f"sync-{payload.mailing_list}").start()
+        raise HTTPException(
+            status_code=503,
+            detail=f"Mailing list '{payload.mailing_list}' is not yet synced. "
+                   f"A background sync has been started — retry in a few minutes.",
+        )
     mailing_list = archive.mailing_list(payload.mailing_list)
     received_after = _parse_iso_datetime(payload.sent_after)
     received_before = _parse_iso_datetime(payload.sent_before)
+    subject_query = _parse_boolean_query(payload.subject or "")
+    search_in = set(payload.search_in) if payload.search_in else {"subject"}
+
+    rows = _query_message_headers(
+        archive, mailing_list.name(), mailing_list.uidvalidity(),
+        received_after.isoformat(), received_before.isoformat(),
+    )
 
     mbox_lines: list[str] = []
     message_count = 0
     skipped_count = 0
 
-    for envelope in mailing_list.messages(received_after=received_after, received_before=received_before):
-        from_value = _safe_string(envelope.from_(), "")
-        subject_value = _safe_string(envelope.subject(), "")
+    for (message_num, from_name, from_addr, subject, message_id, date_str) in rows:
+        from_value = f"{from_name} <{from_addr}>" if from_name else (from_addr or "")
+        subject_value = subject or ""
 
         if payload.from_addr and payload.from_addr.lower() not in from_value.lower():
             continue
-        if payload.subject and payload.subject.lower() not in subject_value.lower():
-            continue
+
+        prefetched_raw: bytes | None = None
+        prefetched_message: Message | None = None
+        if subject_query:
+            matched = "subject" in search_in and _match_boolean_query(subject_query, subject_value)
+            if not matched and "body" in search_in:
+                prefetched_raw = _fetch_message_raw(archive, message_num)
+                if prefetched_raw is not None:
+                    prefetched_message = _email_message_from_bytes(prefetched_raw, policy=_email_policy.default)
+                    matched = _match_boolean_query(subject_query, _extract_message_text(prefetched_message))
+            if not matched:
+                continue
 
         try:
-            message = envelope.contents()
+            raw = prefetched_raw if prefetched_raw is not None else _fetch_message_raw(archive, message_num)
+            if raw is None:
+                skipped_count += 1
+                continue
+            message = prefetched_message if prefetched_message is not None else _email_message_from_bytes(raw, policy=_email_policy.default)
             raw_message = _extract_raw_message_text(message)
             if not raw_message:
                 skipped_count += 1
                 continue
 
             # RFC4155 mbox format: "From " line (with space, not colon) as separator
-            mbox_lines.append(f"From {from_value or 'unknown'} {_safe_string(envelope.date(), 'unknown')}")
+            mbox_lines.append(f"From {from_value or 'unknown'} {date_str or 'unknown'}")
             mbox_lines.append(raw_message)
             mbox_lines.append("")  # blank line between messages
             message_count += 1

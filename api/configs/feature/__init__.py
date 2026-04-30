@@ -271,7 +271,7 @@ class IetfDataConfig(BaseSettings):
 
     IETFDATA_SERVICE_TIMEOUT: PositiveFloat | None = Field(
         description="Timeout in seconds for requests to the IETF data sidecar service (set to None to disable)",
-        default=60.0,
+        default=300.0,
     )
 
     PLUGIN_MODEL_SCHEMA_CACHE_TTL: PositiveInt = Field(

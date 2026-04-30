@@ -24,6 +24,7 @@ import json
 import logging
 import re
 import string
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -52,11 +53,11 @@ class IetfMailarchiveImportPayload(TypedDict):
     sent_before: str
     from_addr: str | None
     subject: str | None
+    search_in: list[str]
     offset: int
     limit: int
     output_format: Literal["mbox_text", "jsonl"]
     fetch_all: bool
-    refresh: bool
 
 
 class IetfRfcImportPayload(TypedDict):
@@ -253,6 +254,44 @@ class IetfImportService:
         return {"draft_name": draft_name, "formats": formats}, 200
 
     @staticmethod
+    def get_mailarchive_sync_status(list_name: str) -> dict:
+        """Return sync status for a single mailing list from the sidecar."""
+        url = str(ietfdata_service_url / f"api/v1/mailarchive/{list_name}/status")
+        try:
+            with httpx.Client(timeout=dify_config.IETFDATA_SERVICE_TIMEOUT) as client:
+                response = client.get(url)
+        except httpx.RequestError as exc:
+            logger.warning("ietfdata sidecar request failed for %s: %s", url, exc)
+            raise RemoteFileUploadError(f"Failed to contact the IETF data service: {exc}") from exc
+
+        if response.status_code == 404:
+            return {"name": list_name, "status": "not_found", "message_count": 0}
+        if response.status_code != httpx.codes.OK:
+            logger.warning("ietfdata sidecar returned %s for %s: %s", response.status_code, url, response.text)
+            raise RemoteFileUploadError(f"IETF data service error: {response.text}")
+
+        return response.json()
+
+    @staticmethod
+    def trigger_mailarchive_sync(list_name: str) -> dict:
+        """Trigger a background IMAP sync for a mailing list via the sidecar."""
+        url = str(ietfdata_service_url / f"api/v1/mailarchive/{list_name}/sync")
+        try:
+            with httpx.Client(timeout=dify_config.IETFDATA_SERVICE_TIMEOUT) as client:
+                response = client.post(url)
+        except httpx.RequestError as exc:
+            logger.warning("ietfdata sidecar request failed for %s: %s", url, exc)
+            raise RemoteFileUploadError(f"Failed to contact the IETF data service: {exc}") from exc
+
+        if response.status_code == 404:
+            raise RemoteFileUploadError(f"Unknown mailing list: {list_name}")
+        if response.status_code != httpx.codes.OK:
+            logger.warning("ietfdata sidecar returned %s for %s: %s", response.status_code, url, response.text)
+            raise RemoteFileUploadError(f"IETF data service error: {response.text}")
+
+        return response.json()
+
+    @staticmethod
     def get_mailing_lists() -> list[str]:
         """Fetch the list of available IETF mailing lists from the sidecar."""
 
@@ -348,6 +387,13 @@ class IetfImportService:
             logger.warning("ietfdata sidecar request failed for %s: %s", url, exc)
             raise RemoteFileUploadError(f"Failed to contact the IETF data service: {exc}") from exc
 
+        if response.status_code == 503:
+            # Mailing list not yet synced — propagate the user-friendly message directly.
+            try:
+                detail = response.json().get("detail", response.text)
+            except Exception:
+                detail = response.text
+            raise RemoteFileUploadError(detail)
         if response.status_code != httpx.codes.OK:
             logger.warning("ietfdata sidecar returned %s for %s: %s", response.status_code, url, response.text)
             raise RemoteFileUploadError(f"IETF data service error: {response.text}")
@@ -476,7 +522,7 @@ class IetfImportService:
         sent_before: str,
         from_addr: str | None = None,
         subject: str | None = None,
-        refresh: bool = False,
+        search_in: list[str] | None = None,
     ) -> tuple[dict, int]:
         """Download one mbox per calendar year in [sent_after, sent_before] and preprocess each.
 
@@ -491,11 +537,7 @@ class IetfImportService:
             start_year = 1970
             end_year = datetime.now(tz=UTC).year
 
-        year_results: list[dict] = []
-
-        for year in range(start_year, end_year + 1):
-            # Preserve the user-selected boundaries for the first/last year.
-            # Only fully covered middle years should use calendar-year limits.
+        def _process_year(year: int) -> dict:
             year_after = sent_after if year == start_year else f"{year}-01-01T00:00:00"
             year_before = sent_before if year == end_year else f"{year}-12-31T23:59:59"
             payload: IetfMailarchiveImportPayload = {
@@ -504,51 +546,53 @@ class IetfImportService:
                 "sent_before": year_before,
                 "from_addr": from_addr,
                 "subject": subject,
+                "search_in": search_in if search_in is not None else ["subject"],
                 "offset": 0,
                 "limit": 100,
                 "output_format": "mbox_text",
                 "fetch_all": False,
-                "refresh": refresh,
             }
-
             try:
                 download_result, _ = IetfImportService.download_mailarchive_as_mbox_to_local(payload)
             except RemoteFileUploadError as exc:
                 if "No messages matched" in str(exc):
-                    year_results.append(
-                        {
-                            "year": year,
-                            "saved_path": None,
-                            "host_path_hint": None,
-                            "processed_path": None,
-                            "processed_host_path_hint": None,
-                            "total_emails": 0,
-                            "discarded_emails": 0,
-                            "preview_lines": [],
-                        }
-                    )
-                    continue
+                    return {
+                        "year": year,
+                        "saved_path": None,
+                        "host_path_hint": None,
+                        "processed_path": None,
+                        "processed_host_path_hint": None,
+                        "total_emails": 0,
+                        "discarded_emails": 0,
+                        "preview_lines": [],
+                    }
                 raise
-
             preprocess_result = IetfImportService.preprocess_mbox_file(download_result["saved_path"])
             processed_path, processed_host_path_hint = IetfImportService._write_preprocessed_email_records(
                 source_path=download_result["saved_path"],
                 emails=preprocess_result["emails"],
             )
+            return {
+                "year": year,
+                "saved_path": download_result["saved_path"],
+                "host_path_hint": download_result["host_path_hint"],
+                "processed_path": processed_path,
+                "processed_host_path_hint": processed_host_path_hint,
+                "total_emails": preprocess_result["total_emails"],
+                "discarded_emails": preprocess_result["discarded_emails"],
+                "preview_lines": preprocess_result["preview_lines"],
+            }
 
-            year_results.append(
-                {
-                    "year": year,
-                    "saved_path": download_result["saved_path"],
-                    "host_path_hint": download_result["host_path_hint"],
-                    "processed_path": processed_path,
-                    "processed_host_path_hint": processed_host_path_hint,
-                    "total_emails": preprocess_result["total_emails"],
-                    "discarded_emails": preprocess_result["discarded_emails"],
-                    "preview_lines": preprocess_result["preview_lines"],
-                }
-            )
+        years = list(range(start_year, end_year + 1))
+        max_workers = min(len(years), 8)
+        year_result_map: dict[int, dict] = {}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_year = {executor.submit(_process_year, y): y for y in years}
+            for future in as_completed(future_to_year):
+                result = future.result()  # re-raises any exception from the worker
+                year_result_map[result["year"]] = result
 
+        year_results = [year_result_map[y] for y in sorted(year_result_map)]
         return {"years": year_results}, 200
 
     @staticmethod

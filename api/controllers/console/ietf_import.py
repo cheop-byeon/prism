@@ -26,7 +26,11 @@ class IetfMailarchiveImportRequest(BaseModel):
     sent_after: str = Field(default="1970-01-01T00:00:00", description="Lower bound for message sent date")
     sent_before: str = Field(default="2038-01-19T03:14:07", description="Upper bound for message sent date")
     from_addr: str | None = Field(default=None, description="Optional sender email substring filter")
-    subject: str | None = Field(default=None, description="Optional message subject substring filter")
+    subject: str | None = Field(default=None, description="Optional keyword query filter")
+    search_in: list[Literal["subject", "body"]] = Field(
+        default=["subject"],
+        description="Where to apply the keyword query: subject, body, or both",
+    )
     offset: int = Field(default=0, ge=0, description="Number of matched messages to skip before collecting results")
     limit: PositiveInt = Field(default=100, description="Maximum number of messages to include when fetch_all is false")
     output_format: Literal["mbox_text", "jsonl"] = Field(
@@ -34,7 +38,6 @@ class IetfMailarchiveImportRequest(BaseModel):
         description="Export as structured JSONL (one record per email) or raw mbox-style plain text",
     )
     fetch_all: bool = Field(default=False, description="If true, include all matched messages in one import")
-    refresh: bool = Field(default=False, description="Refresh the mailing list from the upstream archive before query")
 
     model_config = ConfigDict(extra="forbid")
 
@@ -156,7 +159,7 @@ class IetfMailarchivePreprocessRequest(BaseModel):
     sent_before: str = Field(default="2038-01-19T03:14:07")
     from_addr: str | None = Field(default=None)
     subject: str | None = Field(default=None)
-    refresh: bool = Field(default=False)
+    search_in: list[Literal["subject", "body"]] = Field(default=["subject"])
 
     model_config = ConfigDict(extra="forbid")
 
@@ -180,7 +183,7 @@ class IetfMailarchiveMboxPreprocessApi(Resource):
             sent_before=payload.sent_before,
             from_addr=payload.from_addr,
             subject=payload.subject,
-            refresh=payload.refresh,
+            search_in=list(payload.search_in),
         )
 
 
@@ -230,6 +233,20 @@ class IetfMailingListsApi(Resource):
     def get(self):
         lists = IetfImportService.get_mailing_lists()
         return {"lists": lists}
+
+
+@console_ns.route("/ietf/mailarchive/<string:list_name>/status")
+class IetfMailarchiveSyncStatusApi(Resource):
+    @login_required
+    def get(self, list_name: str):
+        return IetfImportService.get_mailarchive_sync_status(list_name)
+
+
+@console_ns.route("/ietf/mailarchive/<string:list_name>/sync")
+class IetfMailarchiveSyncTriggerApi(Resource):
+    @login_required
+    def post(self, list_name: str):
+        return IetfImportService.trigger_mailarchive_sync(list_name)
 
 
 @console_ns.route("/ietf/rfcs/suggestions")

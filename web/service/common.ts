@@ -353,11 +353,11 @@ export type IetfMailarchiveImportRequest = {
   sent_before: string
   from_addr?: string
   subject?: string
+  search_in: ('subject' | 'body')[]
   offset: number
   limit: number
   output_format: 'markdown' | 'mbox_text'
   fetch_all: boolean
-  refresh: boolean
 }
 
 export type IetfFormatInfo = {
@@ -435,7 +435,7 @@ export type IetfMailarchivePreprocessRequest = {
   sent_before: string
   from_addr?: string
   subject?: string
-  refresh: boolean
+  search_in: ('subject' | 'body')[]
 }
 
 export type IetfPreprocessedUploadRequest = {
@@ -479,8 +479,24 @@ export const importIetfDraftFile = (body: IetfDraftImportRequest): Promise<Uploa
   return post<UploadedConsoleFile>('/ietf/imports/drafts', { body })
 }
 
+export type IetfSyncStatus = 'ready' | 'syncing' | 'not_found'
+
+export type IetfSyncStatusResponse = {
+  name: string
+  status: IetfSyncStatus
+  message_count: number
+}
+
 export const fetchIetfMailingLists = (): Promise<{ lists: string[] }> => {
   return get<{ lists: string[] }>('/ietf/mailarchive/lists')
+}
+
+export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {
+  return get<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/status`)
+}
+
+export const triggerIetfMailarchiveSync = (listName: string): Promise<IetfSyncStatusResponse> => {
+  return post<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/sync`, {})
 }
 
 export const fetchIetfRfcSuggestions = (params: { query?: string, limit?: number }): Promise<{ suggestions: IetfRfcSuggestion[] }> => {

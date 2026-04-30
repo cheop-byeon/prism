@@ -12,24 +12,24 @@ docker rmi dify-local-api:dev 2>/dev/null || true
 docker image prune -f
 docker builder prune -f
 
-echo "==> Building dify-local-api:dev image..."
+echo "==> Building dify-local-api:dev and ietfdata_service images..."
 docker compose \
   -f docker-compose.yaml \
   -f docker-compose.override.yaml \
-  build api
+  build api ietfdata_service
 
-echo "==> Recreating backend containers with new image..."
+echo "==> Recreating backend containers with new images..."
 docker compose \
   -f docker-compose.yaml \
   -f docker-compose.override.yaml \
   up -d --force-recreate --no-deps \
-  api worker worker_beat || true
+  api worker worker_beat ietfdata_service || true
 
 # If containers were only Created (not Started) due to init_permissions dep ordering, start them.
 docker compose \
   -f docker-compose.yaml \
   -f docker-compose.override.yaml \
-  start api worker worker_beat 2>/dev/null || true
+  start api worker worker_beat ietfdata_service 2>/dev/null || true
 
 echo "==> Waiting for api to be healthy..."
 for i in $(seq 1 30); do
@@ -47,4 +47,10 @@ echo "==> Recent api logs:"
 docker compose \
   -f docker-compose.yaml \
   -f docker-compose.override.yaml \
-  logs --tail=30 api
+  logs --tail=20 api
+
+echo "==> Recent ietfdata_service logs:"
+docker compose \
+  -f docker-compose.yaml \
+  -f docker-compose.override.yaml \
+  logs --tail=10 ietfdata_service

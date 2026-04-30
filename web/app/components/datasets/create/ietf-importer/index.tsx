@@ -7,6 +7,7 @@ import type {
   IetfPreprocessResponse,
   IetfRfcImportRequest,
   IetfRfcSuggestion,
+  IetfSyncStatus,
   IetfYearPreprocessResult,
   UploadedConsoleFile,
 } from '@/service/common'
@@ -20,11 +21,13 @@ import { toast } from '@/app/components/base/ui/toast'
 import {
   downloadAndPreprocessMailarchiveYears,
   fetchIetfDraftFormats,
+  fetchIetfMailarchiveSyncStatus,
   fetchIetfMailingLists,
   fetchIetfRfcFormats,
   fetchIetfRfcSuggestions,
   importIetfDraftFile,
   importIetfRfcFile,
+  triggerIetfMailarchiveSync,
 } from '@/service/common'
 import { useFileUploadConfig } from '@/service/use-common'
 import { PROGRESS_COMPLETE } from '../file-uploader/constants'
@@ -45,7 +48,7 @@ type MailarchiveFormState = {
   sentBefore: string
   fromAddr: string
   subject: string
-  refresh: boolean
+  searchIn: ('subject' | 'body')[]
 }
 
 type RfcFormState = {
@@ -58,7 +61,7 @@ const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
   sentBefore: '2038-01-19T03:14:07',
   fromAddr: '',
   subject: '',
-  refresh: false,
+  searchIn: ['subject'],
 }
 
 const DEFAULT_RFC_FORM: RfcFormState = {
@@ -161,6 +164,10 @@ function IetfImporter({
   const [availableFormats, setAvailableFormats] = useState<IetfFormatInfo[]>([])
   const [selectedFormat, setSelectedFormat] = useState<string>('txt')
   const [isFetchingFormats, setIsFetchingFormats] = useState(false)
+  const [syncStatus, setSyncStatus] = useState<IetfSyncStatus | 'checking' | null>(null)
+  const [syncMessageCount, setSyncMessageCount] = useState<number>(0)
+  const [isTriggeringSync, setIsTriggeringSync] = useState(false)
+  const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mailingListDropdownRef = useRef<HTMLDivElement>(null)
   const rfcDropdownRef = useRef<HTMLDivElement>(null)
   const dropdownRef = mailingListDropdownRef
@@ -198,6 +205,93 @@ function IetfImporter({
     if (open)
       loadMailingLists()
   }, [open])
+
+  // Check sync status whenever the mailing list selection changes
+  useEffect(() => {
+    if (syncPollRef.current) {
+      clearInterval(syncPollRef.current)
+      syncPollRef.current = null
+    }
+
+    let cancelled = false
+
+    const run = async () => {
+      const listName = mailarchiveForm.mailingList.trim()
+      if (!listName || mode !== 'mailarchive') {
+        setSyncStatus(null)
+        setSyncMessageCount(0)
+        return
+      }
+
+      setSyncStatus('checking')
+      try {
+        const result = await fetchIetfMailarchiveSyncStatus(listName)
+        if (cancelled)
+          return
+        setSyncStatus(result.status)
+        setSyncMessageCount(result.message_count ?? 0)
+        if (result.status === 'ready' && syncPollRef.current) {
+          clearInterval(syncPollRef.current)
+          syncPollRef.current = null
+        }
+      }
+      catch {
+        if (!cancelled)
+          setSyncStatus(null)
+      }
+    }
+
+    run()
+
+    return () => {
+      cancelled = true
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current)
+        syncPollRef.current = null
+      }
+    }
+  }, [mailarchiveForm.mailingList, mode])
+
+  // Start polling when status is 'syncing'
+  useEffect(() => {
+    if (syncStatus !== 'syncing') {
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current)
+        syncPollRef.current = null
+      }
+      return
+    }
+
+    const listName = mailarchiveForm.mailingList.trim()
+    if (!listName)
+      return
+
+    if (syncPollRef.current)
+      return // already polling
+
+    syncPollRef.current = setInterval(async () => {
+      try {
+        const result = await fetchIetfMailarchiveSyncStatus(listName)
+        setSyncStatus(result.status)
+        setSyncMessageCount(result.message_count ?? 0)
+        if (result.status === 'ready' && syncPollRef.current) {
+          clearInterval(syncPollRef.current)
+          syncPollRef.current = null
+        }
+      }
+      catch {
+        // ignore transient errors during polling
+      }
+    }, 10000)
+
+    return () => {
+      if (syncPollRef.current) {
+        clearInterval(syncPollRef.current)
+        syncPollRef.current = null
+      }
+    }
+  // eslint-disable-next-line react/exhaustive-deps
+  }, [syncStatus])
 
   useEffect(() => {
     if (!open || mode !== 'rfcs')
@@ -334,6 +428,24 @@ function IetfImporter({
     toast.error(errorMessage)
   }
 
+  const handleStartSync = async () => {
+    const listName = mailarchiveForm.mailingList.trim()
+    if (!listName)
+      return
+    setIsTriggeringSync(true)
+    try {
+      await triggerIetfMailarchiveSync(listName)
+      setSyncStatus('syncing')
+    }
+    catch (error) {
+      const msg = await extractErrorMessage(error)
+      toast.error(msg || t('stepOne.ietf.importFailed', { ns: 'datasetCreation' }))
+    }
+    finally {
+      setIsTriggeringSync(false)
+    }
+  }
+
   const submitMailarchiveImport = async () => {
     const mailingList = mailarchiveForm.mailingList.trim()
     if (!mailingList) {
@@ -354,7 +466,7 @@ function IetfImporter({
         sent_before: sentBefore,
         from_addr: trimOrUndefined(mailarchiveForm.fromAddr),
         subject: trimOrUndefined(mailarchiveForm.subject),
-        refresh: mailarchiveForm.refresh,
+        search_in: mailarchiveForm.searchIn,
       })
       setPreprocessResults(result.years)
       setOpen(false)
@@ -456,7 +568,7 @@ function IetfImporter({
             })}
           </div>
           <div className="mt-4 flex flex-wrap gap-2">
-            {preprocessResults.map(item => (
+            {preprocessResults.filter(item => item.total_emails > 0).map(item => (
               <button
                 key={item.year}
                 type="button"
@@ -478,6 +590,9 @@ function IetfImporter({
                 })}
               </button>
             ))}
+          </div>
+          <div className="mt-3 text-xs leading-5 text-text-tertiary">
+            {t('stepOne.ietf.discardedExplanation', { ns: 'datasetCreation' })}
           </div>
         </div>
       )}
@@ -587,7 +702,7 @@ function IetfImporter({
                       onChange={e => setMailarchiveForm(prev => ({ ...prev, fromAddr: e.target.value }))}
                     />
                   </div>
-                  <div>
+                  <div className="col-span-2">
                     <div className="mb-1 text-xs font-medium text-text-secondary">
                       {t('stepOne.ietf.subject', { ns: 'datasetCreation' })}
                     </div>
@@ -595,21 +710,80 @@ function IetfImporter({
                       value={mailarchiveForm.subject}
                       onChange={e => setMailarchiveForm(prev => ({ ...prev, subject: e.target.value }))}
                     />
-                  </div>
-                  <div>
-                    <div className="mb-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.refresh', { ns: 'datasetCreation' })}
+                    <div className="mt-2 flex items-center gap-4">
+                      <span className="text-xs text-text-tertiary">
+                        {t('stepOne.ietf.searchIn', { ns: 'datasetCreation' })}
+                        :
+                      </span>
+                      {(['subject', 'body'] as const).map(scope => (
+                        <label key={scope} className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                          <input
+                            type="checkbox"
+                            checked={mailarchiveForm.searchIn.includes(scope)}
+                            onChange={(e) => {
+                              setMailarchiveForm((prev) => {
+                                const next = e.target.checked
+                                  ? [...prev.searchIn, scope]
+                                  : prev.searchIn.filter(s => s !== scope)
+                                // require at least one option
+                                return { ...prev, searchIn: next.length ? next : prev.searchIn }
+                              })
+                            }}
+                          />
+                          {scope === 'subject'
+                            ? t('stepOne.ietf.searchInSubject', { ns: 'datasetCreation' })
+                            : t('stepOne.ietf.searchInBody', { ns: 'datasetCreation' })}
+                        </label>
+                      ))}
                     </div>
-                    <label className="flex min-h-[40px] items-center gap-2 rounded-xl border border-components-panel-border bg-components-panel-bg px-3 py-2 text-sm text-text-secondary">
-                      <input
-                        type="checkbox"
-                        checked={mailarchiveForm.refresh}
-                        onChange={e => setMailarchiveForm(prev => ({ ...prev, refresh: e.target.checked }))}
-                      />
-                      <span>{t('stepOne.ietf.refresh', { ns: 'datasetCreation' })}</span>
-                    </label>
                   </div>
                 </div>
+                {mailarchiveForm.mailingList.trim() && (
+                  <div
+                    className={`flex items-start gap-3 rounded-xl border px-3 py-2.5 text-xs ${
+                      syncStatus === 'ready'
+                        ? 'border-state-success-border bg-state-success-hover text-text-success'
+                        : syncStatus === 'syncing'
+                          ? 'border-state-warning-border bg-state-warning-hover text-text-warning'
+                          : syncStatus === 'not_found'
+                            ? 'border-state-destructive-border bg-state-destructive-hover text-text-destructive'
+                            : 'border-divider-subtle bg-background-default-subtle text-text-tertiary'
+                    }`}
+                    data-testid="ietf-sync-status-banner"
+                  >
+                    <div className="flex-1">
+                      {syncStatus === 'checking' && (
+                        <span>{t('stepOne.ietf.syncCheckingStatus', { ns: 'datasetCreation' })}</span>
+                      )}
+                      {syncStatus === 'ready' && (
+                        <span>{t('stepOne.ietf.syncReady', { ns: 'datasetCreation', count: syncMessageCount })}</span>
+                      )}
+                      {syncStatus === 'syncing' && (
+                        <div>
+                          <div className="font-medium">{t('stepOne.ietf.syncSyncing', { ns: 'datasetCreation' })}</div>
+                          <div className="mt-0.5 text-text-tertiary">{t('stepOne.ietf.syncSyncingHint', { ns: 'datasetCreation' })}</div>
+                        </div>
+                      )}
+                      {syncStatus === 'not_found' && (
+                        <div>
+                          <div className="font-medium">{t('stepOne.ietf.syncRequired', { ns: 'datasetCreation' })}</div>
+                          <div className="mt-0.5 text-text-tertiary">{t('stepOne.ietf.syncRequiredHint', { ns: 'datasetCreation' })}</div>
+                        </div>
+                      )}
+                    </div>
+                    {syncStatus === 'not_found' && (
+                      <Button
+                        variant="secondary"
+                        size="small"
+                        loading={isTriggeringSync}
+                        onClick={handleStartSync}
+                        data-testid="ietf-sync-start-button"
+                      >
+                        {t('stepOne.ietf.syncStartButton', { ns: 'datasetCreation' })}
+                      </Button>
+                    )}
+                  </div>
+                )}
                 <div className="text-xs text-text-tertiary">
                   {t('stepOne.ietf.preprocessImportHint', { ns: 'datasetCreation' })}
                 </div>
@@ -832,6 +1006,7 @@ function IetfImporter({
             <Button
               variant="primary"
               loading={isSubmitting}
+              disabled={isSubmitting || (mode === 'mailarchive' && syncStatus !== null && syncStatus !== 'ready')}
               onClick={mode === 'mailarchive' ? submitMailarchiveImport : submitRfcs}
               data-testid="ietf-import-submit"
             >
