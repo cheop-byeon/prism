@@ -15,6 +15,7 @@ from models.dataset import (
     Dataset,
     DatasetMetadata,
     DatasetMetadataBinding,
+    DatasetPermission,
     DatasetProcessRule,
     DatasetQuery,
     Document,
@@ -22,7 +23,7 @@ from models.dataset import (
     Pipeline,
     SegmentAttachmentBinding,
 )
-from models.model import UploadFile
+from models.model import TagBinding, UploadFile
 from models.workflow import Workflow
 
 logger = logging.getLogger(__name__)
@@ -182,6 +183,10 @@ def clean_dataset_task(
             # delete dataset metadata
             session.query(DatasetMetadata).where(DatasetMetadata.dataset_id == dataset_id).delete()
             session.query(DatasetMetadataBinding).where(DatasetMetadataBinding.dataset_id == dataset_id).delete()
+            # delete dataset permissions (used when permission type is PARTIAL_TEAM)
+            session.query(DatasetPermission).where(DatasetPermission.dataset_id == dataset_id).delete()
+            # delete tag bindings
+            session.query(TagBinding).where(TagBinding.target_id == dataset_id).delete()
             # delete pipeline and workflow
             if pipeline_id:
                 session.query(Pipeline).where(Pipeline.id == pipeline_id).delete()
