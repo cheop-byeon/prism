@@ -34,10 +34,10 @@ logger = logging.getLogger(__name__)
 def clean_dataset_task(
     dataset_id: str,
     tenant_id: str,
-    indexing_technique: str,
-    index_struct: str,
-    collection_binding_id: str,
-    doc_form: str,
+    indexing_technique: str | None,
+    index_struct: str | None,
+    collection_binding_id: str | None,
+    doc_form: str | None,
     pipeline_id: str | None = None,
 ):
     """
@@ -101,8 +101,18 @@ def clean_dataset_task(
                 )
             )
 
+            # Skip vector cleanup for datasets that were never indexed.
+            skip_vector_cleanup = not indexing_technique and not collection_binding_id
             try:
-                if other_datasets_using_binding:
+                if skip_vector_cleanup:
+                    logger.info(
+                        click.style(
+                            f"Dataset {dataset_id} has no indexing_technique or collection_binding_id; "
+                            "skipping vector cleanup",
+                            fg="yellow",
+                        )
+                    )
+                elif other_datasets_using_binding:
                     # Shared collection: remove only vectors tagged with this dataset_id.
                     from core.rag.datasource.vdb.vector_factory import Vector
 
