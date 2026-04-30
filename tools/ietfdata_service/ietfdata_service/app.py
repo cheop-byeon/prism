@@ -732,6 +732,7 @@ def _query_message_headers(
     uidvalidity: int,
     rx_after: str,
     rx_before: str,
+    from_addr: str | None = None,
 ) -> list[tuple]:
     """Return (message_num, from_name, from_addr, subject, message_id, date) rows via a single
     JOIN query WITHOUT loading the message blob.
@@ -740,18 +741,31 @@ def _query_message_headers(
     (direct delivery + list relay), so we keep only the lowest message_num per
     Message-ID, matching the deduplication that the mailarchive website applies.
     Messages with no Message-ID header are kept as-is (grouped by message_num).
+
+    from_addr, when provided, is pushed into SQL as a case-insensitive substring
+    filter against both the address and display-name columns, avoiding a full
+    Python-side scan of every row in the date range.
     """
-    sql = """
+    params: list[object] = [ml_name, uidvalidity, rx_after, rx_before]
+    from_clause = ""
+    if from_addr:
+        needle = from_addr.lower()
+        from_clause = (
+            "\n          AND (   INSTR(LOWER(COALESCE(h.from_addr, '')), ?) > 0"
+            "\n               OR INSTR(LOWER(COALESCE(h.from_name, '')), ?) > 0)"
+        )
+        params.extend([needle, needle])
+    sql = f"""
         SELECT MIN(m.message_num), h.from_name, h.from_addr, h.subject, h.message_id, h.date
         FROM   ietf_ma_msg  m
         LEFT JOIN ietf_ma_hdr h ON h.message_num = m.message_num
         WHERE  m.mailing_list  = ?
           AND  m.uidvalidity   = ?
           AND  m.date_received > ?
-          AND  m.date_received < ?
+          AND  m.date_received < ?{from_clause}
         GROUP BY COALESCE(h.message_id, CAST(m.message_num AS TEXT))
     """
-    return archive._db.cursor().execute(sql, (ml_name, uidvalidity, rx_after, rx_before)).fetchall()
+    return archive._db.cursor().execute(sql, params).fetchall()
 
 
 def _fetch_message_raw(archive: MailArchive, message_num: int) -> bytes | None:
@@ -1039,6 +1053,7 @@ def import_mailarchive(payload: MailarchiveImportRequest) -> SidecarFileResponse
     rows = _query_message_headers(
         archive, mailing_list.name(), mailing_list.uidvalidity(),
         received_after.isoformat(), received_before.isoformat(),
+        from_addr=payload.from_addr,
     )
 
     message_sections: list[str] = []
@@ -1049,9 +1064,6 @@ def import_mailarchive(payload: MailarchiveImportRequest) -> SidecarFileResponse
     for (message_num, from_name, from_addr, subject, message_id, date_str) in rows:
         from_value = f"{from_name} <{from_addr}>" if from_name else (from_addr or "")
         subject_value = subject or ""
-
-        if payload.from_addr and payload.from_addr.lower() not in from_value.lower():
-            continue
 
         # Query matching — check subject first (cheap), then body blob only if needed.
         prefetched_raw: bytes | None = None
@@ -1180,6 +1192,7 @@ def import_mailarchive_as_mbox(payload: MailarchiveImportRequest) -> SidecarFile
     rows = _query_message_headers(
         archive, mailing_list.name(), mailing_list.uidvalidity(),
         received_after.isoformat(), received_before.isoformat(),
+        from_addr=payload.from_addr,
     )
 
     mbox_lines: list[str] = []
@@ -1189,9 +1202,6 @@ def import_mailarchive_as_mbox(payload: MailarchiveImportRequest) -> SidecarFile
     for (message_num, from_name, from_addr, subject, message_id, date_str) in rows:
         from_value = f"{from_name} <{from_addr}>" if from_name else (from_addr or "")
         subject_value = subject or ""
-
-        if payload.from_addr and payload.from_addr.lower() not in from_value.lower():
-            continue
 
         prefetched_raw: bytes | None = None
         prefetched_message: Message | None = None
