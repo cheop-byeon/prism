@@ -64,6 +64,7 @@ const defaultProps = {
   embeddingModelList: [],
   retrievalConfig: createRetrievalConfig(),
   showMultiModalTip: false,
+  keywordStore: 'bm25' as const,
   isModelAndRetrievalConfigDisabled: false,
   isQAConfirmDialogOpen: false,
   onIndexTypeChange: vi.fn(),
@@ -71,6 +72,7 @@ const defaultProps = {
   onRetrievalConfigChange: vi.fn(),
   onQAConfirmDialogClose: vi.fn(),
   onQAConfirmDialogConfirm: vi.fn(),
+  onKeywordStoreChange: vi.fn(),
 }
 
 describe('IndexingModeSection', () => {

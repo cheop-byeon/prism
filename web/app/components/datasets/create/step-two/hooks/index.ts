@@ -2,7 +2,7 @@ export { useDocumentCreation } from './use-document-creation'
 export type { DocumentCreation, ValidationParams } from './use-document-creation'
 
 export { IndexingType, useIndexingConfig } from './use-indexing-config'
-export type { IndexingConfig } from './use-indexing-config'
+export type { IndexingConfig, KeywordStoreType } from './use-indexing-config'
 
 export { useIndexingEstimate } from './use-indexing-estimate'
 export type { IndexingEstimate } from './use-indexing-estimate'

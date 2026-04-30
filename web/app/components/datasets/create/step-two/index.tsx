@@ -73,6 +73,7 @@ const StepTwo: FC<StepTwoProps> = ({
     initialIndexType: propsIndexingType,
     initialEmbeddingModel: currentDataset?.embedding_model ? { provider: currentDataset.embedding_model_provider, model: currentDataset.embedding_model } : undefined,
     initialRetrievalConfig: currentDataset?.retrieval_model_dict,
+    initialKeywordStore: currentDataset?.keyword_store ?? 'bm25',
     isAPIKeySet,
     hasSetIndexType,
   })
@@ -160,7 +161,7 @@ const StepTwo: FC<StepTwoProps> = ({
     })
     if (!isValid)
       return
-    const params = creation.buildCreationParams(currentDocForm, docLanguage, segmentation.getProcessRule(currentDocForm), indexing.retrievalConfig, indexing.embeddingModel, indexing.getIndexingTechnique(), segmentation.summaryIndexSetting)
+    const params = creation.buildCreationParams(currentDocForm, docLanguage, segmentation.getProcessRule(currentDocForm), indexing.retrievalConfig, indexing.embeddingModel, indexing.getIndexingTechnique(), segmentation.summaryIndexSetting, indexing.keywordStore)
     if (!params)
       return
     await creation.executeCreation(params, indexing.indexType, indexing.retrievalConfig)
@@ -263,6 +264,7 @@ const StepTwo: FC<StepTwoProps> = ({
           embeddingModelList={indexing.embeddingModelList}
           retrievalConfig={indexing.retrievalConfig}
           showMultiModalTip={indexing.showMultiModalTip}
+          keywordStore={indexing.keywordStore}
           isModelAndRetrievalConfigDisabled={isModelAndRetrievalConfigDisabled}
           datasetId={datasetId}
           isQAConfirmDialogOpen={isQAConfirmDialogOpen}
@@ -271,6 +273,7 @@ const StepTwo: FC<StepTwoProps> = ({
           onRetrievalConfigChange={indexing.setRetrievalConfig}
           onQAConfirmDialogClose={() => setIsQAConfirmDialogOpen(false)}
           onQAConfirmDialogConfirm={handleQAConfirm}
+          onKeywordStoreChange={indexing.setKeywordStore}
         />
         <StepTwoFooter isSetting={isSetting} isCreating={creation.isCreating} onPrevious={() => onStepChange?.(-1)} onCreate={handleCreate} onCancel={onCancel} />
       </div>

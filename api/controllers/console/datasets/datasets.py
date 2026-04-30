@@ -129,6 +129,9 @@ def _validate_doc_form(value: str | None) -> str | None:
     return value
 
 
+_VALID_KEYWORD_STORES = {"bm25", "jieba"}
+
+
 class DatasetCreatePayload(BaseModel):
     name: str = Field(..., min_length=1, max_length=40)
     description: str = Field("", max_length=400)
@@ -137,6 +140,7 @@ class DatasetCreatePayload(BaseModel):
     provider: str = "vendor"
     external_knowledge_api_id: str | None = None
     external_knowledge_id: str | None = None
+    keyword_store: str | None = None
 
     @field_validator("indexing_technique")
     @classmethod
@@ -148,6 +152,13 @@ class DatasetCreatePayload(BaseModel):
     def validate_provider(cls, value: str) -> str:
         if value not in Dataset.PROVIDER_LIST:
             raise ValueError("Invalid provider.")
+        return value
+
+    @field_validator("keyword_store")
+    @classmethod
+    def validate_keyword_store(cls, value: str | None) -> str | None:
+        if value is not None and value not in _VALID_KEYWORD_STORES:
+            raise ValueError(f"Invalid keyword_store. Must be one of: {_VALID_KEYWORD_STORES}")
         return value
 
 
@@ -409,6 +420,7 @@ class DatasetListApi(Resource):
                 provider=payload.provider,
                 external_knowledge_api_id=payload.external_knowledge_api_id,
                 external_knowledge_id=payload.external_knowledge_id,
+                keyword_store=payload.keyword_store,
             )
         except services.errors.dataset.DatasetNameDuplicateError:
             raise DatasetNameDuplicateError()

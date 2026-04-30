@@ -89,6 +89,7 @@ dataset_detail_fields = {
     "updated_at": TimestampField,
     "embedding_model": fields.String,
     "embedding_model_provider": fields.String,
+    "keyword_store": fields.String,
     "embedding_available": fields.Boolean,
     "retrieval_model_dict": fields.Nested(dataset_retrieval_model_fields),
     "summary_index_setting": fields.Nested(dataset_summary_index_fields),

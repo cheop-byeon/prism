@@ -90,6 +90,7 @@ export type DataSet = {
   built_in_field_enabled: boolean
   doc_metadata?: MetadataInDoc[]
   keyword_number?: number
+  keyword_store?: 'bm25' | 'jieba'
   pipeline_id?: string
   is_published?: boolean // Indicates if the pipeline is published
   runtime_mode: 'rag_pipeline' | 'general'
@@ -666,6 +667,7 @@ export type CreateDocumentReq = DocumentReq & {
   retrieval_model: RetrievalConfig
   embedding_model: string
   embedding_model_provider: string
+  keyword_store?: 'bm25' | 'jieba'
 }
 
 export type IndexingEstimateParams = DocumentReq & Partial<DataSource> & {

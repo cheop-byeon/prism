@@ -13,7 +13,8 @@ class Keyword:
         self._keyword_processor = self._init_keyword()
 
     def _init_keyword(self) -> BaseKeyword:
-        keyword_type = dify_config.KEYWORD_STORE
+        # Per-dataset setting takes precedence over the server-wide default.
+        keyword_type = getattr(self._dataset, "keyword_store", None) or dify_config.KEYWORD_STORE
         keyword_factory = self.get_keyword_factory(keyword_type)
         return keyword_factory(self._dataset)
 
@@ -24,6 +25,10 @@ class Keyword:
                 from core.rag.datasource.keyword.jieba.jieba import Jieba
 
                 return Jieba
+            case KeyWordType.BM25:
+                from core.rag.datasource.keyword.bm25.bm25 import Bm25Keyword
+
+                return Bm25Keyword
             case _:
                 raise ValueError(f"Keyword store {keyword_type} is not supported.")
 

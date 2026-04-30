@@ -23,10 +23,13 @@ const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
   score_threshold: 0.5,
 }
 
+export type KeywordStoreType = 'bm25' | 'jieba'
+
 export type UseIndexingConfigOptions = {
   initialIndexType?: IndexingType
   initialEmbeddingModel?: DefaultModel
   initialRetrievalConfig?: RetrievalConfig
+  initialKeywordStore?: KeywordStoreType
   isAPIKeySet: boolean
   hasSetIndexType: boolean
 }
@@ -36,6 +39,7 @@ export const useIndexingConfig = (options: UseIndexingConfigOptions) => {
     initialIndexType,
     initialEmbeddingModel,
     initialRetrievalConfig,
+    initialKeywordStore,
     isAPIKeySet,
     hasSetIndexType,
   } = options
@@ -64,6 +68,11 @@ export const useIndexingConfig = (options: UseIndexingConfigOptions) => {
       provider: defaultEmbeddingModel?.provider.provider || '',
       model: defaultEmbeddingModel?.model || '',
     },
+  )
+
+  // Keyword store state (only relevant for ECONOMICAL mode)
+  const [keywordStore, setKeywordStore] = useState<KeywordStoreType>(
+    initialKeywordStore ?? 'bm25',
   )
 
   // Retrieval config state
@@ -121,6 +130,10 @@ export const useIndexingConfig = (options: UseIndexingConfigOptions) => {
     setIndexType,
     hasSetIndexType,
     getIndexingTechnique,
+
+    // Keyword store (economical mode sub-choice)
+    keywordStore,
+    setKeywordStore,
 
     // Embedding model
     embeddingModel,

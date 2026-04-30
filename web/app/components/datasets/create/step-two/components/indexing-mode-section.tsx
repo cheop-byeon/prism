@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import type { KeywordStoreType } from '../hooks'
 import type { DefaultModel, Model } from '@/app/components/header/account-setting/model-provider-page/declarations'
 import type { RetrievalConfig } from '@/types/app'
 import { useTranslation } from 'react-i18next'
@@ -31,6 +32,7 @@ type IndexingModeSectionProps = {
   embeddingModelList?: Model[]
   retrievalConfig: RetrievalConfig
   showMultiModalTip: boolean
+  keywordStore: KeywordStoreType
   // Flags
   isModelAndRetrievalConfigDisabled: boolean
   datasetId?: string
@@ -42,6 +44,7 @@ type IndexingModeSectionProps = {
   onRetrievalConfigChange: (config: RetrievalConfig) => void
   onQAConfirmDialogClose: () => void
   onQAConfirmDialogConfirm: () => void
+  onKeywordStoreChange: (store: KeywordStoreType) => void
 }
 
 export const IndexingModeSection: FC<IndexingModeSectionProps> = ({
@@ -52,6 +55,7 @@ export const IndexingModeSection: FC<IndexingModeSectionProps> = ({
   embeddingModelList,
   retrievalConfig,
   showMultiModalTip,
+  keywordStore,
   isModelAndRetrievalConfigDisabled,
   datasetId,
   isQAConfirmDialogOpen,
@@ -60,6 +64,7 @@ export const IndexingModeSection: FC<IndexingModeSectionProps> = ({
   onRetrievalConfigChange,
   onQAConfirmDialogClose,
   onQAConfirmDialogConfirm,
+  onKeywordStoreChange,
 }) => {
   const { t } = useTranslation()
   const docLink = useDocLink()
@@ -172,6 +177,38 @@ export const IndexingModeSection: FC<IndexingModeSectionProps> = ({
           <Link className="text-text-accent" href={`/datasets/${datasetId}/settings`}>
             {t('stepTwo.datasetSettingLink', { ns: 'datasetCreation' })}
           </Link>
+        </div>
+      )}
+
+      {/* Keyword store sub-choice (only shown when Economical is selected and not yet locked) */}
+      {!hasSetIndexType && indexType === IndexingType.ECONOMICAL && (
+        <div className="mt-3 flex items-center gap-3">
+          <span className="shrink-0 text-text-tertiary system-xs-medium">
+            {t('stepTwo.keywordStore', { ns: 'datasetCreation' })}
+            :
+          </span>
+          {(['bm25', 'jieba'] as const).map(store => (
+            <label key={store} className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+              <input
+                type="radio"
+                name="keyword_store"
+                value={store}
+                checked={keywordStore === store}
+                onChange={() => onKeywordStoreChange(store)}
+                className="accent-primary-600"
+              />
+              <span className="font-medium">
+                {store === 'bm25'
+                  ? t('stepTwo.keywordStoreBm25', { ns: 'datasetCreation' })
+                  : t('stepTwo.keywordStoreJieba', { ns: 'datasetCreation' })}
+              </span>
+              <span className="text-text-tertiary">
+                {store === 'bm25'
+                  ? t('stepTwo.keywordStoreBm25Hint', { ns: 'datasetCreation' })
+                  : t('stepTwo.keywordStoreJiebaHint', { ns: 'datasetCreation' })}
+              </span>
+            </label>
+          ))}
         </div>
       )}
 

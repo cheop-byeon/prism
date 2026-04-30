@@ -225,6 +225,7 @@ class DatasetService:
         embedding_model_name: str | None = None,
         retrieval_model: RetrievalModel | None = None,
         summary_index_setting: dict | None = None,
+        keyword_store: str | None = None,
     ):
         # check if dataset name already exists
         if db.session.query(Dataset).filter_by(name=name, tenant_id=tenant_id).first():
@@ -270,6 +271,8 @@ class DatasetService:
         dataset.retrieval_model = retrieval_model.model_dump() if retrieval_model else None
         dataset.permission = DatasetPermissionEnum(permission) if permission else DatasetPermissionEnum.ONLY_ME
         dataset.provider = provider
+        if keyword_store:
+            dataset.keyword_store = keyword_store
         if summary_index_setting is not None:
             dataset.summary_index_setting = summary_index_setting
         db.session.add(dataset)
@@ -2729,6 +2732,7 @@ class DocumentService:
             retrieval_model=retrieval_model.model_dump() if retrieval_model else None,
             summary_index_setting=knowledge_config.summary_index_setting,
             is_multimodal=knowledge_config.is_multimodal,
+            keyword_store=knowledge_config.keyword_store or "bm25",
         )
 
         db.session.add(dataset)

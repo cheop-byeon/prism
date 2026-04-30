@@ -149,6 +149,7 @@ class Dataset(Base):
     embedding_model = mapped_column(sa.String(255), nullable=True)
     embedding_model_provider = mapped_column(sa.String(255), nullable=True)
     keyword_number = mapped_column(sa.Integer, nullable=True, server_default=sa.text("10"))
+    keyword_store = mapped_column(sa.String(50), nullable=False, server_default=sa.text("'bm25'"))
     collection_binding_id = mapped_column(StringUUID, nullable=True)
     retrieval_model = mapped_column(AdjustedJSON, nullable=True)
     summary_index_setting = mapped_column(AdjustedJSON, nullable=True)

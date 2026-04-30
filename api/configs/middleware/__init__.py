@@ -102,9 +102,10 @@ class VectorStoreConfig(BaseSettings):
 
 class KeywordStoreConfig(BaseSettings):
     KEYWORD_STORE: str = Field(
-        description="Method for keyword extraction and storage."
-        " Default is 'jieba', a Chinese text segmentation library.",
-        default="jieba",
+        description="Default keyword index backend for new datasets in Economical mode."
+        " 'bm25' (default) uses BM25Okapi with length normalisation."
+        " 'jieba' uses the original Jieba TF-IDF keyword-extraction approach.",
+        default="bm25",
     )
 
 

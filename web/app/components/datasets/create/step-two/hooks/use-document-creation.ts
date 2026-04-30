@@ -143,6 +143,7 @@ export const useDocumentCreation = (options: UseDocumentCreationOptions) => {
     embeddingModel: DefaultModel,
     indexingTechnique: string,
     summaryIndexSetting?: SummaryIndexSettingType,
+    keywordStore?: 'bm25' | 'jieba',
   ): CreateDocumentReq | null => {
     if (isSetting) {
       return {
@@ -173,6 +174,7 @@ export const useDocumentCreation = (options: UseDocumentCreationOptions) => {
       retrieval_model: retrievalConfig,
       embedding_model: embeddingModel.model,
       embedding_model_provider: embeddingModel.provider,
+      ...(indexingTechnique === 'economy' && keywordStore ? { keyword_store: keywordStore } : {}),
     } as CreateDocumentReq
 
     // Add data source specific info

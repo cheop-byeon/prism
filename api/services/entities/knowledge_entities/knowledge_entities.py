@@ -129,6 +129,7 @@ class KnowledgeConfig(BaseModel):
     embedding_model_provider: str | None = None
     name: str | None = None
     is_multimodal: bool = False
+    keyword_store: Literal["bm25", "jieba"] | None = None
 
     @field_validator("doc_form")
     @classmethod
