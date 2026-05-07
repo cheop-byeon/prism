@@ -2,6 +2,7 @@
 
 import type { CustomFile, FileItem } from '@/models/datasets'
 import type {
+  GithubJobState,
   IetfDraftImportRequest,
   IetfFormatInfo,
   IetfPreprocessResponse,
@@ -11,7 +12,7 @@ import type {
   IetfYearPreprocessResult,
   UploadedConsoleFile,
 } from '@/service/common'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
@@ -20,6 +21,7 @@ import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitl
 import { toast } from '@/app/components/base/ui/toast'
 import {
   downloadAndPreprocessMailarchiveYears,
+  fetchGithubImportStatus,
   fetchIetfDraftFormats,
   fetchIetfMailarchiveSyncStatus,
   fetchIetfMailingLists,
@@ -27,10 +29,13 @@ import {
   fetchIetfRfcSuggestions,
   importIetfDraftFile,
   importIetfRfcFile,
+  resumeGithubImport,
+  startGithubImport,
   triggerIetfMailarchiveSync,
 } from '@/service/common'
 import { useFileUploadConfig } from '@/service/use-common'
 import { PROGRESS_COMPLETE } from '../file-uploader/constants'
+import { getReposForWg, WG_NAMES } from './wg-repos'
 
 type IetfImporterProps = {
   fileList: FileItem[]
@@ -40,7 +45,7 @@ type IetfImporterProps = {
   supportBatchUpload: boolean
 }
 
-type IetfImportMode = 'mailarchive' | 'rfcs'
+type IetfImportMode = 'mailarchive' | 'rfcs' | 'github'
 
 type MailarchiveFormState = {
   mailingList: string
@@ -55,6 +60,18 @@ type RfcFormState = {
   rfcId: string
 }
 
+type GithubLoader = 'graphql' | 'langchain' | 'llamaindex'
+
+type GithubFormState = {
+  wg: string
+  repo: string
+  includeIssues: boolean
+  includePRs: boolean
+  includeClosed: boolean
+  githubToken: string
+  loader: GithubLoader
+}
+
 const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
   mailingList: '',
   sentAfter: '1970-01-01T00:00:00',
@@ -66,6 +83,19 @@ const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
 
 const DEFAULT_RFC_FORM: RfcFormState = {
   rfcId: '',
+}
+
+const GITHUB_TOKEN_STORAGE_KEY = 'ietf_github_access_token'
+const GITHUB_JOB_STORAGE_KEY = 'ietf_github_last_job'
+
+const DEFAULT_GITHUB_FORM: GithubFormState = {
+  wg: '',
+  repo: '',
+  includeIssues: true,
+  includePRs: true,
+  includeClosed: true,
+  githubToken: '',
+  loader: 'graphql',
 }
 
 const IETF_IMPORT_FILE_LIMIT = 500
@@ -149,6 +179,16 @@ function IetfImporter({
 
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<IetfImportMode>('mailarchive')
+  const [githubForm, setGithubForm] = useState<GithubFormState>(() => ({
+    ...DEFAULT_GITHUB_FORM,
+    githubToken: (typeof window !== 'undefined' ? localStorage.getItem(GITHUB_TOKEN_STORAGE_KEY) : null) ?? '',
+  }))
+  const [showWgDropdown, setShowWgDropdown] = useState(false)
+  const [showDraftDropdown, setShowDraftDropdown] = useState(false)
+  const [wgFilter, setWgFilter] = useState('')
+  const [draftFilter, setDraftFilter] = useState('')
+  const wgDropdownRef = useRef<HTMLDivElement>(null)
+  const draftDropdownRef = useRef<HTMLDivElement>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [mailarchiveForm, setMailarchiveForm] = useState(DEFAULT_MAILARCHIVE_FORM)
   const [rfcForm, setRfcForm] = useState(DEFAULT_RFC_FORM)
@@ -168,6 +208,9 @@ function IetfImporter({
   const [syncMessageCount, setSyncMessageCount] = useState<number>(0)
   const [isTriggeringSync, setIsTriggeringSync] = useState(false)
   const syncPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [githubJobId, setGithubJobId] = useState<string | null>(null)
+  const [githubJobState, setGithubJobState] = useState<GithubJobState | null>(null)
+  const githubPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const mailingListDropdownRef = useRef<HTMLDivElement>(null)
   const rfcDropdownRef = useRef<HTMLDivElement>(null)
   const dropdownRef = mailingListDropdownRef
@@ -413,6 +456,74 @@ function IetfImporter({
     setOpen(false)
   }
 
+  // Poll GitHub background job status every 2 s while running/pending
+  useEffect(() => {
+    if (!githubJobId)
+      return
+    const poll = async () => {
+      try {
+        const state = await fetchGithubImportStatus(githubJobId)
+        setGithubJobState(state)
+        if (state.status === 'done') {
+          if (githubPollRef.current) {
+            clearInterval(githubPollRef.current)
+            githubPollRef.current = null
+          }
+          localStorage.removeItem(GITHUB_JOB_STORAGE_KEY)
+          setIsSubmitting(false)
+          if (state.file)
+            handleImportedFile(state.file)
+        }
+        else if (state.status === 'error') {
+          if (githubPollRef.current) {
+            clearInterval(githubPollRef.current)
+            githubPollRef.current = null
+          }
+          if (!state.resumable)
+            localStorage.removeItem(GITHUB_JOB_STORAGE_KEY)
+          setIsSubmitting(false)
+        }
+      }
+      catch {
+        // ignore transient poll errors
+      }
+    }
+    if (githubPollRef.current)
+      clearInterval(githubPollRef.current)
+    poll()
+    githubPollRef.current = setInterval(poll, 2000)
+    return () => {
+      if (githubPollRef.current) {
+        clearInterval(githubPollRef.current)
+        githubPollRef.current = null
+      }
+    }
+  // eslint-disable-next-line react/exhaustive-deps
+  }, [githubJobId])
+
+  // Auto-reconnect: when the dialog opens on the GitHub tab, check localStorage for a
+  // previously started job and resume polling it if it is still active.
+  useEffect(() => {
+    if (!open || mode !== 'github' || githubJobId)
+      return
+    try {
+      const saved = localStorage.getItem(GITHUB_JOB_STORAGE_KEY)
+      if (!saved)
+        return
+      const { job_id } = JSON.parse(saved) as { job_id: string }
+      if (job_id) {
+        startTransition(() => {
+          setGithubJobId(job_id)
+          setIsSubmitting(true)
+        })
+      }
+    }
+    catch {
+      // ignore corrupt localStorage entry
+    }
+  // eslint-disable-next-line react/exhaustive-deps
+  }, [open, mode])
+
   const handleRequestError = async (error: unknown) => {
     const fallbackMessage = t('stepOne.ietf.importFailed', { ns: 'datasetCreation' })
     const parsedMessage = await extractErrorMessage(error)
@@ -527,6 +638,65 @@ function IetfImporter({
     }
   }
 
+  const submitGithub = async () => {
+    const repo = githubForm.repo.trim()
+    if (!repo || !repo.includes('/')) {
+      toast.error(t('stepOne.ietf.validation.githubRepoRequired', { ns: 'datasetCreation' }))
+      return
+    }
+    if (!githubForm.includeIssues && !githubForm.includePRs) {
+      toast.error(t('stepOne.ietf.validation.githubAtLeastOne', { ns: 'datasetCreation' }))
+      return
+    }
+    const token = githubForm.githubToken.trim()
+    if (!token) {
+      toast.error(t('stepOne.ietf.validation.githubTokenRequired', { ns: 'datasetCreation' }))
+      return
+    }
+    localStorage.setItem(GITHUB_TOKEN_STORAGE_KEY, token)
+    setIsSubmitting(true)
+    setGithubJobId(null)
+    setGithubJobState(null)
+    try {
+      const { job_id } = await startGithubImport({
+        repo,
+        include_issues: githubForm.includeIssues,
+        include_prs: githubForm.includePRs,
+        include_closed: githubForm.includeClosed,
+        github_token: token,
+        loader: githubForm.loader,
+      })
+      setGithubJobId(job_id)
+      localStorage.setItem(GITHUB_JOB_STORAGE_KEY, JSON.stringify({ job_id, repo, loader: githubForm.loader }))
+      // isSubmitting stays true until the polling effect resolves the job
+    }
+    catch (error) {
+      await handleRequestError(error)
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleGithubResume = async () => {
+    if (!githubJobId)
+      return
+    const token = githubForm.githubToken.trim()
+    if (!token) {
+      toast.error(t('stepOne.ietf.validation.githubTokenRequired', { ns: 'datasetCreation' }))
+      return
+    }
+    setIsSubmitting(true)
+    setGithubJobState(null)
+    try {
+      const { job_id } = await resumeGithubImport(githubJobId, token)
+      setGithubJobId(job_id)
+      localStorage.setItem(GITHUB_JOB_STORAGE_KEY, JSON.stringify({ job_id, repo: githubForm.repo, loader: githubForm.loader }))
+    }
+    catch (error) {
+      await handleRequestError(error)
+      setIsSubmitting(false)
+    }
+  }
+
   return (
     <>
       <div className="mb-5 flex max-w-[640px] items-center justify-between gap-4 rounded-2xl border border-divider-subtle bg-background-default-subtle px-4 py-3">
@@ -634,6 +804,15 @@ function IetfImporter({
                 <span className="flex items-center gap-1.5">
                   <span className="i-ri-article-line size-4" />
                   {t('stepOne.ietf.rfcs', { ns: 'datasetCreation' })}
+                </span>
+              </Button>
+              <Button
+                variant={mode === 'github' ? 'primary' : 'secondary'}
+                onClick={() => setMode('github')}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span className="i-ri-github-line size-4" />
+                  {t('stepOne.ietf.github', { ns: 'datasetCreation' })}
                 </span>
               </Button>
             </div>
@@ -997,7 +1176,198 @@ function IetfImporter({
                 )}
               </div>
             )}
+            {mode === 'github' && (
+              <div className="space-y-4" data-testid="ietf-github-form">
+                <div className="text-xs leading-4 text-text-tertiary">
+                  {t('stepOne.ietf.githubFiltersHint', { ns: 'datasetCreation' })}
+                </div>
+
+                {/* WG combobox */}
+                <div>
+                  <div className="mb-1 text-xs font-medium text-text-secondary">
+                    {t('stepOne.ietf.githubWg', { ns: 'datasetCreation' })}
+                  </div>
+                  <div className="relative" ref={wgDropdownRef}>
+                    <Input
+                      value={wgFilter || githubForm.wg}
+                      onChange={(e) => {
+                        setWgFilter(e.target.value)
+                        setShowWgDropdown(true)
+                      }}
+                      onFocus={() => setShowWgDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowWgDropdown(false), 150)}
+                      placeholder={t('stepOne.ietf.githubWgPlaceholder', { ns: 'datasetCreation' }) || ''}
+                    />
+                    {showWgDropdown && (
+                      <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-divider-subtle bg-components-panel-bg shadow-lg">
+                        {WG_NAMES
+                          .filter(wg => !wgFilter || wg.toLowerCase().includes(wgFilter.toLowerCase()))
+                          .map(wg => (
+                            <div
+                              key={wg}
+                              className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-state-base-hover"
+                              onMouseDown={() => {
+                                setGithubForm(prev => ({ ...prev, wg, repo: '' }))
+                                setWgFilter('')
+                                setDraftFilter('')
+                                setShowWgDropdown(false)
+                              }}
+                            >
+                              {wg}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Draft / repo combobox */}
+                <div>
+                  <div className="mb-1 text-xs font-medium text-text-secondary">
+                    {t('stepOne.ietf.githubDraft', { ns: 'datasetCreation' })}
+                  </div>
+                  <div className="relative" ref={draftDropdownRef}>
+                    <Input
+                      value={draftFilter || githubForm.repo}
+                      onChange={(e) => {
+                        setDraftFilter(e.target.value)
+                        setGithubForm(prev => ({ ...prev, repo: e.target.value }))
+                        setShowDraftDropdown(true)
+                      }}
+                      onFocus={() => setShowDraftDropdown(true)}
+                      onBlur={() => setTimeout(() => setShowDraftDropdown(false), 150)}
+                      placeholder={t('stepOne.ietf.githubDraftPlaceholder', { ns: 'datasetCreation' }) || ''}
+                    />
+                    {showDraftDropdown && githubForm.wg && (
+                      <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-divider-subtle bg-components-panel-bg shadow-lg">
+                        {getReposForWg(githubForm.wg)
+                          .filter(r => !draftFilter || r.toLowerCase().includes(draftFilter.toLowerCase()))
+                          .map(r => (
+                            <div
+                              key={r}
+                              className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-state-base-hover"
+                              onMouseDown={() => {
+                                setGithubForm(prev => ({ ...prev, repo: r }))
+                                setDraftFilter('')
+                                setShowDraftDropdown(false)
+                              }}
+                            >
+                              {r}
+                            </div>
+                          ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Checkboxes */}
+                <div className="flex flex-wrap gap-4">
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={githubForm.includeIssues}
+                      onChange={e => setGithubForm(prev => ({ ...prev, includeIssues: e.target.checked }))}
+                    />
+                    {t('stepOne.ietf.githubIncludeIssues', { ns: 'datasetCreation' })}
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={githubForm.includePRs}
+                      onChange={e => setGithubForm(prev => ({ ...prev, includePRs: e.target.checked }))}
+                    />
+                    {t('stepOne.ietf.githubIncludePRs', { ns: 'datasetCreation' })}
+                  </label>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={githubForm.includeClosed}
+                      onChange={e => setGithubForm(prev => ({ ...prev, includeClosed: e.target.checked }))}
+                    />
+                    {t('stepOne.ietf.githubIncludeClosed', { ns: 'datasetCreation' })}
+                  </label>
+                </div>
+
+                {/* Loader selector */}
+                <div>
+                  <div className="mb-1 text-xs font-medium text-text-secondary">
+                    {t('stepOne.ietf.githubLoader', { ns: 'datasetCreation' })}
+                  </div>
+                  <div className="flex gap-2">
+                    {(
+                      [
+                        ['graphql', t('stepOne.ietf.githubLoaderGraphql', { ns: 'datasetCreation' })],
+                        ['langchain', t('stepOne.ietf.githubLoaderLangchain', { ns: 'datasetCreation' })],
+                        ['llamaindex', t('stepOne.ietf.githubLoaderLlamaindex', { ns: 'datasetCreation' })],
+                      ] as [GithubLoader, string][]
+                    ).map(([l, label]) => (
+                      <button
+                        key={l}
+                        type="button"
+                        onClick={() => setGithubForm(prev => ({ ...prev, loader: l }))}
+                        className={`rounded-md border px-3 py-1 text-xs transition-colors ${
+                          githubForm.loader === l
+                            ? 'border-components-button-primary-bg bg-components-button-primary-bg text-components-button-primary-text'
+                            : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-state-base-hover'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Token */}
+                <div>
+                  <div className="mb-1 text-xs font-medium text-text-secondary">
+                    {t('stepOne.ietf.githubToken', { ns: 'datasetCreation' })}
+                  </div>
+                  <Input
+                    type="password"
+                    value={githubForm.githubToken}
+                    onChange={e => setGithubForm(prev => ({ ...prev, githubToken: e.target.value }))}
+                    placeholder={t('stepOne.ietf.githubTokenHint', { ns: 'datasetCreation' }) || ''}
+                  />
+                </div>
+              </div>
+            )}
           </div>
+
+          {/* GitHub background import progress */}
+          {mode === 'github' && githubJobState && (
+            <div className="mx-6 mb-2 rounded-lg border border-divider-subtle bg-background-default-subtle px-4 py-3 text-xs">
+              {githubJobState.status === 'error'
+                ? (
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-text-warning">{githubJobState.error}</span>
+                      {githubJobState.resumable && (
+                        <Button variant="secondary" size="small" onClick={handleGithubResume}>
+                          {t('stepOne.ietf.githubImportResume', { ns: 'datasetCreation' })}
+                        </Button>
+                      )}
+                    </div>
+                  )
+                : (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-text-secondary">
+                        <span>
+                          {githubJobState.phase === 'pending' && t('stepOne.ietf.githubImportPending', { ns: 'datasetCreation' })}
+                          {githubJobState.phase === 'fetching' && t('stepOne.ietf.githubImportFetching', { ns: 'datasetCreation', count: githubJobState.fetched })}
+                          {githubJobState.phase === 'fetching_comments' && t('stepOne.ietf.githubImportFetchingComments', { ns: 'datasetCreation', count: githubJobState.fetched })}
+                          {githubJobState.phase === 'uploading' && t('stepOne.ietf.githubImportUploading', { ns: 'datasetCreation' })}
+                        </span>
+                        <span className="text-text-tertiary">
+                          {githubJobState.elapsed_seconds}
+                          s
+                        </span>
+                      </div>
+                      {githubJobState.elapsed_seconds >= 30 && (
+                        <p className="text-text-tertiary">{t('stepOne.ietf.githubImportSlow', { ns: 'datasetCreation' })}</p>
+                      )}
+                    </div>
+                  )}
+            </div>
+          )}
 
           <div className="flex justify-end gap-2 border-t border-divider-subtle px-6 py-4">
             <Button variant="secondary" onClick={closeDialog} disabled={isSubmitting}>
@@ -1007,7 +1377,7 @@ function IetfImporter({
               variant="primary"
               loading={isSubmitting}
               disabled={isSubmitting || (mode === 'mailarchive' && syncStatus !== null && syncStatus !== 'ready')}
-              onClick={mode === 'mailarchive' ? submitMailarchiveImport : submitRfcs}
+              onClick={mode === 'mailarchive' ? submitMailarchiveImport : mode === 'rfcs' ? submitRfcs : submitGithub}
               data-testid="ietf-import-submit"
             >
               {t('stepOne.ietf.import', { ns: 'datasetCreation' })}

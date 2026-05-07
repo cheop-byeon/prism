@@ -200,6 +200,16 @@ class FaissVector(BaseVector):
 
         return sorted(docs, key=lambda d: d.metadata.get("score", 0), reverse=True)
 
+    def get_by_ids(self, ids: list[str]) -> list[Document]:
+        """Return documents whose doc_id metadata field matches any of *ids*."""
+        id_set = set(ids)
+        docs: list[Document] = []
+        with self._lock:
+            for meta, text in zip(self._meta["metadatas"], self._meta["texts"]):
+                if meta.get("doc_id") in id_set:
+                    docs.append(Document(page_content=text, metadata=dict(meta)))
+        return docs
+
     def search_by_full_text(self, query: str, **kwargs: Any) -> list[Document]:
         # FAISS is a vector-only index; full-text search is not supported.
         return []

@@ -98,6 +98,7 @@ dependencies = [
     "langchain-experimental>=0.3.0",
     "langchain-text-splitters>=0.3.8",
     "llama-index>=0.14.21",
+    "llama-index-readers-github>=0.3.0",
     "tree-sitter>=0.25.2",
     "tree-sitter-language-pack>=0.1.0,<1.0.0",  # v1.x renamed module to _native; llama-index needs the v0.x API
 ]

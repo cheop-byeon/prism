@@ -1541,6 +1541,7 @@ dependencies = [
     { name = "langsmith" },
     { name = "litellm" },
     { name = "llama-index" },
+    { name = "llama-index-readers-github" },
     { name = "markdown" },
     { name = "mlflow-skinny" },
     { name = "numpy" },
@@ -1752,6 +1753,7 @@ requires-dist = [
     { name = "langsmith", specifier = "~=0.7.16" },
     { name = "litellm", specifier = "==1.82.6" },
     { name = "llama-index", specifier = ">=0.14.21" },
+    { name = "llama-index-readers-github", specifier = ">=0.3.0" },
     { name = "markdown", specifier = "~=3.10.2" },
     { name = "mlflow-skinny", specifier = ">=3.0.0" },
     { name = "numpy", specifier = "~=1.26.4" },
@@ -3868,6 +3870,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/65/27/18a7fd0873023aed145332dab5a09b95b298e4fff1c21685eaf22b629d87/llama_index_llms_openai-0.7.5.tar.gz", hash = "sha256:54123e679a7cddc1f2e969f278a4654050730daf84691731a0c53ae14feac3c7", size = 27423, upload-time = "2026-03-30T16:30:33.973Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/63/62/a847e9a94c2f92926c30188259f9f86e019dcc45122bbb222dea35a74c02/llama_index_llms_openai-0.7.5-py3-none-any.whl", hash = "sha256:c302c6386873420df3714c3d538f45379b6de27ab6a531f30c67419b39a538f5", size = 28492, upload-time = "2026-03-30T16:30:32.979Z" },
+]
+
+[[package]]
+name = "llama-index-readers-github"
+version = "0.11.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "httpx" },
+    { name = "llama-index-core" },
+    { name = "llama-index-embeddings-openai" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/ab/7e1b039c674b9ddbf28f40ba2323f2a8bec1d03916dd090662533a6de513/llama_index_readers_github-0.11.2.tar.gz", hash = "sha256:b65ddde1afdabe9881025146b1e9fcdb57f223a1254c24fa3972d1740f832bc1", size = 25933, upload-time = "2026-03-13T16:16:23.872Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/7f/7e06b98c30737e268626e2ef13235bff377dd283c04634ecd18e62785ba5/llama_index_readers_github-0.11.2-py3-none-any.whl", hash = "sha256:a5251e01fb7aaaf100f375f29c76f939b5f58ccf70105f890d06f413209f17c6", size = 33741, upload-time = "2026-03-13T16:16:24.658Z" },
 ]
 
 [[package]]

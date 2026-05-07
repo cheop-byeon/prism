@@ -93,30 +93,34 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
 
         {/* Text Preview */}
         {currentDocForm === ChunkingMode.text && estimate?.preview && (
-          estimate.preview.map((item, index) => (
-            <ChunkContainer
-              key={item.content}
-              label={`Chunk-${index + 1}`}
-              characterCount={item.content.length}
-            >
-              {item.content}
-              {item.summary && <SummaryLabel summary={item.summary} />}
-            </ChunkContainer>
-          ))
+          estimate.preview.map((item, index) => {
+            const content = item.content ?? ''
+            return (
+              <ChunkContainer
+                key={index}
+                label={`Chunk-${index + 1}`}
+                characterCount={content.length}
+              >
+                {content}
+                {item.summary && <SummaryLabel summary={item.summary} />}
+              </ChunkContainer>
+            )
+          })
         )}
 
         {/* Parent-Child Preview */}
         {currentDocForm === ChunkingMode.parentChild && estimate?.preview && (
           estimate.preview.map((item, index) => {
             const indexForLabel = index + 1
+            const content = item.content ?? ''
             const childChunks = parentChildConfig.chunkForContext === 'full-doc'
               ? item.child_chunks.slice(0, FULL_DOC_PREVIEW_LENGTH)
               : item.child_chunks
             return (
               <ChunkContainer
-                key={item.content}
+                key={index}
                 label={`Chunk-${indexForLabel}`}
-                characterCount={item.content.length}
+                characterCount={content.length}
               >
                 <FormattedText>
                   {childChunks.map((child, childIndex) => {

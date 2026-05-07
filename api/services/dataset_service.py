@@ -3123,7 +3123,7 @@ class SegmentService:
         "email_id": ("email_id", "emailId", "message_id", "messageId", "id"),
         "url": ("url", "source_url", "sourceURL", "link"),
         "subject_line": ("subject_line", "subject-line", "subject", "title"),
-        "date": ("date", "sent_at", "sentAt", "timestamp"),
+        "date": ("date", "sent_at", "sentAt", "timestamp", "created_at"),
         # Backward-compatible keys for existing UI consumers.
         "id": ("id",),
         "subject": ("subject",),

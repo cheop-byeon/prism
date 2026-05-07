@@ -479,6 +479,42 @@ export const importIetfDraftFile = (body: IetfDraftImportRequest): Promise<Uploa
   return post<UploadedConsoleFile>('/ietf/imports/drafts', { body })
 }
 
+export type GithubImportRequest = {
+  repo: string
+  include_issues?: boolean
+  include_prs?: boolean
+  include_closed?: boolean
+  github_token: string
+  loader?: 'graphql' | 'langchain' | 'llamaindex'
+}
+
+export type GithubJobStatus = 'pending' | 'running' | 'done' | 'error'
+
+export type GithubJobState = {
+  job_id: string
+  status: GithubJobStatus
+  repo: string
+  loader: string
+  fetched: number
+  phase: string
+  elapsed_seconds: number
+  resumable: boolean
+  file?: UploadedConsoleFile
+  error?: string
+}
+
+export const startGithubImport = (body: GithubImportRequest): Promise<{ job_id: string, status: GithubJobStatus }> => {
+  return post('/ietf/imports/github', { body })
+}
+
+export const fetchGithubImportStatus = (jobId: string): Promise<GithubJobState> => {
+  return get(`/ietf/imports/github/${jobId}/status`)
+}
+
+export const resumeGithubImport = (jobId: string, github_token: string): Promise<{ job_id: string, status: GithubJobStatus }> => {
+  return post(`/ietf/imports/github/${jobId}/resume`, { body: { github_token } })
+}
+
 export type IetfSyncStatus = 'ready' | 'syncing' | 'not_found'
 
 export type IetfSyncStatusResponse = {

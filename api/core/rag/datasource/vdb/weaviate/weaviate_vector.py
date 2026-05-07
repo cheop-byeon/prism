@@ -107,7 +107,7 @@ class WeaviateVector(BaseVector):
         "email_id": ("email_id", "emailId", "message_id", "messageId", "id"),
         "url": ("url", "source_url", "sourceURL", "link"),
         "subject_line": ("subject_line", "subject-line", "subject", "title"),
-        "date": ("date", "sent_at", "sentAt", "timestamp"),
+        "date": ("date", "sent_at", "sentAt", "timestamp", "created_at"),
         "subject": ("subject",),
     }
     _DISPLAY_METADATA_PROPERTIES: tuple[str, ...] = tuple(_DISPLAY_METADATA_ALIASES.keys())

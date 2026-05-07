@@ -758,6 +758,8 @@ services:
     volumes:
       # Mount the storage directory to the container, for storing user files.
       - ./volumes/app/storage:/app/api/storage
+      # Override vector_factory.py to apply local batch-size and batching fixes.
+      - ../api/core/rag/datasource/vdb/vector_factory.py:/app/api/core/rag/datasource/vdb/vector_factory.py:ro
     networks:
       - ssrf_proxy_network
       - default
@@ -787,6 +789,8 @@ services:
     volumes:
       # Mount the storage directory to the container, for storing user files.
       - ./volumes/app/storage:/app/api/storage
+      # Override vector_factory.py to apply local batch-size and batching fixes.
+      - ../api/core/rag/datasource/vdb/vector_factory.py:/app/api/core/rag/datasource/vdb/vector_factory.py:ro
     networks:
       - ssrf_proxy_network
       - default

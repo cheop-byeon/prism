@@ -8,6 +8,8 @@ Pydantic models and the upload orchestration lives in `IetfImportService`.
 
 from __future__ import annotations
 
+import uuid
+from datetime import UTC, datetime
 from typing import Literal
 
 from flask import request
@@ -17,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, PositiveInt, field_validator,
 from controllers.console import console_ns
 from libs.login import login_required
 from services.ietf_import_service import IetfImportService
+from tasks.github_import_task import create_pending_job, get_job_state, github_import_task
 
 
 class IetfMailarchiveImportRequest(BaseModel):
@@ -89,6 +92,27 @@ class IetfRfcImportRequest(BaseModel):
             normalized.append(upper)
 
         return normalized
+
+
+class GithubImportRequest(BaseModel):
+    """Input payload for importing issues and PR comments from a GitHub repository."""
+
+    repo: str = Field(..., min_length=1, description="Repository in 'owner/repo' format")
+    include_issues: bool = Field(default=True, description="Include issues")
+    include_prs: bool = Field(default=True, description="Include pull requests")
+    include_closed: bool = Field(default=True, description="Include closed/merged items")
+    github_token: str = Field(..., min_length=1, description="GitHub personal access token with repo or public_repo scope")  # noqa: E501
+    loader: Literal["graphql", "langchain", "llamaindex"] = Field(default="graphql", description="Loader backend to use")  # noqa: E501
+
+    model_config = ConfigDict(extra="forbid")
+
+    @field_validator("repo")
+    @classmethod
+    def validate_repo_format(cls, value: str) -> str:
+        value = value.strip()
+        if "/" not in value or value.count("/") != 1:
+            raise ValueError("repo must be in 'owner/repo' format")
+        return value
 
 
 class IetfRfcSuggestionQuery(BaseModel):
@@ -256,3 +280,105 @@ class IetfRfcSuggestionsApi(Resource):
         query = IetfRfcSuggestionQuery.model_validate(request.args.to_dict(flat=True))  # type: ignore[arg-type]
         suggestions = IetfImportService.get_rfc_suggestions(query=query.query, limit=query.limit)
         return {"suggestions": suggestions}
+
+
+@console_ns.route("/ietf/imports/github")
+class GithubImportApi(Resource):
+    @login_required
+    def post(self):
+        from libs.login import current_account_with_tenant
+        payload = GithubImportRequest.model_validate(console_ns.payload)
+        account, _ = current_account_with_tenant()
+        job_id = str(uuid.uuid4())
+        create_pending_job(
+            job_id,
+            repo=payload.repo,
+            loader=payload.loader,
+            include_issues=payload.include_issues,
+            include_prs=payload.include_prs,
+            include_closed=payload.include_closed,
+        )
+        github_import_task.delay(
+            job_id=job_id,
+            repo=payload.repo,
+            include_issues=payload.include_issues,
+            include_prs=payload.include_prs,
+            include_closed=payload.include_closed,
+            github_token=payload.github_token,
+            loader=payload.loader,
+            account_id=str(account.id),
+        )
+        return {"job_id": job_id, "status": "pending"}, 202
+
+
+_STALE_SECONDS = 600  # 10 minutes without a heartbeat → worker likely died
+
+
+@console_ns.route("/ietf/imports/github/<string:job_id>/status")
+class GithubImportStatusApi(Resource):
+    @login_required
+    def get(self, job_id: str):
+        state = get_job_state(job_id)
+        if not state:
+            return {"error": "Job not found"}, 404
+        # Detect a stale running job: heartbeat stopped → worker crashed
+        if state.get("status") == "running":
+            updated_raw = state.get("updated_at") or state.get("started_at", "")
+            try:
+                updated_at = datetime.fromisoformat(updated_raw)
+                if updated_at.tzinfo is None:
+                    updated_at = updated_at.replace(tzinfo=UTC)
+                idle = (datetime.now(UTC) - updated_at).total_seconds()
+                if idle > _STALE_SECONDS:
+                    state["status"] = "error"
+                    state["error"] = (
+                        "The import worker stopped unexpectedly "
+                        "(server may have restarted). You can resume the import."
+                    )
+                    state["resumable"] = bool(state.get("checkpoint"))
+            except (ValueError, TypeError):
+                pass
+        return state, 200
+
+
+class GithubResumeRequest(BaseModel):
+    github_token: str = Field(..., min_length=1)
+    model_config = ConfigDict(extra="forbid")
+
+
+@console_ns.route("/ietf/imports/github/<string:job_id>/resume")
+class GithubImportResumeApi(Resource):
+    @login_required
+    def post(self, job_id: str):
+        from libs.login import current_account_with_tenant
+        state = get_job_state(job_id)
+        if not state:
+            return {"error": "Job not found"}, 404
+        if state.get("status") != "error" or not state.get("resumable"):
+            return {"error": "Job is not resumable"}, 400
+        resume_payload = GithubResumeRequest.model_validate(console_ns.payload)
+        account, _ = current_account_with_tenant()
+        new_job_id = str(uuid.uuid4())
+        checkpoint = state.get("checkpoint") or {}
+        initial_fetched = checkpoint.get("fetched", 0)
+        create_pending_job(
+            new_job_id,
+            repo=state["repo"],
+            loader=state["loader"],
+            include_issues=state.get("include_issues", True),
+            include_prs=state.get("include_prs", True),
+            include_closed=state.get("include_closed", True),
+            initial_fetched=initial_fetched,
+        )
+        github_import_task.delay(
+            job_id=new_job_id,
+            repo=state["repo"],
+            include_issues=state.get("include_issues", True),
+            include_prs=state.get("include_prs", True),
+            include_closed=state.get("include_closed", True),
+            github_token=resume_payload.github_token,
+            loader=state["loader"],
+            account_id=str(account.id),
+            checkpoint=state.get("checkpoint"),
+        )
+        return {"job_id": new_job_id, "status": "pending"}, 202
