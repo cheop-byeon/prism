@@ -988,14 +988,7 @@ export const DEFAULT_WEIGHTED_SCORE = {
 
 export type ChildChunkType = 'automatic' | 'customized'
 
-export type ChunkMetadata = Partial<{
-  email_id: string
-  url: string
-  subject_line: string
-  subject: string
-  id: string
-  date: string
-}>
+export type ChunkMetadata = Record<string, string | null | undefined>
 
 export type ChildChunkDetail = {
   id: string

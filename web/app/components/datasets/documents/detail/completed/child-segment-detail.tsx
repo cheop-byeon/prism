@@ -24,6 +24,8 @@ type IChildSegmentDetailProps = {
   docForm: ChunkingMode
 }
 
+const SKIP_METADATA_KEYS = new Set(['source', 'line', 'content', 'record_type', 'subject_line', 'email_id'])
+
 /**
  * Show all the contents of the segment
  */
@@ -54,18 +56,30 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
   )
 
   const metadata = metadataResponse?.data?.metadata || {}
-  const resolvedMetadata = {
-    url: metadata.url,
-    subject: metadata.subject_line || metadata.subject,
-    id: metadata.email_id || metadata.id,
-    date: metadata.date,
+  const normalizedMetadata: Record<string, string | null | undefined> = {
+    ...metadata,
+    ...(metadata.subject_line && !metadata.subject ? { subject: metadata.subject_line } : {}),
+    ...(metadata.email_id && !metadata.id ? { id: metadata.email_id } : {}),
   }
-  const metadataItems = [
-    { key: 'url', label: t('segment.metadataUrl', { ns: 'datasetDocuments' }) },
-    { key: 'subject', label: t('segment.metadataSubject', { ns: 'datasetDocuments' }) },
-    { key: 'id', label: t('segment.metadataId', { ns: 'datasetDocuments' }) },
-    { key: 'date', label: t('segment.metadataDate', { ns: 'datasetDocuments' }) },
-  ]
+  const metadataFieldLabels: Record<string, string> = {
+    url: t('segment.metadataUrl', { ns: 'datasetDocuments' }),
+    subject: t('segment.metadataSubject', { ns: 'datasetDocuments' }),
+    id: t('segment.metadataId', { ns: 'datasetDocuments' }),
+    date: t('segment.metadataDate', { ns: 'datasetDocuments' }),
+    draft_name: t('segment.metadataDraftName', { ns: 'datasetDocuments' }),
+    from_rev: t('segment.metadataFromRev', { ns: 'datasetDocuments' }),
+    to_rev: t('segment.metadataToRev', { ns: 'datasetDocuments' }),
+    section_id: t('segment.metadataSectionId', { ns: 'datasetDocuments' }),
+    section_title: t('segment.metadataSectionTitle', { ns: 'datasetDocuments' }),
+    change_type: t('segment.metadataChangeType', { ns: 'datasetDocuments' }),
+  }
+  const metadataItems = Object.entries(normalizedMetadata)
+    .filter(([key, value]) => !SKIP_METADATA_KEYS.has(key) && value != null && value !== '')
+    .map(([key, value]) => ({
+      key,
+      label: metadataFieldLabels[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      value: String(value),
+    }))
 
   eventEmitter?.useSubscription((v) => {
     if (v === 'update-child-segment')
@@ -143,12 +157,14 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
           <div className="rounded-xl border border-components-panel-border bg-components-panel-bg px-3 py-2">
             <div className="mb-2 text-text-tertiary system-xs-semibold-uppercase">{t('segment.metadata', { ns: 'datasetDocuments' })}</div>
             <div className="space-y-2">
-              {metadataItems.map(item => (
-                <div key={item.key} className="space-y-1">
-                  <div className="text-text-tertiary system-2xs-medium-uppercase">{item.label}</div>
-                  <div className="break-all text-text-primary system-xs-regular">{resolvedMetadata[item.key as keyof typeof resolvedMetadata] || '-'}</div>
-                </div>
-              ))}
+              {metadataItems.length === 0
+                ? <div className="text-text-tertiary system-xs-regular">-</div>
+                : metadataItems.map(item => (
+                    <div key={item.key} className="space-y-1">
+                      <div className="text-text-tertiary system-2xs-medium-uppercase">{item.label}</div>
+                      <div className="break-all text-text-primary system-xs-regular">{item.value}</div>
+                    </div>
+                  ))}
             </div>
           </div>
         </div>
