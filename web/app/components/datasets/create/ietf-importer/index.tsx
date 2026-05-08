@@ -4,6 +4,7 @@ import type { CustomFile, FileItem } from '@/models/datasets'
 import type {
   GithubJobState,
   IetfDraftImportRequest,
+  IetfDraftRelations,
   IetfFormatInfo,
   IetfPreprocessResponse,
   IetfRfcImportRequest,
@@ -24,7 +25,7 @@ import {
   downloadAndPreprocessMailarchiveYears,
   fetchGithubImportStatus,
   fetchIetfDraftFormats,
-  fetchIetfDraftPredecessors,
+  fetchIetfDraftRelations,
   fetchIetfMailarchiveSyncStatus,
   fetchIetfMailingLists,
   fetchIetfRfcFormats,
@@ -202,8 +203,8 @@ function IetfImporter({
   const [selectedWgDoc, setSelectedWgDoc] = useState<IetfWgDocument | null>(null)
   const [showWgDocDropdown, setShowWgDocDropdown] = useState(false)
   const [wgDocFilter, setWgDocFilter] = useState('')
-  const [wgDocPredecessors, setWgDocPredecessors] = useState<string[]>([])
-  const [wgDocPredecessorsLoading, setWgDocPredecessorsLoading] = useState(false)
+  const [wgDocRelations, setWgDocRelations] = useState<IetfDraftRelations | null>(null)
+  const [wgDocRelationsLoading, setWgDocRelationsLoading] = useState(false)
   const keywordAutoFilledRef = useRef(false)
   const wgDocDropdownRef = useRef<HTMLDivElement>(null)
   const [rfcSuggestions, setRfcSuggestions] = useState<IetfRfcSuggestion[]>([])
@@ -269,8 +270,8 @@ function IetfImporter({
       setSelectedWgDoc(null)
       setWgDocuments([])
       setWgDocFilter('')
-      setWgDocPredecessors([])
-      setWgDocPredecessorsLoading(false)
+      setWgDocRelations(null)
+      setWgDocRelationsLoading(false)
     })
     if (!wg || mode !== 'mailarchive')
       return
@@ -591,28 +592,26 @@ function IetfImporter({
     setSelectedWgDoc(doc)
     setWgDocFilter('')
     setShowWgDocDropdown(false)
-    setWgDocPredecessors([])
+    setWgDocRelations(null)
 
-    // Immediately auto-fill with what we have (no predecessor yet)
-    const buildKeyword = (predecessors: string[]) => {
-      const parts: string[] = [doc.name, ...predecessors]
-      if (doc.rfc_number)
-        parts.push(`RFC${doc.rfc_number}`)
-      return parts.join(' OR ')
-    }
+    // Immediately auto-fill with the draft name (relations not yet loaded)
     keywordAutoFilledRef.current = true
-    setMailarchiveForm(prev => ({ ...prev, subject: buildKeyword([]) }))
+    setMailarchiveForm(prev => ({ ...prev, subject: doc.name }))
 
-    // Fetch predecessor drafts and update keyword when loaded
-    setWgDocPredecessorsLoading(true)
-    fetchIetfDraftPredecessors(doc.name)
+    // Fetch relations (predecessors + RFC number) and update keyword when loaded
+    setWgDocRelationsLoading(true)
+    fetchIetfDraftRelations(doc.name)
       .then((result) => {
-        setWgDocPredecessors(result.predecessors)
-        if (keywordAutoFilledRef.current)
-          setMailarchiveForm(prev => ({ ...prev, subject: buildKeyword(result.predecessors) }))
+        setWgDocRelations(result)
+        if (keywordAutoFilledRef.current) {
+          const parts: string[] = [doc.name, ...result.predecessors]
+          if (result.rfc_number)
+            parts.push(`RFC${result.rfc_number}`)
+          setMailarchiveForm(prev => ({ ...prev, subject: parts.join(' OR ') }))
+        }
       })
-      .catch(() => setWgDocPredecessors([]))
-      .finally(() => setWgDocPredecessorsLoading(false))
+      .catch(() => setWgDocRelations({ predecessors: [], rfc_number: null }))
+      .finally(() => setWgDocRelationsLoading(false))
   }
 
   const handleStartSync = async () => {
@@ -959,11 +958,7 @@ function IetfImporter({
                                 const q = wgDocFilter.toLowerCase()
                                 if (!q)
                                   return true
-                                return (
-                                  doc.name.toLowerCase().includes(q)
-                                  || doc.title.toLowerCase().includes(q)
-                                  || (doc.rfc_number != null && `rfc${doc.rfc_number}`.includes(q))
-                                )
+                                return doc.name.toLowerCase().includes(q) || doc.title.toLowerCase().includes(q)
                               })
                               .map(doc => (
                                 <div
@@ -971,17 +966,8 @@ function IetfImporter({
                                   onClick={() => handleWgDocSelect(doc)}
                                   className="cursor-pointer px-3 py-2 text-sm hover:bg-components-panel-border"
                                 >
-                                  <div className="font-medium text-text-primary">
-                                    {doc.is_rfc ? `RFC ${doc.rfc_number}` : doc.name}
-                                  </div>
-                                  <div className="truncate text-xs text-text-tertiary">
-                                    {doc.title}
-                                    {doc.is_rfc && (
-                                      <span className="ml-1 opacity-60">
-                                        {`(was ${doc.name})`}
-                                      </span>
-                                    )}
-                                  </div>
+                                  <div className="font-medium text-text-primary">{doc.name}</div>
+                                  <div className="truncate text-xs text-text-tertiary">{doc.title}</div>
                                 </div>
                               ))}
                           </div>
@@ -1001,8 +987,11 @@ function IetfImporter({
                               <div className="text-[10px] text-text-tertiary">
                                 {t('stepOne.ietf.wgDocWas', { ns: 'datasetCreation' })}
                               </div>
-                              <div title={wgDocPredecessors[0] ?? ''} className="truncate text-xs font-medium text-text-secondary">
-                                {wgDocPredecessorsLoading ? '…' : (wgDocPredecessors[0] ?? '—')}
+                              <div
+                                title={wgDocRelations?.predecessors[0] ?? ''}
+                                className="truncate text-xs font-medium text-text-secondary"
+                              >
+                                {wgDocRelationsLoading ? '…' : (wgDocRelations?.predecessors[0] ?? '—')}
                               </div>
                             </div>
                             <div className="min-w-0">
@@ -1010,7 +999,7 @@ function IetfImporter({
                                 {t('stepOne.ietf.wgDocPublishedAs', { ns: 'datasetCreation' })}
                               </div>
                               <div className="text-xs font-medium text-text-secondary">
-                                {selectedWgDoc.rfc_number ? `RFC ${selectedWgDoc.rfc_number}` : '—'}
+                                {wgDocRelationsLoading ? '…' : (wgDocRelations?.rfc_number ? `RFC ${wgDocRelations.rfc_number}` : '—')}
                               </div>
                             </div>
                           </div>

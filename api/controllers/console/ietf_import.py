@@ -273,13 +273,12 @@ class IetfDraftNameQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-@console_ns.route("/ietf/draft/predecessors")
-class IetfDraftPredecessorsApi(Resource):
+@console_ns.route("/ietf/draft/relations")
+class IetfDraftRelationsApi(Resource):
     @login_required
     def get(self):
         query = IetfDraftNameQuery.model_validate(request.args.to_dict(flat=True))  # type: ignore[arg-type]
-        predecessors = IetfImportService.get_draft_predecessors(query.draft_name)
-        return {"predecessors": predecessors}
+        return IetfImportService.get_draft_relations(query.draft_name)
 
 
 @console_ns.route("/ietf/mailarchive/<string:list_name>/status")

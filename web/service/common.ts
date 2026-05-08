@@ -530,7 +530,10 @@ export const fetchIetfMailingLists = (): Promise<{ lists: string[] }> => {
 export type IetfWgDocument = {
   name: string
   title: string
-  is_rfc: boolean
+}
+
+export type IetfDraftRelations = {
+  predecessors: string[]
   rfc_number: number | null
 }
 
@@ -538,8 +541,8 @@ export const fetchIetfWgDocuments = (wgAcronym: string): Promise<{ documents: Ie
   return get<{ documents: IetfWgDocument[] }>(`/ietf/wg/${encodeURIComponent(wgAcronym)}/documents`)
 }
 
-export const fetchIetfDraftPredecessors = (draftName: string): Promise<{ predecessors: string[] }> => {
-  return get<{ predecessors: string[] }>('/ietf/draft/predecessors', { params: { draft_name: draftName } })
+export const fetchIetfDraftRelations = (draftName: string): Promise<IetfDraftRelations> => {
+  return get<IetfDraftRelations>('/ietf/draft/relations', { params: { draft_name: draftName } })
 }
 
 export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {

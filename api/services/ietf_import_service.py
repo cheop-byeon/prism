@@ -22,6 +22,7 @@ import email as email_lib
 import email.header as email_header_lib
 import json
 import logging
+import operator
 import re
 import string
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -376,37 +377,56 @@ class IetfImportService:
             raise RemoteFileUploadError("IETF data service returned an invalid response") from exc
 
     @staticmethod
-    def get_draft_predecessors(draft_name: str) -> list[str]:
-        """Return names of drafts that *draft_name* replaces, via IETF Datatracker."""
+    def get_draft_relations(draft_name: str) -> dict:
+        """Return predecessor drafts and published RFC number for a given draft.
 
-        url = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
-        params = {
-            "relationship": "/api/v1/name/docrelationshipname/replaces/",
-            "source__name": draft_name,
-            "format": "json",
-            "limit": 20,
-        }
+        Two Datatracker queries:
+        1. source=<draft>, relationship=replaces → targets are predecessor drafts ("was")
+        2. target=<draft>, relationship=replaces → sources starting with "rfc" are the published RFC
+        """
+
+        _RDOC_URL = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
+        predecessors: list[str] = []
+        rfc_number: int | None = None
+
         try:
             with httpx.Client(timeout=10.0) as client:
-                response = client.get(url, params=params)
-                response.raise_for_status()
-                data = response.json()
-        except Exception as exc:
-            logger.warning("Datatracker relateddocument request failed for '%s': %s", draft_name, exc)
-            return []
+                # Predecessors: drafts this document replaced
+                resp = client.get(_RDOC_URL, params={
+                    "relationship__slug": "replaces",
+                    "source__name": draft_name,
+                    "format": "json",
+                    "limit": 20,
+                })
+                resp.raise_for_status()
+                for obj in resp.json().get("objects", []):
+                    target_uri: str = obj.get("target", "") or ""
+                    name = target_uri.rstrip("/").split("/")[-1]
+                    if name.startswith("draft-"):
+                        predecessors.append(name)
 
-        predecessors: list[str] = []
-        for obj in data.get("objects", []):
-            # target URI is like /api/v1/doc/document/draft-iyengar-quic-transport/
-            target_uri: str = obj.get("target", "") or ""
-            name = target_uri.rstrip("/").split("/")[-1]
-            if name and name.startswith("draft-"):
-                predecessors.append(name)
-        return predecessors
+                # RFC: what document replaced this draft (an rfc* name means it was published)
+                resp = client.get(_RDOC_URL, params={
+                    "relationship__slug": "replaces",
+                    "target__name": draft_name,
+                    "format": "json",
+                    "limit": 20,
+                })
+                resp.raise_for_status()
+                for obj in resp.json().get("objects", []):
+                    source_uri: str = obj.get("source", "") or ""
+                    src_name = source_uri.rstrip("/").split("/")[-1]
+                    if src_name.startswith("rfc") and src_name[3:].isdigit():
+                        rfc_number = int(src_name[3:])
+                        break
+        except Exception as exc:
+            logger.warning("Datatracker relations request failed for '%s': %s", draft_name, exc)
+
+        return {"predecessors": predecessors, "rfc_number": rfc_number}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:
-        """Fetch Internet-Drafts (and their RFC status) for a WG from IETF Datatracker."""
+        """Fetch Internet-Drafts for a WG from IETF Datatracker."""
 
         _DATATRACKER_URL = "https://datatracker.ietf.org/api/v1/doc/document/"
         params: dict = {
@@ -428,20 +448,7 @@ class IetfImportService:
                         name: str = obj.get("name", "")
                         if not name:
                             continue
-                        rfc_uri: str | None = obj.get("rfc") or None
-                        rfc_number: int | None = None
-                        if rfc_uri:
-                            last = rfc_uri.rstrip("/").split("/")[-1]
-                            if last.startswith("rfc") and last[3:].isdigit():
-                                rfc_number = int(last[3:])
-                        documents.append(
-                            {
-                                "name": name,
-                                "title": obj.get("title", ""),
-                                "is_rfc": rfc_uri is not None,
-                                "rfc_number": rfc_number,
-                            }
-                        )
+                        documents.append({"name": name, "title": obj.get("title", "")})
                     meta = data.get("meta", {})
                     if not meta.get("next"):
                         break
@@ -453,7 +460,7 @@ class IetfImportService:
             logger.warning("IETF Datatracker response parse error for WG '%s': %s", wg_acronym, exc)
             raise RemoteFileUploadError("IETF Datatracker returned an unexpected response") from exc
 
-        documents.sort(key=lambda d: (0 if d["is_rfc"] else 1, -(d["rfc_number"] or 0), d["name"]))
+        documents.sort(key=operator.itemgetter("name"))
         return documents
 
     @staticmethod
