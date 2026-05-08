@@ -529,6 +529,181 @@ class IetfImportService:
         documents.sort(key=operator.itemgetter("name"))
         return documents
 
+    # ------------------------------------------------------------------ #
+    # Draft evolution (section-level diff chain across all revisions)      #
+    # ------------------------------------------------------------------ #
+
+    _SECTION_RE = re.compile(r'^(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*)\.?\s{2,}(\S.*)$')
+    _PAGE_BREAK_RE = re.compile(r'\x0c[^\n]*\n(?:[^\n]*\n){0,2}', re.MULTILINE)
+
+    @staticmethod
+    def _parse_sections(text: str) -> dict[str, tuple[str, str]]:
+        """Split IETF plain-text into {section_id: (title, body)}.
+
+        Headings are recognised by the pattern ``N.M.  Title`` at column 0.
+        Page-break artifacts (form-feed + running header/footer) are stripped
+        first so they do not appear as spurious section headings.
+        """
+        text = IetfImportService._PAGE_BREAK_RE.sub('\n', text)
+        sections: dict[str, tuple[str, str]] = {}
+        current_id: str | None = None
+        current_title = ''
+        current_lines: list[str] = []
+
+        for line in text.splitlines():
+            m = IetfImportService._SECTION_RE.match(line)
+            if m:
+                if current_id is not None:
+                    sections[current_id] = (current_title, '\n'.join(current_lines).strip())
+                current_id = m.group(1).rstrip('.')
+                current_title = m.group(2).strip()
+                current_lines = []
+            elif current_id is not None:
+                current_lines.append(line)
+
+        if current_id is not None:
+            sections[current_id] = (current_title, '\n'.join(current_lines).strip())
+        return sections
+
+    @staticmethod
+    def _diff_version_pair(
+        old: dict[str, tuple[str, str]],
+        new: dict[str, tuple[str, str]],
+        from_rev: str,
+        to_rev: str,
+        draft_name: str,
+    ) -> list[dict]:
+        """Return change records for every section that differs between two revisions."""
+        records: list[dict] = []
+        for sec_id in sorted(set(old) | set(new)):
+            old_entry = old.get(sec_id)
+            new_entry = new.get(sec_id)
+            if old_entry is None and new_entry is not None:
+                change_type = "added"
+            elif old_entry is not None and new_entry is None:
+                change_type = "removed"
+            elif old_entry is not None and new_entry is not None:
+                if ' '.join(old_entry[1].split()) == ' '.join(new_entry[1].split()):
+                    continue  # identical text — skip
+                change_type = "modified"
+            else:
+                continue
+            records.append({
+                "draft_name": draft_name,
+                "from_rev": from_rev,
+                "to_rev": to_rev,
+                "section_id": sec_id,
+                "section_title": (new_entry or old_entry)[0],  # type: ignore[index]
+                "change_type": change_type,
+                "old_text": old_entry[1] if old_entry else None,
+                "new_text": new_entry[1] if new_entry else None,
+            })
+        return records
+
+    @staticmethod
+    def generate_draft_evolution(draft_name: str) -> tuple[dict, int]:
+        """Fetch every plain-text revision of a draft, diff them section by
+        section, and upload the resulting change-log as a JSONL dataset file.
+
+        Each JSONL record describes one section that changed between two
+        consecutive revisions:
+          draft_name, from_rev, to_rev, section_id, section_title,
+          change_type (added|removed|modified), old_text, new_text
+        """
+        _ARCHIVE = "https://www.ietf.org/archive/id/"
+        _DATATRACKER = "https://datatracker.ietf.org/api/v1/doc/document/"
+
+        # Determine current revision from Datatracker
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(f"{_DATATRACKER}{draft_name}/", params={"format": "json"})
+                resp.raise_for_status()
+                max_rev = int(resp.json().get("rev", "0"))
+        except Exception as exc:
+            raise RemoteFileUploadError(
+                f"Could not retrieve revision info for '{draft_name}' from Datatracker"
+            ) from exc
+
+        revisions = [f"{i:02d}" for i in range(max_rev + 1)]
+
+        # Fetch all revision texts in parallel
+        def _fetch(rev: str) -> tuple[str, str | None]:
+            url = f"{_ARCHIVE}{draft_name}-{rev}.txt"
+            try:
+                with httpx.Client(timeout=30.0) as c:
+                    r = c.get(url)
+                    if r.status_code == 200:
+                        return rev, r.text
+            except Exception as exc:
+                logger.debug("Could not fetch %s: %s", url, exc)
+            return rev, None
+
+        version_texts: dict[str, str] = {}
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            for rev, text in pool.map(_fetch, revisions):
+                if text:
+                    version_texts[rev] = text
+
+        if len(version_texts) < 2:
+            raise RemoteFileUploadError(
+                f"Could not fetch enough revisions of '{draft_name}' to produce a diff"
+            )
+
+        # Parse each version into sections and diff consecutive pairs
+        sorted_revs = sorted(version_texts)
+        parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
+
+        all_changes: list[dict] = []
+        for from_rev, to_rev in zip(sorted_revs, sorted_revs[1:]):
+            all_changes.extend(
+                IetfImportService._diff_version_pair(
+                    parsed[from_rev], parsed[to_rev], from_rev, to_rev, draft_name
+                )
+            )
+
+        # Prepend a summary header record
+        header: dict = {
+            "record_type": "summary",
+            "draft_name": draft_name,
+            "revisions_compared": len(sorted_revs),
+            "first_rev": sorted_revs[0],
+            "last_rev": sorted_revs[-1],
+            "total_changes": len(all_changes),
+        }
+        records = [header, *all_changes]
+
+        jsonl_bytes = '\n'.join(json.dumps(r) for r in records).encode()
+        filename = f"{draft_name}-evolution.jsonl"
+
+        try:
+            user, _ = current_account_with_tenant()
+            upload_file = FileService(db.engine).upload_file(
+                filename=filename,
+                content=jsonl_bytes,
+                mimetype="application/jsonlines",
+                user=user,
+                source="datasets",
+                source_url=f"ietfdata://evolution/{draft_name}",
+            )
+        except services.errors.file.FileTooLargeError as exc:
+            raise FileTooLargeError(exc.description)
+        except services.errors.file.UnsupportedFileTypeError:
+            raise UnsupportedFileTypeError()
+
+        return (
+            FileWithSignedUrl(
+                id=upload_file.id,
+                name=upload_file.name,
+                size=upload_file.size,
+                extension=upload_file.extension,
+                url=file_helpers.get_signed_file_url(upload_file_id=upload_file.id),
+                mime_type=upload_file.mime_type,
+                created_by=upload_file.created_by,
+                created_at=int(upload_file.created_at.timestamp()),
+            ).model_dump(mode="json"),
+            201,
+        )
+
     @staticmethod
     def _request_sidecar(path: str, payload: dict) -> IetfSidecarFileResponse:
         """Call the sidecar and validate its file payload response."""

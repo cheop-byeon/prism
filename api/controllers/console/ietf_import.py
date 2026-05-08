@@ -235,6 +235,22 @@ class IetfDraftImportApi(Resource):
         return IetfImportService.import_drafts({"draft_names": payload.draft_names, "format": payload.format})
 
 
+class IetfDraftEvolutionRequest(BaseModel):
+    """Input payload for generating a section-level diff chain across all draft revisions."""
+
+    draft_name: str = Field(..., min_length=1, description="Base draft name, e.g. draft-ietf-quic-transport")
+
+    model_config = ConfigDict(extra="forbid")
+
+
+@console_ns.route("/ietf/imports/draft-evolution")
+class IetfDraftEvolutionApi(Resource):
+    @login_required
+    def post(self):
+        payload = IetfDraftEvolutionRequest.model_validate(console_ns.payload)
+        return IetfImportService.generate_draft_evolution(payload.draft_name)
+
+
 @console_ns.route("/ietf/rfcs/formats")
 class IetfRfcFormatsApi(Resource):
     @login_required

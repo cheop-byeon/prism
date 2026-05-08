@@ -548,6 +548,10 @@ export const fetchIetfDraftRelations = (draftName: string): Promise<IetfDraftRel
   return get<IetfDraftRelations>('/ietf/draft/relations', { params: { draft_name: draftName } })
 }
 
+export const importIetfDraftEvolution = (draftName: string): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/draft-evolution', { body: { draft_name: draftName } })
+}
+
 export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {
   return get<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/status`)
 }
