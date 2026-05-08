@@ -378,34 +378,49 @@ class IetfImportService:
 
     @staticmethod
     def get_draft_relations(draft_name: str) -> dict:
-        """Return predecessor drafts ("was") for a given draft via IETF Datatracker.
+        """Return 'replaces' and 'replaced_by' relationships for a draft.
 
-        Queries relateddocument with relationship=replaces where source=<draft>;
-        the returned targets are the predecessor drafts this one replaced.
-        The RFC number is resolved separately in get_wg_documents via title matching.
+        replaces:     drafts this one supersedes (source=this, relationship=replaces)
+        replaced_by:  drafts/RFCs that supersede this one (target=this, relationship=replaces)
+
+        Both queries run in parallel against the IETF Datatracker relateddocument API.
         """
 
         _RDOC_URL = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
-        predecessors: list[str] = []
+        replaces: list[str] = []
+        replaced_by: list[str] = []
+
+        def _fetch(client: httpx.Client, params: dict, uri_field: str) -> list[str]:
+            try:
+                resp = client.get(_RDOC_URL, params=params)
+                resp.raise_for_status()
+                names: list[str] = []
+                for obj in resp.json().get("objects", []):
+                    uri: str = obj.get(uri_field, "") or ""
+                    name = uri.rstrip("/").split("/")[-1]
+                    if name:
+                        names.append(name)
+                return names
+            except Exception as exc:
+                logger.warning("Datatracker relations sub-request failed: %s", exc)
+                return []
 
         try:
             with httpx.Client(timeout=10.0) as client:
-                resp = client.get(_RDOC_URL, params={
-                    "relationship__slug": "replaces",
-                    "source__name": draft_name,
-                    "format": "json",
-                    "limit": 50,
-                })
-                resp.raise_for_status()
-                for obj in resp.json().get("objects", []):
-                    target_uri: str = obj.get("target", "") or ""
-                    name = target_uri.rstrip("/").split("/")[-1]
-                    if name.startswith("draft-"):
-                        predecessors.append(name)
+                base_params = {"relationship__slug": "replaces", "format": "json", "limit": 50}
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    f_replaces = pool.submit(
+                        _fetch, client, {**base_params, "source__name": draft_name}, "target"
+                    )
+                    f_replaced_by = pool.submit(
+                        _fetch, client, {**base_params, "target__name": draft_name}, "source"
+                    )
+                    replaces = f_replaces.result()
+                    replaced_by = f_replaced_by.result()
         except Exception as exc:
             logger.warning("Datatracker relations request failed for '%s': %s", draft_name, exc)
 
-        return {"predecessors": predecessors}
+        return {"replaces": replaces, "replaced_by": replaced_by}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:

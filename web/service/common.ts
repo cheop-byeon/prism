@@ -534,7 +534,8 @@ export type IetfWgDocument = {
 }
 
 export type IetfDraftRelations = {
-  predecessors: string[]
+  replaces: string[]
+  replaced_by: string[]
 }
 
 export const fetchIetfWgDocuments = (wgAcronym: string): Promise<{ documents: IetfWgDocument[] }> => {
