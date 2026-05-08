@@ -378,19 +378,24 @@ class IetfImportService:
 
     @staticmethod
     def get_draft_relations(draft_name: str) -> dict:
-        """Return 'replaces' and 'replaced_by' relationships for a draft.
+        """Return relationship and date information for a draft via IETF Datatracker.
 
-        replaces:     drafts this one supersedes (source=this, relationship=replaces)
-        replaced_by:  drafts/RFCs that supersede this one (target=this, relationship=replaces)
+        replaces:       drafts this one supersedes (source=this, relationship=replaces)
+        replaced_by:    drafts/RFCs that supersede this one (target=this, relationship=replaces)
+        first_rev_date: ISO datetime of the earliest new_revision event (first submission)
+        last_rev_date:  ISO datetime of the latest new_revision event (last published version)
 
-        Both queries run in parallel against the IETF Datatracker relateddocument API.
+        All three queries run in parallel.
         """
 
         _RDOC_URL = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
+        _EVENT_URL = "https://datatracker.ietf.org/api/v1/doc/docevent/"
         replaces: list[str] = []
         replaced_by: list[str] = []
+        first_rev_date: str | None = None
+        last_rev_date: str | None = None
 
-        def _fetch(client: httpx.Client, params: dict, uri_field: str) -> list[str]:
+        def _fetch_related(client: httpx.Client, params: dict, uri_field: str) -> list[str]:
             try:
                 resp = client.get(_RDOC_URL, params=params)
                 resp.raise_for_status()
@@ -405,22 +410,47 @@ class IetfImportService:
                 logger.warning("Datatracker relations sub-request failed: %s", exc)
                 return []
 
+        def _fetch_dates(client: httpx.Client) -> tuple[str | None, str | None]:
+            try:
+                resp = client.get(_EVENT_URL, params={
+                    "doc__name": draft_name,
+                    "type": "new_revision",
+                    "format": "json",
+                    "order_by": "time",
+                    "limit": 200,
+                })
+                resp.raise_for_status()
+                times = [obj["time"] for obj in resp.json().get("objects", []) if obj.get("time")]
+                if not times:
+                    return None, None
+                return times[0], times[-1]
+            except Exception as exc:
+                logger.warning("Datatracker docevent request failed for '%s': %s", draft_name, exc)
+                return None, None
+
         try:
             with httpx.Client(timeout=10.0) as client:
                 base_params = {"relationship__slug": "replaces", "format": "json", "limit": 50}
-                with ThreadPoolExecutor(max_workers=2) as pool:
+                with ThreadPoolExecutor(max_workers=3) as pool:
                     f_replaces = pool.submit(
-                        _fetch, client, {**base_params, "source__name": draft_name}, "target"
+                        _fetch_related, client, {**base_params, "source__name": draft_name}, "target"
                     )
                     f_replaced_by = pool.submit(
-                        _fetch, client, {**base_params, "target__name": draft_name}, "source"
+                        _fetch_related, client, {**base_params, "target__name": draft_name}, "source"
                     )
+                    f_dates = pool.submit(_fetch_dates, client)
                     replaces = f_replaces.result()
                     replaced_by = f_replaced_by.result()
+                    first_rev_date, last_rev_date = f_dates.result()
         except Exception as exc:
             logger.warning("Datatracker relations request failed for '%s': %s", draft_name, exc)
 
-        return {"replaces": replaces, "replaced_by": replaced_by}
+        return {
+            "replaces": replaces,
+            "replaced_by": replaced_by,
+            "first_rev_date": first_rev_date,
+            "last_rev_date": last_rev_date,
+        }
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:

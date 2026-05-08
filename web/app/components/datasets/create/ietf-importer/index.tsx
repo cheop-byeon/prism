@@ -596,6 +596,15 @@ function IetfImporter({
     return [...new Set(parts)].join(' OR ')
   }
 
+  const applyRelations = (doc: IetfWgDocument, relations: IetfDraftRelations) => {
+    const updates: Partial<MailarchiveFormState> = { subject: buildKeyword(doc, relations) }
+    if (relations.first_rev_date)
+      updates.sentAfter = `${relations.first_rev_date.split('T')[0]}T00:00:00`
+    if (relations.last_rev_date)
+      updates.sentBefore = `${relations.last_rev_date.split('T')[0]}T23:59:59`
+    setMailarchiveForm(prev => ({ ...prev, ...updates }))
+  }
+
   const handleWgDocSelect = (doc: IetfWgDocument) => {
     setSelectedWgDoc(doc)
     setWgDocFilter('')
@@ -606,7 +615,7 @@ function IetfImporter({
     const cached = wgDocRelationsCacheRef.current.get(doc.name)
     if (cached) {
       setWgDocRelations(cached)
-      setMailarchiveForm(prev => ({ ...prev, subject: buildKeyword(doc, cached) }))
+      applyRelations(doc, cached)
       return
     }
 
@@ -619,9 +628,9 @@ function IetfImporter({
         wgDocRelationsCacheRef.current.set(doc.name, result)
         setWgDocRelations(result)
         if (keywordAutoFilledRef.current)
-          setMailarchiveForm(prev => ({ ...prev, subject: buildKeyword(doc, result) }))
+          applyRelations(doc, result)
       })
-      .catch(() => setWgDocRelations({ replaces: [], replaced_by: [] }))
+      .catch(() => setWgDocRelations({ replaces: [], replaced_by: [], first_rev_date: null, last_rev_date: null }))
       .finally(() => setWgDocRelationsLoading(false))
   }
 
