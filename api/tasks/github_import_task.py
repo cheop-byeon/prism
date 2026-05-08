@@ -6,7 +6,7 @@ import json
 import logging
 import os
 import tempfile
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import click
@@ -248,12 +248,13 @@ def github_import_task(
             "\n".join(json.dumps(r, ensure_ascii=False) for r in records) + "\n"
         ).encode("utf-8")
         safe_repo = repo.replace("/", "-")
-        timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%dT%H%M%S")
+        timestamp = datetime.now(tz=UTC).strftime("%Y%m%dT%H%M%S")
         filename = f"github-{safe_repo}-{loader}-{timestamp}.jsonl"
 
         with session_factory.create_session() as session:
-            from models.account import TenantAccountJoin
             from sqlalchemy import select as sa_select
+
+            from models.account import TenantAccountJoin
 
             account = session.query(Account).where(Account.id == account_id).first()
             if not account:
