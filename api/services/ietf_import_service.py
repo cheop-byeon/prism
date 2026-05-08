@@ -376,6 +376,58 @@ class IetfImportService:
             raise RemoteFileUploadError("IETF data service returned an invalid response") from exc
 
     @staticmethod
+    def get_wg_documents(wg_acronym: str) -> list[dict]:
+        """Fetch Internet-Drafts (and their RFC status) for a WG from IETF Datatracker."""
+
+        _DATATRACKER_URL = "https://datatracker.ietf.org/api/v1/doc/document/"
+        params: dict = {
+            "group__acronym": wg_acronym,
+            "name__startswith": "draft-",
+            "format": "json",
+            "limit": 200,
+            "offset": 0,
+        }
+        documents: list[dict] = []
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                while True:
+                    response = client.get(_DATATRACKER_URL, params=params)
+                    response.raise_for_status()
+                    data = response.json()
+                    for obj in data.get("objects", []):
+                        name: str = obj.get("name", "")
+                        if not name:
+                            continue
+                        rfc_uri: str | None = obj.get("rfc") or None
+                        rfc_number: int | None = None
+                        if rfc_uri:
+                            last = rfc_uri.rstrip("/").split("/")[-1]
+                            if last.startswith("rfc") and last[3:].isdigit():
+                                rfc_number = int(last[3:])
+                        documents.append(
+                            {
+                                "name": name,
+                                "title": obj.get("title", ""),
+                                "is_rfc": rfc_uri is not None,
+                                "rfc_number": rfc_number,
+                            }
+                        )
+                    meta = data.get("meta", {})
+                    if not meta.get("next"):
+                        break
+                    params["offset"] = int(params["offset"]) + int(params["limit"])
+        except httpx.RequestError as exc:
+            logger.warning("IETF Datatracker request failed for WG '%s': %s", wg_acronym, exc)
+            raise RemoteFileUploadError(f"Failed to contact IETF Datatracker: {exc}") from exc
+        except Exception as exc:
+            logger.warning("IETF Datatracker response parse error for WG '%s': %s", wg_acronym, exc)
+            raise RemoteFileUploadError("IETF Datatracker returned an unexpected response") from exc
+
+        documents.sort(key=lambda d: (0 if d["is_rfc"] else 1, -(d["rfc_number"] or 0), d["name"]))
+        return documents
+
+    @staticmethod
     def _request_sidecar(path: str, payload: dict) -> IetfSidecarFileResponse:
         """Call the sidecar and validate its file payload response."""
 

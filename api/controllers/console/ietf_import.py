@@ -259,6 +259,14 @@ class IetfMailingListsApi(Resource):
         return {"lists": lists}
 
 
+@console_ns.route("/ietf/wg/<string:wg_acronym>/documents")
+class IetfWgDocumentsApi(Resource):
+    @login_required
+    def get(self, wg_acronym: str):
+        documents = IetfImportService.get_wg_documents(wg_acronym.strip().lower())
+        return {"documents": documents}
+
+
 @console_ns.route("/ietf/mailarchive/<string:list_name>/status")
 class IetfMailarchiveSyncStatusApi(Resource):
     @login_required

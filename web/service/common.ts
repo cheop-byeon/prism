@@ -527,6 +527,17 @@ export const fetchIetfMailingLists = (): Promise<{ lists: string[] }> => {
   return get<{ lists: string[] }>('/ietf/mailarchive/lists')
 }
 
+export type IetfWgDocument = {
+  name: string
+  title: string
+  is_rfc: boolean
+  rfc_number: number | null
+}
+
+export const fetchIetfWgDocuments = (wgAcronym: string): Promise<{ documents: IetfWgDocument[] }> => {
+  return get<{ documents: IetfWgDocument[] }>(`/ietf/wg/${encodeURIComponent(wgAcronym)}/documents`)
+}
+
 export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {
   return get<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/status`)
 }

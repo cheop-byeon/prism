@@ -9,6 +9,7 @@ import type {
   IetfRfcImportRequest,
   IetfRfcSuggestion,
   IetfSyncStatus,
+  IetfWgDocument,
   IetfYearPreprocessResult,
   UploadedConsoleFile,
 } from '@/service/common'
@@ -27,6 +28,7 @@ import {
   fetchIetfMailingLists,
   fetchIetfRfcFormats,
   fetchIetfRfcSuggestions,
+  fetchIetfWgDocuments,
   importIetfDraftFile,
   importIetfRfcFile,
   resumeGithubImport,
@@ -194,6 +196,12 @@ function IetfImporter({
   const [rfcForm, setRfcForm] = useState(DEFAULT_RFC_FORM)
   const [availableMailingLists, setAvailableMailingLists] = useState<string[]>([])
   const [showMailingListDropdown, setShowMailingListDropdown] = useState(false)
+  const [wgDocuments, setWgDocuments] = useState<IetfWgDocument[]>([])
+  const [wgDocumentsLoading, setWgDocumentsLoading] = useState(false)
+  const [selectedWgDoc, setSelectedWgDoc] = useState<IetfWgDocument | null>(null)
+  const [showWgDocDropdown, setShowWgDocDropdown] = useState(false)
+  const [wgDocFilter, setWgDocFilter] = useState('')
+  const wgDocDropdownRef = useRef<HTMLDivElement>(null)
   const [rfcSuggestions, setRfcSuggestions] = useState<IetfRfcSuggestion[]>([])
   const [showRfcSuggestions, setShowRfcSuggestions] = useState(false)
   const [selectedRfc, setSelectedRfc] = useState<IetfRfcSuggestion | null>(null)
@@ -225,9 +233,10 @@ function IetfImporter({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (mailingListDropdownRef.current && !mailingListDropdownRef.current.contains(event.target as Node)) {
+      if (mailingListDropdownRef.current && !mailingListDropdownRef.current.contains(event.target as Node))
         setShowMailingListDropdown(false)
-      }
+      if (wgDocDropdownRef.current && !wgDocDropdownRef.current.contains(event.target as Node))
+        setShowWgDocDropdown(false)
       if (rfcDropdownRef.current && !rfcDropdownRef.current.contains(event.target as Node))
         setShowRfcSuggestions(false)
     }
@@ -248,6 +257,39 @@ function IetfImporter({
     if (open)
       loadMailingLists()
   }, [open])
+
+  // Fetch I-D/RFC documents for the selected WG
+  useEffect(() => {
+    const wg = mailarchiveForm.mailingList.trim()
+    startTransition(() => {
+      setSelectedWgDoc(null)
+      setWgDocuments([])
+      setWgDocFilter('')
+    })
+    if (!wg || mode !== 'mailarchive')
+      return
+
+    let cancelled = false
+    startTransition(() => setWgDocumentsLoading(true))
+
+    fetchIetfWgDocuments(wg)
+      .then((result) => {
+        if (!cancelled)
+          setWgDocuments(result.documents)
+      })
+      .catch(() => {
+        if (!cancelled)
+          setWgDocuments([])
+      })
+      .finally(() => {
+        if (!cancelled)
+          setWgDocumentsLoading(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [mailarchiveForm.mailingList, mode])
 
   // Check sync status whenever the mailing list selection changes
   useEffect(() => {
@@ -854,6 +896,80 @@ function IetfImporter({
                       )}
                     </div>
                   </div>
+
+                  {/* I-D / RFC selector — shown once a WG is selected */}
+                  {mailarchiveForm.mailingList.trim() && (
+                    <div className="col-span-2">
+                      <div className="mb-1 text-xs font-medium text-text-secondary">
+                        {t('stepOne.ietf.wgDoc', { ns: 'datasetCreation' })}
+                      </div>
+                      <div ref={wgDocDropdownRef} className="relative">
+                        <Input
+                          value={wgDocFilter}
+                          onChange={(e) => {
+                            setWgDocFilter(e.target.value)
+                            setShowWgDocDropdown(true)
+                          }}
+                          onFocus={() => setShowWgDocDropdown(true)}
+                          placeholder={
+                            wgDocumentsLoading
+                              ? (t('stepOne.ietf.wgDocLoading', { ns: 'datasetCreation' }) || '')
+                              : (t('stepOne.ietf.wgDocPlaceholder', { ns: 'datasetCreation' }) || '')
+                          }
+                          readOnly={wgDocumentsLoading}
+                        />
+                        {selectedWgDoc && !wgDocFilter && (
+                          <div className="mt-1 truncate text-xs text-text-tertiary">
+                            {selectedWgDoc.is_rfc
+                              ? `RFC ${selectedWgDoc.rfc_number} — ${selectedWgDoc.title}`
+                              : `${selectedWgDoc.name} — ${selectedWgDoc.title}`}
+                          </div>
+                        )}
+                        {showWgDocDropdown && wgDocuments.length > 0 && (
+                          <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
+                            {wgDocuments
+                              .filter((doc) => {
+                                const q = wgDocFilter.toLowerCase()
+                                if (!q)
+                                  return true
+                                return (
+                                  doc.name.toLowerCase().includes(q)
+                                  || doc.title.toLowerCase().includes(q)
+                                  || (doc.rfc_number != null && `rfc${doc.rfc_number}`.includes(q))
+                                )
+                              })
+                              .map(doc => (
+                                <div
+                                  key={doc.name}
+                                  onClick={() => {
+                                    setSelectedWgDoc(doc)
+                                    setWgDocFilter('')
+                                    setShowWgDocDropdown(false)
+                                    const keyword = doc.is_rfc
+                                      ? `RFC${doc.rfc_number}`
+                                      : doc.name
+                                    setMailarchiveForm(prev => ({ ...prev, subject: keyword }))
+                                  }}
+                                  className="cursor-pointer px-3 py-2 text-sm hover:bg-components-panel-border"
+                                >
+                                  <div className="font-medium text-text-primary">
+                                    {doc.is_rfc ? `RFC ${doc.rfc_number}` : doc.name}
+                                  </div>
+                                  <div className="truncate text-xs text-text-tertiary">
+                                    {doc.title}
+                                    {doc.is_rfc && (
+                                      <span className="ml-1 opacity-60">
+                                        {`(was ${doc.name})`}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <div className="mb-1 text-xs font-medium text-text-secondary">
                       {t('stepOne.ietf.sentAfter', { ns: 'datasetCreation' })}
