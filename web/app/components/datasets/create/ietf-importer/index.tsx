@@ -24,6 +24,7 @@ import {
   downloadAndPreprocessMailarchiveYears,
   fetchGithubImportStatus,
   fetchIetfDraftFormats,
+  fetchIetfDraftPredecessors,
   fetchIetfMailarchiveSyncStatus,
   fetchIetfMailingLists,
   fetchIetfRfcFormats,
@@ -201,6 +202,9 @@ function IetfImporter({
   const [selectedWgDoc, setSelectedWgDoc] = useState<IetfWgDocument | null>(null)
   const [showWgDocDropdown, setShowWgDocDropdown] = useState(false)
   const [wgDocFilter, setWgDocFilter] = useState('')
+  const [wgDocPredecessors, setWgDocPredecessors] = useState<string[]>([])
+  const [wgDocPredecessorsLoading, setWgDocPredecessorsLoading] = useState(false)
+  const keywordAutoFilledRef = useRef(false)
   const wgDocDropdownRef = useRef<HTMLDivElement>(null)
   const [rfcSuggestions, setRfcSuggestions] = useState<IetfRfcSuggestion[]>([])
   const [showRfcSuggestions, setShowRfcSuggestions] = useState(false)
@@ -265,6 +269,8 @@ function IetfImporter({
       setSelectedWgDoc(null)
       setWgDocuments([])
       setWgDocFilter('')
+      setWgDocPredecessors([])
+      setWgDocPredecessorsLoading(false)
     })
     if (!wg || mode !== 'mailarchive')
       return
@@ -579,6 +585,34 @@ function IetfImporter({
     }
     const errorMessage = parsedMessage || fallbackMessage
     toast.error(errorMessage)
+  }
+
+  const handleWgDocSelect = (doc: IetfWgDocument) => {
+    setSelectedWgDoc(doc)
+    setWgDocFilter('')
+    setShowWgDocDropdown(false)
+    setWgDocPredecessors([])
+
+    // Immediately auto-fill with what we have (no predecessor yet)
+    const buildKeyword = (predecessors: string[]) => {
+      const parts: string[] = [doc.name, ...predecessors]
+      if (doc.rfc_number)
+        parts.push(`RFC${doc.rfc_number}`)
+      return parts.join(' OR ')
+    }
+    keywordAutoFilledRef.current = true
+    setMailarchiveForm(prev => ({ ...prev, subject: buildKeyword([]) }))
+
+    // Fetch predecessor drafts and update keyword when loaded
+    setWgDocPredecessorsLoading(true)
+    fetchIetfDraftPredecessors(doc.name)
+      .then((result) => {
+        setWgDocPredecessors(result.predecessors)
+        if (keywordAutoFilledRef.current)
+          setMailarchiveForm(prev => ({ ...prev, subject: buildKeyword(result.predecessors) }))
+      })
+      .catch(() => setWgDocPredecessors([]))
+      .finally(() => setWgDocPredecessorsLoading(false))
   }
 
   const handleStartSync = async () => {
@@ -918,13 +952,6 @@ function IetfImporter({
                           }
                           readOnly={wgDocumentsLoading}
                         />
-                        {selectedWgDoc && !wgDocFilter && (
-                          <div className="mt-1 truncate text-xs text-text-tertiary">
-                            {selectedWgDoc.is_rfc
-                              ? `RFC ${selectedWgDoc.rfc_number} — ${selectedWgDoc.title}`
-                              : `${selectedWgDoc.name} — ${selectedWgDoc.title}`}
-                          </div>
-                        )}
                         {showWgDocDropdown && wgDocuments.length > 0 && (
                           <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
                             {wgDocuments
@@ -941,15 +968,7 @@ function IetfImporter({
                               .map(doc => (
                                 <div
                                   key={doc.name}
-                                  onClick={() => {
-                                    setSelectedWgDoc(doc)
-                                    setWgDocFilter('')
-                                    setShowWgDocDropdown(false)
-                                    const keyword = doc.is_rfc
-                                      ? `RFC${doc.rfc_number}`
-                                      : doc.name
-                                    setMailarchiveForm(prev => ({ ...prev, subject: keyword }))
-                                  }}
+                                  onClick={() => handleWgDocSelect(doc)}
                                   className="cursor-pointer px-3 py-2 text-sm hover:bg-components-panel-border"
                                 >
                                   <div className="font-medium text-text-primary">
@@ -965,6 +984,35 @@ function IetfImporter({
                                   </div>
                                 </div>
                               ))}
+                          </div>
+                        )}
+                        {/* 3-field info card shown after selection */}
+                        {selectedWgDoc && !wgDocFilter && (
+                          <div className="mt-2 grid grid-cols-3 gap-3 rounded-lg border border-divider-subtle bg-background-section-burn p-2">
+                            <div className="min-w-0">
+                              <div className="text-[10px] text-text-tertiary">
+                                {t('stepOne.ietf.wgDocSelectedDraft', { ns: 'datasetCreation' })}
+                              </div>
+                              <div title={selectedWgDoc.name} className="truncate text-xs font-medium text-text-secondary">
+                                {selectedWgDoc.name}
+                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[10px] text-text-tertiary">
+                                {t('stepOne.ietf.wgDocWas', { ns: 'datasetCreation' })}
+                              </div>
+                              <div title={wgDocPredecessors[0] ?? ''} className="truncate text-xs font-medium text-text-secondary">
+                                {wgDocPredecessorsLoading ? '…' : (wgDocPredecessors[0] ?? '—')}
+                              </div>
+                            </div>
+                            <div className="min-w-0">
+                              <div className="text-[10px] text-text-tertiary">
+                                {t('stepOne.ietf.wgDocPublishedAs', { ns: 'datasetCreation' })}
+                              </div>
+                              <div className="text-xs font-medium text-text-secondary">
+                                {selectedWgDoc.rfc_number ? `RFC ${selectedWgDoc.rfc_number}` : '—'}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -1003,7 +1051,10 @@ function IetfImporter({
                     </div>
                     <Input
                       value={mailarchiveForm.subject}
-                      onChange={e => setMailarchiveForm(prev => ({ ...prev, subject: e.target.value }))}
+                      onChange={(e) => {
+                        keywordAutoFilledRef.current = false
+                        setMailarchiveForm(prev => ({ ...prev, subject: e.target.value }))
+                      }}
                     />
                     <div className="mt-2 flex items-center gap-4">
                       <span className="text-xs text-text-tertiary">

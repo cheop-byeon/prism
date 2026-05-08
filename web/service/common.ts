@@ -538,6 +538,10 @@ export const fetchIetfWgDocuments = (wgAcronym: string): Promise<{ documents: Ie
   return get<{ documents: IetfWgDocument[] }>(`/ietf/wg/${encodeURIComponent(wgAcronym)}/documents`)
 }
 
+export const fetchIetfDraftPredecessors = (draftName: string): Promise<{ predecessors: string[] }> => {
+  return get<{ predecessors: string[] }>('/ietf/draft/predecessors', { params: { draft_name: draftName } })
+}
+
 export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {
   return get<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/status`)
 }

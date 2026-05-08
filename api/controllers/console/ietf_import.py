@@ -267,6 +267,21 @@ class IetfWgDocumentsApi(Resource):
         return {"documents": documents}
 
 
+class IetfDraftNameQuery(BaseModel):
+    draft_name: str = Field(..., min_length=1)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+@console_ns.route("/ietf/draft/predecessors")
+class IetfDraftPredecessorsApi(Resource):
+    @login_required
+    def get(self):
+        query = IetfDraftNameQuery.model_validate(request.args.to_dict(flat=True))  # type: ignore[arg-type]
+        predecessors = IetfImportService.get_draft_predecessors(query.draft_name)
+        return {"predecessors": predecessors}
+
+
 @console_ns.route("/ietf/mailarchive/<string:list_name>/status")
 class IetfMailarchiveSyncStatusApi(Resource):
     @login_required

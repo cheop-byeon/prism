@@ -376,6 +376,35 @@ class IetfImportService:
             raise RemoteFileUploadError("IETF data service returned an invalid response") from exc
 
     @staticmethod
+    def get_draft_predecessors(draft_name: str) -> list[str]:
+        """Return names of drafts that *draft_name* replaces, via IETF Datatracker."""
+
+        url = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
+        params = {
+            "relationship": "/api/v1/name/docrelationshipname/replaces/",
+            "source__name": draft_name,
+            "format": "json",
+            "limit": 20,
+        }
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                response = client.get(url, params=params)
+                response.raise_for_status()
+                data = response.json()
+        except Exception as exc:
+            logger.warning("Datatracker relateddocument request failed for '%s': %s", draft_name, exc)
+            return []
+
+        predecessors: list[str] = []
+        for obj in data.get("objects", []):
+            # target URI is like /api/v1/doc/document/draft-iyengar-quic-transport/
+            target_uri: str = obj.get("target", "") or ""
+            name = target_uri.rstrip("/").split("/")[-1]
+            if name and name.startswith("draft-"):
+                predecessors.append(name)
+        return predecessors
+
+    @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:
         """Fetch Internet-Drafts (and their RFC status) for a WG from IETF Datatracker."""
 
