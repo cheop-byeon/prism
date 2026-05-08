@@ -3118,16 +3118,13 @@ class DocumentService:
 
 
 class SegmentService:
-    # Output key -> metadata key aliases, in lookup priority order.
-    _DISPLAY_METADATA_FIELDS: dict[str, tuple[str, ...]] = {
-        "email_id": ("email_id", "emailId", "message_id", "messageId", "id"),
-        "url": ("url", "source_url", "sourceURL", "link"),
-        "subject_line": ("subject_line", "subject-line", "subject", "title"),
-        "date": ("date", "sent_at", "sentAt", "timestamp", "created_at"),
-        # Backward-compatible keys for existing UI consumers.
-        "id": ("id",),
-        "subject": ("subject",),
-    }
+    # Vector-store system fields that must never be surfaced to the UI.
+    _INTERNAL_METADATA_FIELDS: frozenset[str] = frozenset({
+        "doc_id",
+        "doc_hash",
+        "dataset_id",
+        "document_id",
+    })
 
     @classmethod
     def segment_create_args_validate(cls, args: dict, document: Document):
@@ -4026,20 +4023,11 @@ class SegmentService:
             return {}
 
         metadata = documents[0].metadata or {}
-        filtered_metadata: dict[str, str] = {}
-        for output_key, candidates in cls._DISPLAY_METADATA_FIELDS.items():
-            value = None
-            for candidate in candidates:
-                candidate_value = metadata.get(candidate)
-                if candidate_value in (None, ""):
-                    continue
-                value = candidate_value
-                break
-            if value is None:
-                continue
-            filtered_metadata[output_key] = str(value)
-
-        return filtered_metadata
+        return {
+            key: str(value)
+            for key, value in metadata.items()
+            if key not in cls._INTERNAL_METADATA_FIELDS and value not in (None, "")
+        }
 
 
 class DatasetCollectionBindingService:
