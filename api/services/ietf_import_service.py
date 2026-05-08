@@ -18,6 +18,7 @@ declares Python 3.13+.
 from __future__ import annotations
 
 import base64
+import difflib
 import email as email_lib
 import email.header as email_header_lib
 import json
@@ -588,6 +589,14 @@ class IetfImportService:
                 change_type = "modified"
             else:
                 continue
+            diff = '\n'.join(difflib.unified_diff(
+                (old_entry[1] if old_entry else '').splitlines(),
+                (new_entry[1] if new_entry else '').splitlines(),
+                fromfile=f"{draft_name}-{from_rev}",
+                tofile=f"{draft_name}-{to_rev}",
+                n=2,
+                lineterm='',
+            ))
             records.append({
                 "draft_name": draft_name,
                 "from_rev": from_rev,
@@ -595,8 +604,7 @@ class IetfImportService:
                 "section_id": sec_id,
                 "section_title": (new_entry or old_entry)[0],  # type: ignore[index]
                 "change_type": change_type,
-                "old_text": old_entry[1] if old_entry else None,
-                "new_text": new_entry[1] if new_entry else None,
+                "diff": diff,
             })
         return records
 
@@ -608,7 +616,7 @@ class IetfImportService:
         Each JSONL record describes one section that changed between two
         consecutive revisions:
           draft_name, from_rev, to_rev, section_id, section_title,
-          change_type (added|removed|modified), old_text, new_text
+          change_type (added|removed|modified), diff (unified diff string)
         """
         _ARCHIVE = "https://www.ietf.org/archive/id/"
         _DATATRACKER = "https://datatracker.ietf.org/api/v1/doc/document/"
