@@ -411,22 +411,36 @@ class IetfImportService:
                 return []
 
         def _fetch_dates(client: httpx.Client) -> tuple[str | None, str | None]:
+            first_date: str | None = None
+            last_date: str | None = None
             try:
-                resp = client.get(_EVENT_URL, params={
-                    "doc__name": draft_name,
+                # Last-modified date from the document record itself
+                doc_resp = client.get(
+                    f"https://datatracker.ietf.org/api/v1/doc/document/{draft_name}/",
+                    params={"format": "json"},
+                )
+                doc_resp.raise_for_status()
+                last_date = doc_resp.json().get("time")
+            except Exception as exc:
+                logger.warning("Datatracker document fetch failed for '%s': %s", draft_name, exc)
+            try:
+                # First revision: docevent where desc contains "<name>-00"
+                # (IETF drafts always start at revision 00; doc__name is not a
+                # supported filter on this endpoint so we use desc__contains instead)
+                ev_resp = client.get(_EVENT_URL, params={
                     "type": "new_revision",
+                    "desc__contains": f"{draft_name}-00",
                     "format": "json",
                     "order_by": "time",
-                    "limit": 200,
+                    "limit": 1,
                 })
-                resp.raise_for_status()
-                times = [obj["time"] for obj in resp.json().get("objects", []) if obj.get("time")]
-                if not times:
-                    return None, None
-                return times[0], times[-1]
+                ev_resp.raise_for_status()
+                objects = ev_resp.json().get("objects", [])
+                if objects:
+                    first_date = objects[0].get("time")
             except Exception as exc:
-                logger.warning("Datatracker docevent request failed for '%s': %s", draft_name, exc)
-                return None, None
+                logger.warning("Datatracker docevent fetch failed for '%s': %s", draft_name, exc)
+            return first_date, last_date
 
         try:
             with httpx.Client(timeout=10.0) as client:
