@@ -378,25 +378,23 @@ class IetfImportService:
 
     @staticmethod
     def get_draft_relations(draft_name: str) -> dict:
-        """Return predecessor drafts and published RFC number for a given draft.
+        """Return predecessor drafts ("was") for a given draft via IETF Datatracker.
 
-        Two Datatracker queries:
-        1. source=<draft>, relationship=replaces → targets are predecessor drafts ("was")
-        2. target=<draft>, relationship=replaces → sources starting with "rfc" are the published RFC
+        Queries relateddocument with relationship=replaces where source=<draft>;
+        the returned targets are the predecessor drafts this one replaced.
+        The RFC number is resolved separately in get_wg_documents via title matching.
         """
 
         _RDOC_URL = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
         predecessors: list[str] = []
-        rfc_number: int | None = None
 
         try:
             with httpx.Client(timeout=10.0) as client:
-                # Predecessors: drafts this document replaced
                 resp = client.get(_RDOC_URL, params={
                     "relationship__slug": "replaces",
                     "source__name": draft_name,
                     "format": "json",
-                    "limit": 20,
+                    "limit": 50,
                 })
                 resp.raise_for_status()
                 for obj in resp.json().get("objects", []):
@@ -404,42 +402,48 @@ class IetfImportService:
                     name = target_uri.rstrip("/").split("/")[-1]
                     if name.startswith("draft-"):
                         predecessors.append(name)
-
-                # RFC: what document replaced this draft (an rfc* name means it was published)
-                resp = client.get(_RDOC_URL, params={
-                    "relationship__slug": "replaces",
-                    "target__name": draft_name,
-                    "format": "json",
-                    "limit": 20,
-                })
-                resp.raise_for_status()
-                for obj in resp.json().get("objects", []):
-                    source_uri: str = obj.get("source", "") or ""
-                    src_name = source_uri.rstrip("/").split("/")[-1]
-                    if src_name.startswith("rfc") and src_name[3:].isdigit():
-                        rfc_number = int(src_name[3:])
-                        break
         except Exception as exc:
             logger.warning("Datatracker relations request failed for '%s': %s", draft_name, exc)
 
-        return {"predecessors": predecessors, "rfc_number": rfc_number}
+        return {"predecessors": predecessors}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:
-        """Fetch Internet-Drafts for a WG from IETF Datatracker."""
+        """Fetch Internet-Drafts for a WG from IETF Datatracker.
+
+        Also fetches RFC documents for the same WG and links them to drafts by
+        title (both the draft and its published RFC share an identical title).
+        The resulting rfc_number field is null for unpublished drafts.
+        """
 
         _DATATRACKER_URL = "https://datatracker.ietf.org/api/v1/doc/document/"
-        params: dict = {
-            "group__acronym": wg_acronym,
-            "name__startswith": "draft-",
-            "format": "json",
-            "limit": 200,
-            "offset": 0,
-        }
         documents: list[dict] = []
 
         try:
             with httpx.Client(timeout=15.0) as client:
+                # Build title → rfc_number map from published RFC documents in this WG
+                title_to_rfc: dict[str, int] = {}
+                rfc_resp = client.get(_DATATRACKER_URL, params={
+                    "group__acronym": wg_acronym,
+                    "name__startswith": "rfc",
+                    "format": "json",
+                    "limit": 200,
+                })
+                rfc_resp.raise_for_status()
+                for obj in rfc_resp.json().get("objects", []):
+                    title: str = (obj.get("title") or "").strip()
+                    rfc_num = obj.get("rfc_number")
+                    if title and rfc_num:
+                        title_to_rfc[title.lower()] = int(rfc_num)
+
+                # Fetch all drafts with pagination
+                params: dict = {
+                    "group__acronym": wg_acronym,
+                    "name__startswith": "draft-",
+                    "format": "json",
+                    "limit": 200,
+                    "offset": 0,
+                }
                 while True:
                     response = client.get(_DATATRACKER_URL, params=params)
                     response.raise_for_status()
@@ -448,7 +452,9 @@ class IetfImportService:
                         name: str = obj.get("name", "")
                         if not name:
                             continue
-                        documents.append({"name": name, "title": obj.get("title", "")})
+                        doc_title: str = (obj.get("title") or "").strip()
+                        rfc_number = title_to_rfc.get(doc_title.lower())
+                        documents.append({"name": name, "title": doc_title, "rfc_number": rfc_number})
                     meta = data.get("meta", {})
                     if not meta.get("next"):
                         break

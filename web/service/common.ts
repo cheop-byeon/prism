@@ -530,11 +530,11 @@ export const fetchIetfMailingLists = (): Promise<{ lists: string[] }> => {
 export type IetfWgDocument = {
   name: string
   title: string
+  rfc_number: number | null
 }
 
 export type IetfDraftRelations = {
   predecessors: string[]
-  rfc_number: number | null
 }
 
 export const fetchIetfWgDocuments = (wgAcronym: string): Promise<{ documents: IetfWgDocument[] }> => {

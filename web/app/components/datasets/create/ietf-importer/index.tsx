@@ -598,19 +598,19 @@ function IetfImporter({
     keywordAutoFilledRef.current = true
     setMailarchiveForm(prev => ({ ...prev, subject: doc.name }))
 
-    // Fetch relations (predecessors + RFC number) and update keyword when loaded
+    // Fetch predecessor relations and update keyword when loaded
     setWgDocRelationsLoading(true)
     fetchIetfDraftRelations(doc.name)
       .then((result) => {
         setWgDocRelations(result)
         if (keywordAutoFilledRef.current) {
           const parts: string[] = [doc.name, ...result.predecessors]
-          if (result.rfc_number)
-            parts.push(`RFC${result.rfc_number}`)
+          if (doc.rfc_number)
+            parts.push(`RFC${doc.rfc_number}`)
           setMailarchiveForm(prev => ({ ...prev, subject: parts.join(' OR ') }))
         }
       })
-      .catch(() => setWgDocRelations({ predecessors: [], rfc_number: null }))
+      .catch(() => setWgDocRelations({ predecessors: [] }))
       .finally(() => setWgDocRelationsLoading(false))
   }
 
@@ -987,19 +987,21 @@ function IetfImporter({
                               <div className="text-[10px] text-text-tertiary">
                                 {t('stepOne.ietf.wgDocWas', { ns: 'datasetCreation' })}
                               </div>
-                              <div
-                                title={wgDocRelations?.predecessors[0] ?? ''}
-                                className="truncate text-xs font-medium text-text-secondary"
-                              >
-                                {wgDocRelationsLoading ? '…' : (wgDocRelations?.predecessors[0] ?? '—')}
-                              </div>
+                              {wgDocRelationsLoading
+                                ? <div className="text-xs font-medium text-text-secondary">…</div>
+                                : (wgDocRelations?.predecessors.length
+                                    ? wgDocRelations.predecessors.map(p => (
+                                        <div key={p} title={p} className="truncate text-xs font-medium text-text-secondary">{p}</div>
+                                      ))
+                                    : <div className="text-xs font-medium text-text-secondary">—</div>
+                                  )}
                             </div>
                             <div className="min-w-0">
                               <div className="text-[10px] text-text-tertiary">
                                 {t('stepOne.ietf.wgDocPublishedAs', { ns: 'datasetCreation' })}
                               </div>
                               <div className="text-xs font-medium text-text-secondary">
-                                {wgDocRelationsLoading ? '…' : (wgDocRelations?.rfc_number ? `RFC ${wgDocRelations.rfc_number}` : '—')}
+                                {selectedWgDoc.rfc_number ? `RFC ${selectedWgDoc.rfc_number}` : '—'}
                               </div>
                             </div>
                           </div>
