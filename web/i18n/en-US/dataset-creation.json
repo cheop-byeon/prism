@@ -126,7 +126,7 @@
   "stepOne.ietf.validation.mailarchiveRequired": "Mailing list is required",
   "stepOne.ietf.validation.rfcQueryRequired": "Provide one RFC ID or select a matching document",
   "stepOne.ietf.wg": "Working group",
-  "stepOne.ietf.wgDoc": "I-D / RFC",
+  "stepOne.ietf.wgDoc": "I-D",
   "stepOne.ietf.wgDocLoading": "Loading documents…",
   "stepOne.ietf.wgDocPlaceholder": "Select an Internet-Draft or RFC",
   "stepOne.ietf.wgDocPublishedAs": "Published as",
