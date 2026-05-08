@@ -2,6 +2,7 @@ import copy
 import datetime
 import json
 import logging
+import re
 import secrets
 import time
 import uuid
@@ -3126,6 +3127,34 @@ class SegmentService:
         "document_id",
     })
 
+    # Parses the structured header embedded in IETF evolution diff chunks so
+    # metadata can be recovered from DB content when the vector store is
+    # unavailable (e.g. economical indexing or get_by_ids not supported).
+    _EVOLUTION_HEADER_RE = re.compile(
+        r'^\[ietf-evolution\]\s+'
+        r'draft:(?P<draft_name>\S+)\s+'
+        r'from:(?P<from_rev>\S+)\s+'
+        r'to:(?P<to_rev>\S+)\s+'
+        r"section:(?P<section_id>\S+)\s+"
+        r"title:(?P<section_title>'[^']*'|\"[^\"]*\"|\S+)\s+"
+        r'change:(?P<change_type>\S+)',
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _parse_evolution_metadata(cls, content: str) -> dict[str, str]:
+        """Extract metadata from an evolution chunk's embedded header line."""
+        first_line = (content or "").splitlines()[0] if content else ""
+        m = cls._EVOLUTION_HEADER_RE.match(first_line.strip())
+        if not m:
+            return {}
+        result = m.groupdict()
+        # Strip surrounding quotes added by repr() on section_title
+        title = result.get("section_title", "")
+        if title and title[0] in ("'", '"') and title[-1] == title[0]:
+            result["section_title"] = title[1:-1]
+        return {k: v for k, v in result.items() if v}
+
     @classmethod
     def segment_create_args_validate(cls, args: dict, document: Document):
         if document.doc_form == IndexStructureType.QA_INDEX:
@@ -3997,37 +4026,42 @@ class SegmentService:
         return db.session.scalars(query).all()
 
     @classmethod
-    def get_chunk_metadata(cls, dataset: Dataset, index_node_id: str | None) -> dict[str, str]:
+    def get_chunk_metadata(
+        cls,
+        dataset: Dataset,
+        index_node_id: str | None,
+        content: str = "",
+    ) -> dict[str, str]:
+        """Return display metadata for a chunk.
+
+        Primary source: vector store (high-quality indexing only).
+        Fallback: parse the structured ``[ietf-evolution]`` header that is
+        embedded in evolution-diff chunk content so metadata is available
+        even for economical indexing or when ``get_by_ids`` is unsupported.
         """
-        Fetch selected metadata fields for a chunk from vector storage.
+        if index_node_id and dataset.indexing_technique == IndexTechniqueType.HIGH_QUALITY:
+            try:
+                vector = Vector(dataset=dataset)
+                get_by_ids = getattr(vector, "get_by_ids", None)
+                if callable(get_by_ids):
+                    documents = get_by_ids([index_node_id])
+                    if documents:
+                        raw = documents[0].metadata or {}
+                        result = {
+                            key: str(value)
+                            for key, value in raw.items()
+                            if key not in cls._INTERNAL_METADATA_FIELDS and value not in (None, "")
+                        }
+                        if result:
+                            return result
+            except Exception:
+                logger.warning(
+                    "failed to fetch chunk metadata by index node id: %s",
+                    index_node_id,
+                    exc_info=True,
+                )
 
-        Returns only the metadata keys used by the drawer UI.
-        """
-        if not index_node_id:
-            return {}
-
-        if dataset.indexing_technique != IndexTechniqueType.HIGH_QUALITY:
-            return {}
-
-        try:
-            vector = Vector(dataset=dataset)
-            get_by_ids = getattr(vector, "get_by_ids", None)
-            if not callable(get_by_ids):
-                return {}
-            documents = get_by_ids([index_node_id])
-        except Exception:
-            logger.warning("failed to fetch chunk metadata by index node id: %s", index_node_id, exc_info=True)
-            return {}
-
-        if not documents:
-            return {}
-
-        metadata = documents[0].metadata or {}
-        return {
-            key: str(value)
-            for key, value in metadata.items()
-            if key not in cls._INTERNAL_METADATA_FIELDS and value not in (None, "")
-        }
+        return cls._parse_evolution_metadata(content)
 
 
 class DatasetCollectionBindingService:

@@ -395,7 +395,11 @@ class DatasetDocumentSegmentUpdateApi(Resource):
 
         segment_dict = dict(marshal(segment, segment_fields))  # type: ignore
         segment_dict["summary"] = None
-        metadata = SegmentService.get_chunk_metadata(dataset=dataset, index_node_id=segment.index_node_id)
+        metadata = SegmentService.get_chunk_metadata(
+            dataset=dataset,
+            index_node_id=segment.index_node_id,
+            content=segment.content or "",
+        )
         segment_dict["metadata"] = metadata
         return {"data": segment_dict}, 200
 
@@ -775,7 +779,11 @@ class ChildChunkUpdateApi(Resource):
             raise Forbidden(str(e))
 
         child_chunk_dict = dict(marshal(child_chunk, child_chunk_fields))  # type: ignore
-        metadata = SegmentService.get_chunk_metadata(dataset=dataset, index_node_id=child_chunk.index_node_id)
+        metadata = SegmentService.get_chunk_metadata(
+            dataset=dataset,
+            index_node_id=child_chunk.index_node_id,
+            content=child_chunk.content or "",
+        )
         child_chunk_dict["metadata"] = metadata
         return {"data": child_chunk_dict}, 200
 

@@ -610,7 +610,7 @@ class IetfImportService:
             # Skip boilerplate/bibliographic sections — they're not normative content.
             if IetfImportService._SKIP_SECTION_RE.match(section_title):
                 continue
-            content = '\n'.join(difflib.unified_diff(
+            diff = '\n'.join(difflib.unified_diff(
                 (old_entry[1] if old_entry else '').splitlines(),
                 (new_entry[1] if new_entry else '').splitlines(),
                 fromfile=f"{draft_name}-{from_rev}",
@@ -618,6 +618,15 @@ class IetfImportService:
                 n=2,
                 lineterm='',
             ))
+            # Embed a parseable header as the first line so metadata is
+            # recoverable from the DB content even without the vector store.
+            header = (
+                f"[ietf-evolution] draft:{draft_name} "
+                f"from:{from_rev} to:{to_rev} "
+                f"section:{sec_id} title:{section_title!r} "
+                f"change:{change_type}"
+            )
+            content = f"{header}\n\n{diff}"
             # `content` is promoted to page_content by JsonlExtractor; everything
             # else becomes chunk metadata (draft_name, from_rev, to_rev, …).
             records.append({
