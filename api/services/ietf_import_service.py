@@ -427,11 +427,12 @@ class IetfImportService:
                 # First revision: docevent where desc contains "<name>-00"
                 # (IETF drafts always start at revision 00; doc__name is not a
                 # supported filter on this endpoint so we use desc__contains instead)
+                # desc__contains with order_by returns 400 — the single rev-00
+                # event is unique so ordering is not needed
                 ev_resp = client.get(_EVENT_URL, params={
                     "type": "new_revision",
                     "desc__contains": f"{draft_name}-00",
                     "format": "json",
-                    "order_by": "time",
                     "limit": 1,
                 })
                 ev_resp.raise_for_status()
