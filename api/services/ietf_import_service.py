@@ -535,7 +535,24 @@ class IetfImportService:
     # ------------------------------------------------------------------ #
 
     _SECTION_RE = re.compile(r'^(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*)\.?\s{2,}(\S.*)$')
-    _PAGE_BREAK_RE = re.compile(r'\x0c[^\n]*\n(?:[^\n]*\n){0,2}', re.MULTILINE)
+    _PAGE_BREAK_RE = re.compile(r'\x0c[^\n]*\n(?:[^\n]*\n){0,3}', re.MULTILINE)
+    # Sections that are structural / bibliographic rather than normative content.
+    # Changes to these sections are noise in an evolution diff.
+    _SKIP_SECTION_RE = re.compile(
+        r'^\s*(?:'
+        r'table\s+of\s+contents?'
+        r'|author(?:s)?(?:\'s?)?\s+(?:address(?:es)?|information|contact(?:s)?)'
+        r'|(?:normative|informative|other)?\s*references?'
+        r'|acknowledgm?ents?'
+        r'|contributors?'
+        r'|copyright\s+(?:notice|statement)'
+        r'|full\s+copyright'
+        r'|status\s+of\s+this\s+memo'
+        r'|change\s+log'
+        r'|revision\s+history'
+        r')\s*$',
+        re.IGNORECASE,
+    )
 
     @staticmethod
     def _parse_sections(text: str) -> dict[str, tuple[str, str]]:
@@ -589,7 +606,11 @@ class IetfImportService:
                 change_type = "modified"
             else:
                 continue
-            diff = '\n'.join(difflib.unified_diff(
+            section_title = (new_entry or old_entry)[0].strip()  # type: ignore[index]
+            # Skip boilerplate/bibliographic sections — they're not normative content.
+            if IetfImportService._SKIP_SECTION_RE.match(section_title):
+                continue
+            content = '\n'.join(difflib.unified_diff(
                 (old_entry[1] if old_entry else '').splitlines(),
                 (new_entry[1] if new_entry else '').splitlines(),
                 fromfile=f"{draft_name}-{from_rev}",
@@ -597,14 +618,16 @@ class IetfImportService:
                 n=2,
                 lineterm='',
             ))
+            # `content` is promoted to page_content by JsonlExtractor; everything
+            # else becomes chunk metadata (draft_name, from_rev, to_rev, …).
             records.append({
+                "content": content,
                 "draft_name": draft_name,
                 "from_rev": from_rev,
                 "to_rev": to_rev,
                 "section_id": sec_id,
-                "section_title": (new_entry or old_entry)[0],  # type: ignore[index]
+                "section_title": section_title,
                 "change_type": change_type,
-                "diff": diff,
             })
         return records
 
@@ -613,10 +636,13 @@ class IetfImportService:
         """Fetch every plain-text revision of a draft, diff them section by
         section, and upload the resulting change-log as a JSONL dataset file.
 
-        Each JSONL record describes one section that changed between two
-        consecutive revisions:
+        Each JSONL line becomes one chunk via JsonlExtractor.  Fields:
+          content        — unified diff text (promoted to page_content)
           draft_name, from_rev, to_rev, section_id, section_title,
-          change_type (added|removed|modified), diff (unified diff string)
+          change_type (added|removed|modified)  — chunk metadata
+
+        Boilerplate sections (ToC, References, Authors, Acknowledgements, …)
+        are excluded; only normative content sections are diffed.
         """
         _ARCHIVE = "https://www.ietf.org/archive/id/"
         _DATATRACKER = "https://datatracker.ietf.org/api/v1/doc/document/"
@@ -669,8 +695,14 @@ class IetfImportService:
                 )
             )
 
-        # Prepend a summary header record
+        # Prepend a summary header record.  `content` is used by JsonlExtractor
+        # as the searchable page text; the remaining fields become metadata.
         header: dict = {
+            "content": (
+                f"{draft_name} evolution summary: {len(sorted_revs)} revisions compared "
+                f"(rev {sorted_revs[0]} → {sorted_revs[-1]}), "
+                f"{len(all_changes)} normative section changes recorded."
+            ),
             "record_type": "summary",
             "draft_name": draft_name,
             "revisions_compared": len(sorted_revs),
