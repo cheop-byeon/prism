@@ -706,22 +706,7 @@ class IetfImportService:
                 )
             )
 
-        # Prepend a summary header record.  `content` is used by JsonlExtractor
-        # as the searchable page text; the remaining fields become metadata.
-        header: dict = {
-            "content": (
-                f"{draft_name} evolution summary: {len(sorted_revs)} revisions compared "
-                f"(rev {sorted_revs[0]} → {sorted_revs[-1]}), "
-                f"{len(all_changes)} normative section changes recorded."
-            ),
-            "record_type": "summary",
-            "draft_name": draft_name,
-            "revisions_compared": len(sorted_revs),
-            "first_rev": sorted_revs[0],
-            "last_rev": sorted_revs[-1],
-            "total_changes": len(all_changes),
-        }
-        records = [header, *all_changes]
+        records = all_changes
 
         jsonl_bytes = '\n'.join(json.dumps(r) for r in records).encode()
         filename = f"{draft_name}-evolution.jsonl"
