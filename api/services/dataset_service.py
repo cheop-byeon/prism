@@ -4074,20 +4074,28 @@ class SegmentService:
         # Fallback 2: this is a continuation chunk — find the nearest preceding
         # segment in the same document that carries the evolution header.
         if document_id and segment_position is not None:
-            rows = (
-                db.session.query(DocumentSegment.content)
-                .filter(
-                    DocumentSegment.document_id == document_id,
-                    DocumentSegment.position < segment_position,
+            try:
+                stmt = (
+                    select(DocumentSegment.content)
+                    .where(
+                        DocumentSegment.document_id == document_id,
+                        DocumentSegment.position < segment_position,
+                    )
+                    .order_by(DocumentSegment.position.desc())
+                    .limit(20)
                 )
-                .order_by(DocumentSegment.position.desc())
-                .limit(20)
-                .all()
-            )
-            for (seg_content,) in rows:
-                result = cls._parse_evolution_metadata(seg_content or "")
-                if result:
-                    return result
+                rows = db.session.execute(stmt).all()
+                for (seg_content,) in rows:
+                    result = cls._parse_evolution_metadata(seg_content or "")
+                    if result:
+                        return result
+            except Exception:
+                logger.debug(
+                    "backward segment search failed for doc %s pos %s",
+                    document_id,
+                    segment_position,
+                    exc_info=True,
+                )
 
         return {}
 
