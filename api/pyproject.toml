@@ -5,7 +5,7 @@ requires-python = ">=3.11,<3.13"
 
 dependencies = [
     "aliyun-log-python-sdk~=0.9.37",
-    "arize-phoenix-otel~=0.15.0",
+    "arize-phoenix-otel~=0.16.1",
     "azure-identity==1.25.3",
     "beautifulsoup4==4.14.3",
     "boto3==1.42.73",
@@ -35,7 +35,7 @@ dependencies = [
     "json-repair>=0.55.1",
     "jsonschema>=4.25.1",
     "langfuse~=2.51.3",
-    "langsmith~=0.7.16",
+    "langsmith~=0.8.3",
     "markdown~=3.10.2",
     "mlflow-skinny>=3.0.0",
     "numpy~=1.26.4",
@@ -78,7 +78,7 @@ dependencies = [
     "sqlalchemy~=2.0.29",
     "starlette==1.0.0",
     "tiktoken~=0.12.0",
-    "transformers~=5.3.0",
+    "transformers~=5.8.0",
     "unstructured[docx,epub,md,ppt,pptx]~=0.21.5",
     "pypandoc~=1.13",
     "yarl~=1.23.0",
