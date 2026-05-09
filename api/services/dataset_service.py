@@ -3130,14 +3130,18 @@ class SegmentService:
     # Parses the structured header embedded in IETF evolution diff chunks so
     # metadata can be recovered from DB content when the vector store is
     # unavailable (e.g. economical indexing or get_by_ids not supported).
+    # Header format (must start with a letter — remove_leading_symbols() strips
+    # leading punctuation/symbols during indexing):
+    #   ietf-evolution draft:<name> from:<rev> to:<rev> section:<id>
+    #     change:<type> | <section title (may contain spaces)>
     _EVOLUTION_HEADER_RE = re.compile(
-        r'^\[ietf-evolution\]\s+'
+        r'^ietf-evolution\s+'
         r'draft:(?P<draft_name>\S+)\s+'
         r'from:(?P<from_rev>\S+)\s+'
         r'to:(?P<to_rev>\S+)\s+'
-        r"section:(?P<section_id>\S+)\s+"
-        r"title:(?P<section_title>'[^']*'|\"[^\"]*\"|\S+)\s+"
-        r'change:(?P<change_type>\S+)',
+        r'section:(?P<section_id>\S+)\s+'
+        r'change:(?P<change_type>\S+)\s+'
+        r'\|\s*(?P<section_title>.+)$',
         re.IGNORECASE,
     )
 
@@ -3148,12 +3152,7 @@ class SegmentService:
         m = cls._EVOLUTION_HEADER_RE.match(first_line.strip())
         if not m:
             return {}
-        result = m.groupdict()
-        # Strip surrounding quotes added by repr() on section_title
-        title = result.get("section_title", "")
-        if title and title[0] in ("'", '"') and title[-1] == title[0]:
-            result["section_title"] = title[1:-1]
-        return {k: v for k, v in result.items() if v}
+        return {k: v.strip() for k, v in m.groupdict().items() if v}
 
     @classmethod
     def segment_create_args_validate(cls, args: dict, document: Document):

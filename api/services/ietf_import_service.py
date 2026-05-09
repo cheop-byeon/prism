@@ -620,11 +620,13 @@ class IetfImportService:
             ))
             # Embed a parseable header as the first line so metadata is
             # recoverable from the DB content even without the vector store.
+            # Must NOT start with punctuation/symbols — remove_leading_symbols()
+            # in the indexing pipeline strips those characters from the start.
             header = (
-                f"[ietf-evolution] draft:{draft_name} "
+                f"ietf-evolution draft:{draft_name} "
                 f"from:{from_rev} to:{to_rev} "
-                f"section:{sec_id} title:{section_title!r} "
-                f"change:{change_type}"
+                f"section:{sec_id} change:{change_type} "
+                f"| {section_title}"
             )
             content = f"{header}\n\n{diff}"
             # `content` is promoted to page_content by JsonlExtractor; everything
