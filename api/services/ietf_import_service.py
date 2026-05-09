@@ -555,6 +555,18 @@ class IetfImportService:
     )
 
     @staticmethod
+    def _section_sort_key(sec_id: str) -> tuple:
+        """Numeric sort key for section IDs like '1', '1.2', '10', 'A', 'A.1'."""
+        parts = sec_id.split('.')
+        key: list[tuple[int, int | str]] = []
+        for part in parts:
+            try:
+                key.append((0, int(part)))
+            except ValueError:
+                key.append((1, part))
+        return tuple(key)
+
+    @staticmethod
     def _parse_sections(text: str) -> dict[str, tuple[str, str]]:
         """Split IETF plain-text into {section_id: (title, body)}.
 
@@ -584,6 +596,45 @@ class IetfImportService:
         return sections
 
     @staticmethod
+    def _split_paragraphs(text: str) -> list[str]:
+        """Split section body into paragraphs on two or more consecutive blank lines."""
+        return [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
+
+    @staticmethod
+    def _prose_diff(old_text: str, new_text: str, from_rev: str, to_rev: str) -> str:
+        """Return a human-readable paragraph-level diff as plain prose.
+
+        Uses SequenceMatcher on the paragraph list so the output describes what
+        actually changed in plain English rather than patch-format noise.
+        Returns an empty string when no paragraph-level differences are found
+        (caller should fall back to showing the full before/after texts).
+        """
+        old_paras = IetfImportService._split_paragraphs(old_text)
+        new_paras = IetfImportService._split_paragraphs(new_text)
+        matcher = difflib.SequenceMatcher(None, old_paras, new_paras, autojunk=False)
+        blocks: list[str] = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == 'equal':
+                continue
+            old_block = old_paras[i1:i2]
+            new_block = new_paras[j1:j2]
+            if tag == 'replace':
+                paired = min(len(old_block), len(new_block))
+                for old_p, new_p in zip(old_block[:paired], new_block[:paired]):
+                    blocks.append(f"Before (rev {from_rev}):\n{old_p}\n\nAfter (rev {to_rev}):\n{new_p}")
+                for extra in old_block[paired:]:
+                    blocks.append(f"Removed in rev {to_rev}:\n{extra}")
+                for extra in new_block[paired:]:
+                    blocks.append(f"Added in rev {to_rev}:\n{extra}")
+            elif tag == 'delete':
+                for p in old_block:
+                    blocks.append(f"Removed in rev {to_rev}:\n{p}")
+            elif tag == 'insert':
+                for p in new_block:
+                    blocks.append(f"Added in rev {to_rev}:\n{p}")
+        return '\n\n'.join(blocks)
+
+    @staticmethod
     def _diff_version_pair(
         old: dict[str, tuple[str, str]],
         new: dict[str, tuple[str, str]],
@@ -593,15 +644,18 @@ class IetfImportService:
     ) -> list[dict]:
         """Return change records for every section that differs between two revisions."""
         records: list[dict] = []
-        for sec_id in sorted(set(old) | set(new)):
+        sort_key = IetfImportService._section_sort_key
+        for sec_id in sorted(set(old) | set(new), key=sort_key):
             old_entry = old.get(sec_id)
             new_entry = new.get(sec_id)
+            old_text = old_entry[1] if old_entry else ''
+            new_text = new_entry[1] if new_entry else ''
             if old_entry is None and new_entry is not None:
                 change_type = "added"
             elif old_entry is not None and new_entry is None:
                 change_type = "removed"
             elif old_entry is not None and new_entry is not None:
-                if ' '.join(old_entry[1].split()) == ' '.join(new_entry[1].split()):
+                if ' '.join(old_text.split()) == ' '.join(new_text.split()):
                     continue  # identical text — skip
                 change_type = "modified"
             else:
@@ -610,14 +664,18 @@ class IetfImportService:
             # Skip boilerplate/bibliographic sections — they're not normative content.
             if IetfImportService._SKIP_SECTION_RE.match(section_title):
                 continue
-            diff = '\n'.join(difflib.unified_diff(
-                (old_entry[1] if old_entry else '').splitlines(),
-                (new_entry[1] if new_entry else '').splitlines(),
-                fromfile=f"{draft_name}-{from_rev}",
-                tofile=f"{draft_name}-{to_rev}",
-                n=2,
-                lineterm='',
-            ))
+
+            # Build human-readable prose body (no patch-format noise).
+            if change_type == "added":
+                body = f"New section added in rev {to_rev}:\n{new_text}"
+            elif change_type == "removed":
+                body = f"Section removed after rev {from_rev}:\n{old_text}"
+            else:
+                body = IetfImportService._prose_diff(old_text, new_text, from_rev, to_rev)
+                if not body:
+                    # No paragraph-level boundaries found — show full before/after.
+                    body = f"Before (rev {from_rev}):\n{old_text}\n\nAfter (rev {to_rev}):\n{new_text}"
+
             # Embed a parseable header as the first line so metadata is
             # recoverable from the DB content even without the vector store.
             # Must NOT start with punctuation/symbols — remove_leading_symbols()
@@ -628,7 +686,7 @@ class IetfImportService:
                 f"section:{sec_id} change:{change_type} "
                 f"| {section_title}"
             )
-            content = f"{header}\n\n{diff}"
+            content = f"{header}\n\n{body}"
             # `content` is promoted to page_content by JsonlExtractor; everything
             # else becomes chunk metadata (draft_name, from_rev, to_rev, …).
             records.append({
@@ -643,22 +701,15 @@ class IetfImportService:
         return records
 
     @staticmethod
-    def generate_draft_evolution(draft_name: str) -> tuple[dict, int]:
-        """Fetch every plain-text revision of a draft, diff them section by
-        section, and upload the resulting change-log as a JSONL dataset file.
+    def _fetch_all_revisions(draft_name: str) -> tuple[list[str], dict[str, str]]:
+        """Fetch all plain-text revisions of *draft_name* from the IETF archive.
 
-        Each JSONL line becomes one chunk via JsonlExtractor.  Fields:
-          content        — unified diff text (promoted to page_content)
-          draft_name, from_rev, to_rev, section_id, section_title,
-          change_type (added|removed|modified)  — chunk metadata
-
-        Boilerplate sections (ToC, References, Authors, Acknowledgements, …)
-        are excluded; only normative content sections are diffed.
+        Returns ``(sorted_revs, version_texts)`` where *version_texts* maps each
+        two-digit revision string to its plain-text content.
         """
         _ARCHIVE = "https://www.ietf.org/archive/id/"
         _DATATRACKER = "https://datatracker.ietf.org/api/v1/doc/document/"
 
-        # Determine current revision from Datatracker
         try:
             with httpx.Client(timeout=15.0) as client:
                 resp = client.get(f"{_DATATRACKER}{draft_name}/", params={"format": "json"})
@@ -671,7 +722,6 @@ class IetfImportService:
 
         revisions = [f"{i:02d}" for i in range(max_rev + 1)]
 
-        # Fetch all revision texts in parallel
         def _fetch(rev: str) -> tuple[str, str | None]:
             url = f"{_ARCHIVE}{draft_name}-{rev}.txt"
             try:
@@ -694,8 +744,53 @@ class IetfImportService:
                 f"Could not fetch enough revisions of '{draft_name}' to produce a diff"
             )
 
-        # Parse each version into sections and diff consecutive pairs
-        sorted_revs = sorted(version_texts)
+        return sorted(version_texts), version_texts
+
+    @staticmethod
+    def _compute_section_lineage(
+        all_changes: list[dict],
+        final_sections: dict[str, tuple[str, str]],
+        first_rev: str,
+    ) -> dict[str, dict]:
+        """Derive revision lineage for each section present in the final version.
+
+        Returns a mapping ``{section_id: {first_seen_rev, last_changed_rev,
+        change_count}}`` using the ordered *all_changes* list built by
+        ``_diff_version_pair``.
+        """
+        lineage: dict[str, dict] = {}
+        for sec_id in final_sections:
+            sec_changes = [c for c in all_changes if c["section_id"] == sec_id]
+            if not sec_changes:
+                lineage[sec_id] = {
+                    "first_seen_rev": first_rev,
+                    "last_changed_rev": first_rev,
+                    "change_count": 0,
+                }
+            else:
+                added_events = [c for c in sec_changes if c["change_type"] == "added"]
+                first_seen = added_events[0]["to_rev"] if added_events else first_rev
+                lineage[sec_id] = {
+                    "first_seen_rev": first_seen,
+                    "last_changed_rev": sec_changes[-1]["to_rev"],
+                    "change_count": len(sec_changes),
+                }
+        return lineage
+
+    @staticmethod
+    def generate_draft_evolution(draft_name: str) -> tuple[dict, int]:
+        """Fetch every plain-text revision of a draft, diff them section by
+        section, and upload the resulting change-log as a JSONL dataset file.
+
+        Each JSONL line becomes one chunk via JsonlExtractor.  Fields:
+          content        — paragraph-level prose diff (promoted to page_content)
+          draft_name, from_rev, to_rev, section_id, section_title,
+          change_type (added|removed|modified)  — chunk metadata
+
+        Boilerplate sections (ToC, References, Authors, Acknowledgements, …)
+        are excluded; only normative content sections are diffed.
+        """
+        sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
         parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
 
         all_changes: list[dict] = []
@@ -706,9 +801,7 @@ class IetfImportService:
                 )
             )
 
-        records = all_changes
-
-        jsonl_bytes = '\n'.join(json.dumps(r) for r in records).encode()
+        jsonl_bytes = '\n'.join(json.dumps(r) for r in all_changes).encode()
         filename = f"{draft_name}-evolution.jsonl"
 
         try:
@@ -720,6 +813,100 @@ class IetfImportService:
                 user=user,
                 source="datasets",
                 source_url=f"ietfdata://evolution/{draft_name}",
+            )
+        except services.errors.file.FileTooLargeError as exc:
+            raise FileTooLargeError(exc.description)
+        except services.errors.file.UnsupportedFileTypeError:
+            raise UnsupportedFileTypeError()
+
+        return (
+            FileWithSignedUrl(
+                id=upload_file.id,
+                name=upload_file.name,
+                size=upload_file.size,
+                extension=upload_file.extension,
+                url=file_helpers.get_signed_file_url(upload_file_id=upload_file.id),
+                mime_type=upload_file.mime_type,
+                created_by=upload_file.created_by,
+                created_at=int(upload_file.created_at.timestamp()),
+            ).model_dump(mode="json"),
+            201,
+        )
+
+    @staticmethod
+    def generate_draft_annotated_rfc(draft_name: str) -> tuple[dict, int]:
+        """Fetch all revisions, compute per-section lineage, then upload a JSONL
+        file containing the *final* version's sections annotated with:
+
+          first_seen_rev   — revision that first introduced this section
+          last_changed_rev — most recent revision that modified it
+          change_count     — total number of revision pairs that touched it
+
+        A section with change_count=0 has been stable since the first fetched
+        revision (settled text); a high change_count signals a frequently
+        renegotiated requirement.
+        """
+        sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
+        parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
+
+        all_changes: list[dict] = []
+        for from_rev, to_rev in zip(sorted_revs, sorted_revs[1:]):
+            all_changes.extend(
+                IetfImportService._diff_version_pair(
+                    parsed[from_rev], parsed[to_rev], from_rev, to_rev, draft_name
+                )
+            )
+
+        final_rev = sorted_revs[-1]
+        final_sections = parsed[final_rev]
+        lineage = IetfImportService._compute_section_lineage(all_changes, final_sections, sorted_revs[0])
+
+        sort_key = IetfImportService._section_sort_key
+        records: list[dict] = []
+        for sec_id in sorted(final_sections, key=sort_key):
+            title, body = final_sections[sec_id]
+            if not body.strip():
+                continue
+            if IetfImportService._SKIP_SECTION_RE.match(title):
+                continue
+            lin = lineage.get(sec_id, {})
+            first_seen_rev = str(lin.get("first_seen_rev", sorted_revs[0]))
+            last_changed_rev = str(lin.get("last_changed_rev", sorted_revs[0]))
+            change_count = str(lin.get("change_count", 0))
+            # Embed parseable header (must start with a letter — see remove_leading_symbols).
+            header = (
+                f"ietf-annotated draft:{draft_name} "
+                f"rev:{final_rev} "
+                f"section:{sec_id} "
+                f"first:{first_seen_rev} "
+                f"last:{last_changed_rev} "
+                f"changes:{change_count} "
+                f"| {title}"
+            )
+            content = f"{header}\n\n{body}"
+            records.append({
+                "content": content,
+                "draft_name": draft_name,
+                "section_id": sec_id,
+                "section_title": title,
+                "final_rev": final_rev,
+                "first_seen_rev": first_seen_rev,
+                "last_changed_rev": last_changed_rev,
+                "change_count": change_count,
+            })
+
+        jsonl_bytes = '\n'.join(json.dumps(r) for r in records).encode()
+        filename = f"{draft_name}-annotated.jsonl"
+
+        try:
+            user, _ = current_account_with_tenant()
+            upload_file = FileService(db.engine).upload_file(
+                filename=filename,
+                content=jsonl_bytes,
+                mimetype="application/jsonlines",
+                user=user,
+                source="datasets",
+                source_url=f"ietfdata://annotated/{draft_name}",
             )
         except services.errors.file.FileTooLargeError as exc:
             raise FileTooLargeError(exc.description)

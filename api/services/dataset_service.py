@@ -3145,14 +3145,27 @@ class SegmentService:
         re.IGNORECASE,
     )
 
+    _ANNOTATED_HEADER_RE = re.compile(
+        r'^ietf-annotated\s+'
+        r'draft:(?P<draft_name>\S+)\s+'
+        r'rev:(?P<final_rev>\S+)\s+'
+        r'section:(?P<section_id>\S+)\s+'
+        r'first:(?P<first_seen_rev>\S+)\s+'
+        r'last:(?P<last_changed_rev>\S+)\s+'
+        r'changes:(?P<change_count>\S+)\s+'
+        r'\|\s*(?P<section_title>.+)$',
+        re.IGNORECASE,
+    )
+
     @classmethod
-    def _parse_evolution_metadata(cls, content: str) -> dict[str, str]:
-        """Extract metadata from an evolution chunk's embedded header line."""
-        first_line = (content or "").splitlines()[0] if content else ""
-        m = cls._EVOLUTION_HEADER_RE.match(first_line.strip())
-        if not m:
-            return {}
-        return {k: v.strip() for k, v in m.groupdict().items() if v}
+    def _parse_chunk_header(cls, content: str) -> dict[str, str]:
+        """Extract metadata from an ietf-evolution or ietf-annotated header line."""
+        first_line = (content or "").splitlines()[0].strip() if content else ""
+        for pattern in (cls._EVOLUTION_HEADER_RE, cls._ANNOTATED_HEADER_RE):
+            m = pattern.match(first_line)
+            if m:
+                return {k: v.strip() for k, v in m.groupdict().items() if v}
+        return {}
 
     @classmethod
     def segment_create_args_validate(cls, args: dict, document: Document):
@@ -4067,7 +4080,7 @@ class SegmentService:
                 )
 
         # Fallback 1: header is in this chunk's own content.
-        result = cls._parse_evolution_metadata(content)
+        result = cls._parse_chunk_header(content)
         if result:
             return result
 
@@ -4086,7 +4099,7 @@ class SegmentService:
                 )
                 rows = db.session.execute(stmt).all()
                 for (seg_content,) in rows:
-                    result = cls._parse_evolution_metadata(seg_content or "")
+                    result = cls._parse_chunk_header(seg_content or "")
                     if result:
                         return result
             except Exception:

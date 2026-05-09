@@ -108,6 +108,10 @@ const SegmentDetail: FC<ISegmentDetailProps> = ({
     section_id: t('segment.metadataSectionId', { ns: 'datasetDocuments' }),
     section_title: t('segment.metadataSectionTitle', { ns: 'datasetDocuments' }),
     change_type: t('segment.metadataChangeType', { ns: 'datasetDocuments' }),
+    final_rev: t('segment.metadataFinalRev', { ns: 'datasetDocuments' }),
+    first_seen_rev: t('segment.metadataFirstSeenRev', { ns: 'datasetDocuments' }),
+    last_changed_rev: t('segment.metadataLastChangedRev', { ns: 'datasetDocuments' }),
+    change_count: t('segment.metadataChangeCount', { ns: 'datasetDocuments' }),
   }
   const metadataItems = Object.entries(normalizedMetadata)
     .filter(([key, value]) => !SKIP_METADATA_KEYS.has(key) && value != null && value !== '')

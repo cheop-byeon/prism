@@ -31,6 +31,7 @@ import {
   fetchIetfRfcFormats,
   fetchIetfRfcSuggestions,
   fetchIetfWgDocuments,
+  importIetfDraftAnnotatedRfc,
   importIetfDraftEvolution,
   importIetfDraftFile,
   importIetfRfcFile,
@@ -215,6 +216,7 @@ function IetfImporter({
   const [importType, setImportType] = useState<'rfc' | 'draft'>('rfc')
   const [selectedDraftVersion, setSelectedDraftVersion] = useState<number | null>(null)
   const [isImportingEvolution, setIsImportingEvolution] = useState(false)
+  const [isImportingAnnotatedRfc, setIsImportingAnnotatedRfc] = useState(false)
   const [preprocessResults, setPreprocessResults] = useState<IetfYearPreprocessResult[] | null>(null)
   const [selectedPreprocessYears, setSelectedPreprocessYears] = useState<number[]>([])
   const [availableFormats, setAvailableFormats] = useState<IetfFormatInfo[]>([])
@@ -749,6 +751,23 @@ function IetfImporter({
     }
     finally {
       setIsImportingEvolution(false)
+    }
+  }
+
+  const handleImportAnnotatedRfc = async () => {
+    const draftName = selectedRfc?.draft_base_name
+    if (!draftName)
+      return
+    setIsImportingAnnotatedRfc(true)
+    try {
+      const file = await importIetfDraftAnnotatedRfc(draftName)
+      handleImportedFile(file)
+    }
+    catch (error) {
+      await handleRequestError(error)
+    }
+    finally {
+      setIsImportingAnnotatedRfc(false)
     }
   }
 
@@ -1385,28 +1404,51 @@ function IetfImporter({
                       </div>
                     )}
 
-                    {/* Evolution log — only shown when the RFC has a known originating draft */}
+                    {/* Evolution log and annotated RFC — only shown when the RFC has a known originating draft */}
                     {selectedRfc.draft_base_name && (
-                      <div className="space-y-2 border-t border-divider-subtle pt-4">
-                        <div className="text-xs font-medium text-text-secondary">
-                          {t('stepOne.ietf.evolution', { ns: 'datasetCreation' })}
+                      <div className="space-y-4 border-t border-divider-subtle pt-4">
+                        <div className="space-y-2">
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.evolution', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="text-xs text-text-tertiary">
+                            {t('stepOne.ietf.evolutionDesc', {
+                              ns: 'datasetCreation',
+                              draft: selectedRfc.draft_base_name,
+                            })}
+                          </div>
+                          <Button
+                            size="small"
+                            loading={isImportingEvolution}
+                            disabled={isImportingEvolution || isImportingAnnotatedRfc || isSubmitting}
+                            onClick={handleImportEvolution}
+                          >
+                            {isImportingEvolution
+                              ? t('stepOne.ietf.evolutionImporting', { ns: 'datasetCreation' })
+                              : t('stepOne.ietf.importEvolution', { ns: 'datasetCreation' })}
+                          </Button>
                         </div>
-                        <div className="text-xs text-text-tertiary">
-                          {t('stepOne.ietf.evolutionDesc', {
-                            ns: 'datasetCreation',
-                            draft: selectedRfc.draft_base_name,
-                          })}
+                        <div className="space-y-2">
+                          <div className="text-xs font-medium text-text-secondary">
+                            {t('stepOne.ietf.annotatedRfc', { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="text-xs text-text-tertiary">
+                            {t('stepOne.ietf.annotatedRfcDesc', {
+                              ns: 'datasetCreation',
+                              draft: selectedRfc.draft_base_name,
+                            })}
+                          </div>
+                          <Button
+                            size="small"
+                            loading={isImportingAnnotatedRfc}
+                            disabled={isImportingEvolution || isImportingAnnotatedRfc || isSubmitting}
+                            onClick={handleImportAnnotatedRfc}
+                          >
+                            {isImportingAnnotatedRfc
+                              ? t('stepOne.ietf.annotatedRfcImporting', { ns: 'datasetCreation' })
+                              : t('stepOne.ietf.importAnnotatedRfc', { ns: 'datasetCreation' })}
+                          </Button>
                         </div>
-                        <Button
-                          size="small"
-                          loading={isImportingEvolution}
-                          disabled={isImportingEvolution || isSubmitting}
-                          onClick={handleImportEvolution}
-                        >
-                          {isImportingEvolution
-                            ? t('stepOne.ietf.evolutionImporting', { ns: 'datasetCreation' })
-                            : t('stepOne.ietf.importEvolution', { ns: 'datasetCreation' })}
-                        </Button>
                       </div>
                     )}
                   </div>

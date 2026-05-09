@@ -251,6 +251,14 @@ class IetfDraftEvolutionApi(Resource):
         return IetfImportService.generate_draft_evolution(payload.draft_name)
 
 
+@console_ns.route("/ietf/imports/draft-annotated-rfc")
+class IetfDraftAnnotatedRfcApi(Resource):
+    @login_required
+    def post(self):
+        payload = IetfDraftEvolutionRequest.model_validate(console_ns.payload)
+        return IetfImportService.generate_draft_annotated_rfc(payload.draft_name)
+
+
 @console_ns.route("/ietf/rfcs/formats")
 class IetfRfcFormatsApi(Resource):
     @login_required

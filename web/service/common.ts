@@ -552,6 +552,10 @@ export const importIetfDraftEvolution = (draftName: string): Promise<UploadedCon
   return post<UploadedConsoleFile>('/ietf/imports/draft-evolution', { body: { draft_name: draftName } })
 }
 
+export const importIetfDraftAnnotatedRfc = (draftName: string): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/draft-annotated-rfc', { body: { draft_name: draftName } })
+}
+
 export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {
   return get<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/status`)
 }
