@@ -399,6 +399,8 @@ class DatasetDocumentSegmentUpdateApi(Resource):
             dataset=dataset,
             index_node_id=segment.index_node_id,
             content=segment.content or "",
+            document_id=str(segment.document_id),
+            segment_position=segment.position,
         )
         segment_dict["metadata"] = metadata
         return {"data": segment_dict}, 200

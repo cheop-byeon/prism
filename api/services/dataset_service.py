@@ -4030,13 +4030,19 @@ class SegmentService:
         dataset: Dataset,
         index_node_id: str | None,
         content: str = "",
+        document_id: str | None = None,
+        segment_position: int | None = None,
     ) -> dict[str, str]:
         """Return display metadata for a chunk.
 
-        Primary source: vector store (high-quality indexing only).
-        Fallback: parse the structured ``[ietf-evolution]`` header that is
-        embedded in evolution-diff chunk content so metadata is available
-        even for economical indexing or when ``get_by_ids`` is unsupported.
+        Sources tried in order:
+        1. Vector store (high-quality indexing): full metadata for every chunk
+           including continuation chunks split from the same diff entry.
+        2. Parse the ``ietf-evolution`` header embedded in the chunk's own
+           content (present in the first chunk of each diff entry).
+        3. Walk backwards through preceding segments in the same document to
+           find the nearest chunk that carries the header, so all continuation
+           chunks of a split diff entry display the same metadata.
         """
         if index_node_id and dataset.indexing_technique == IndexTechniqueType.HIGH_QUALITY:
             try:
@@ -4060,7 +4066,30 @@ class SegmentService:
                     exc_info=True,
                 )
 
-        return cls._parse_evolution_metadata(content)
+        # Fallback 1: header is in this chunk's own content.
+        result = cls._parse_evolution_metadata(content)
+        if result:
+            return result
+
+        # Fallback 2: this is a continuation chunk — find the nearest preceding
+        # segment in the same document that carries the evolution header.
+        if document_id and segment_position is not None:
+            rows = (
+                db.session.query(DocumentSegment.content)
+                .filter(
+                    DocumentSegment.document_id == document_id,
+                    DocumentSegment.position < segment_position,
+                )
+                .order_by(DocumentSegment.position.desc())
+                .limit(20)
+                .all()
+            )
+            for (seg_content,) in rows:
+                result = cls._parse_evolution_metadata(seg_content or "")
+                if result:
+                    return result
+
+        return {}
 
 
 class DatasetCollectionBindingService:
