@@ -61,7 +61,7 @@ class FaissVector(BaseVector):
 
     @staticmethod
     def _normalize(vectors: list[list[float]]) -> np.ndarray:
-        arr = np.array(vectors, dtype=np.float32)
+        arr = np.atleast_2d(np.array(vectors, dtype=np.float32))
         norms = np.linalg.norm(arr, axis=1, keepdims=True)
         norms = np.where(norms == 0.0, 1.0, norms)
         return arr / norms
