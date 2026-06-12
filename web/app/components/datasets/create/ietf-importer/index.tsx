@@ -60,6 +60,7 @@ type MailarchiveFormState = {
   fromAddr: string
   subject: string
   searchIn: ('subject' | 'body')[]
+  filterEmails: boolean
 }
 
 type RfcFormState = {
@@ -85,6 +86,7 @@ const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
   fromAddr: '',
   subject: '',
   searchIn: ['subject'],
+  filterEmails: true,
 }
 
 const DEFAULT_RFC_FORM: RfcFormState = {
@@ -677,6 +679,7 @@ function IetfImporter({
         from_addr: trimOrUndefined(mailarchiveForm.fromAddr),
         subject: trimOrUndefined(mailarchiveForm.subject),
         search_in: mailarchiveForm.searchIn,
+        filter_emails: mailarchiveForm.filterEmails,
       })
       setPreprocessResults(result.years)
       setOpen(false)
@@ -1147,6 +1150,14 @@ function IetfImporter({
                       ))}
                     </div>
                   </div>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      checked={mailarchiveForm.filterEmails}
+                      onChange={e => setMailarchiveForm(prev => ({ ...prev, filterEmails: e.target.checked }))}
+                    />
+                    {t('stepOne.ietf.filterEmails', { ns: 'datasetCreation' })}
+                  </label>
                 </div>
                 {mailarchiveForm.mailingList.trim() && (
                   <div

@@ -436,6 +436,7 @@ export type IetfMailarchivePreprocessRequest = {
   from_addr?: string
   subject?: string
   search_in: ('subject' | 'body')[]
+  filter_emails?: boolean
 }
 
 export type IetfPreprocessedUploadRequest = {

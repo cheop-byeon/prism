@@ -184,6 +184,7 @@ class IetfMailarchivePreprocessRequest(BaseModel):
     from_addr: str | None = Field(default=None)
     subject: str | None = Field(default=None)
     search_in: list[Literal["subject", "body"]] = Field(default=["subject"])
+    filter_emails: bool = Field(default=True)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -208,6 +209,7 @@ class IetfMailarchiveMboxPreprocessApi(Resource):
             from_addr=payload.from_addr,
             subject=payload.subject,
             search_in=list(payload.search_in),
+            filter_emails=payload.filter_emails,
         )
 
 

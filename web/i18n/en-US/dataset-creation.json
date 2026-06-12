@@ -40,6 +40,7 @@
   "stepOne.ietf.fetchAll": "Import all matched emails (may take longer)",
   "stepOne.ietf.fetchAllHint": "When enabled, Dify imports in batches of Max items until no more messages or file slot limit (remaining: {{slots}}).",
   "stepOne.ietf.fetchAllReachFileLimit": "Stopped after {{limit}} files due to file slot limit. Import again to continue.",
+  "stepOne.ietf.filterEmails": "Discard low-quality emails (no Archived-At header, PGP blocks, binary or too-short body)",
   "stepOne.ietf.fromAddr": "Sender contains",
   "stepOne.ietf.github": "GitHub",
   "stepOne.ietf.githubDraft": "Repository",

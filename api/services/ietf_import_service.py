@@ -1004,7 +1004,7 @@ class IetfImportService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def preprocess_mbox_file(saved_path: str) -> dict:
+    def preprocess_mbox_file(saved_path: str, filter_emails: bool = True) -> dict:
         """Parse a local mbox file and extract clean {url, subject, body} records.
 
         Returns a dict with keys:
@@ -1012,6 +1012,9 @@ class IetfImportService:
             total_emails      – number of accepted emails
             discarded_emails  – number discarded (no Archived-At, or non-natural body)
             preview_lines     – top 10 body lines of the first accepted email
+
+        When filter_emails is False, all emails with a parseable message and non-empty
+        body are accepted regardless of Archived-At presence or body quality.
         """
         path = Path(saved_path)
         if not path.exists():
@@ -1038,9 +1041,14 @@ class IetfImportService:
             archived_at = msg.get("Archived-At", "").strip()
             url = archived_at.strip("<>").strip()
             if not url:
-                discarded += 1
-                continue
-            message_id = url.rstrip("/").split("/")[-1]
+                if filter_emails:
+                    discarded += 1
+                    continue
+                raw_mid = msg.get("Message-ID", "").strip().strip("<>")
+                message_id = raw_mid or str(len(accepted))
+                url = f"mid:{message_id}"
+            else:
+                message_id = url.rstrip("/").split("/")[-1]
 
             # ---- Subject (RFC 2047 decoded) ----
             subject = IetfImportService._decode_header(msg.get("Subject", ""))
@@ -1049,8 +1057,9 @@ class IetfImportService:
             date = IetfImportService._decode_header(msg.get("Date", ""))
 
             # ---- Body (text/plain only) ----
-            body = IetfImportService._extract_text_body(msg)
-            if body is None or not IetfImportService._is_natural_text(body):
+            raw_body = IetfImportService._extract_text_body(msg)
+            body = raw_body.strip() if raw_body else None
+            if not body or (filter_emails and not IetfImportService._is_natural_text(body)):
                 discarded += 1
                 continue
 
@@ -1075,6 +1084,7 @@ class IetfImportService:
         from_addr: str | None = None,
         subject: str | None = None,
         search_in: list[str] | None = None,
+        filter_emails: bool = True,
     ) -> tuple[dict, int]:
         """Download one mbox per calendar year in [sent_after, sent_before] and preprocess each.
 
@@ -1119,7 +1129,9 @@ class IetfImportService:
                         "preview_lines": [],
                     }
                 raise
-            preprocess_result = IetfImportService.preprocess_mbox_file(download_result["saved_path"])
+            preprocess_result = IetfImportService.preprocess_mbox_file(
+                download_result["saved_path"], filter_emails=filter_emails
+            )
             processed_path, processed_host_path_hint = IetfImportService._write_preprocessed_email_records(
                 source_path=download_result["saved_path"],
                 emails=preprocess_result["emails"],
@@ -1271,7 +1283,9 @@ class IetfImportService:
         source = Path(source_path)
         destination = processed_dir / f"{source.stem}.jsonl"
         if destination.exists():
-            destination = processed_dir / f"{source.stem}-dup.jsonl"
+            from datetime import datetime as _dt
+            ts = _dt.now().strftime("%Y%m%d%H%M%S")
+            destination = processed_dir / f"{source.stem}-{ts}.jsonl"
 
         with destination.open("w", encoding="utf-8") as f:
             for email_record in emails:

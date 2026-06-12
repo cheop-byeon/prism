@@ -295,15 +295,15 @@ const ModelModal: FC<ModelModalProps> = ({
     <Dialog open onOpenChange={handleOpenChange}>
       <DialogContent
         backdropProps={{ forceRender: true }}
-        className="w-[640px] max-w-[640px] overflow-hidden p-0"
+        className="flex max-h-[calc(100vh-80px)] w-[640px] max-w-[640px] flex-col overflow-hidden p-0"
       >
         <DialogCloseButton className="right-5 top-5 h-8 w-8" />
-        <div className="p-6 pb-3">
+        <div className="shrink-0 p-6 pb-3">
           {modalTitle}
           {modalDesc}
           {modalModel}
         </div>
-        <div className="max-h-[calc(100vh-320px)] overflow-y-auto px-6 py-3">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-3">
           {
             mode === ModelModalModeEnum.configCustomModel && (
               <AuthForm
@@ -365,7 +365,7 @@ const ModelModal: FC<ModelModalProps> = ({
             )
           }
         </div>
-        <div className="flex justify-between p-6 pt-5">
+        <div className="flex shrink-0 justify-between p-6 pt-5">
           {
             (provider.help && (provider.help.title || provider.help.url))
               ? (
