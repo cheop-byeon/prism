@@ -42,8 +42,11 @@ _MESSAGE_ID_RE = re.compile(r"<[^<>\s]+>")
 _SUBJECT_FALLBACK_WINDOW_DAYS = 120
 
 # Thread parents are LLM context on every retrieval hit; cap their size.
+# The char cap must also stay below Dify's parent-chunk hard limit
+# (INDEXING_MAX_SEGMENTATION_TOKENS_LENGTH = 4,000 tokens ≈ 16K chars),
+# so a thread record maps to exactly one parent without being re-split.
 _DEFAULT_MAX_MESSAGES_PER_PART = 40
-_DEFAULT_MAX_CHARS_PER_PART = 30_000
+_DEFAULT_MAX_CHARS_PER_PART = 12_000
 
 
 def normalize_subject(subject: str) -> str:
@@ -234,6 +237,9 @@ def build_thread_records(
                     "part": part_index,
                     "part_count": part_count,
                     "participants": participants,
+                    # Tells the parent-child index processor to use this record
+                    # as one parent chunk instead of re-splitting it.
+                    "parent_unit": "record",
                 }
             )
     return records

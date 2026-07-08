@@ -116,6 +116,7 @@ class TestBuildThreadRecords:
         assert "Alice" in record["participants"]
         assert "Bob" in record["participants"]
         # Thread header + per-message markers with author, date, and URL
+        assert record["parent_unit"] == "record"
         assert record["body"].startswith("Thread: Retry design (2 messages")
         assert "--- Message 1 | Alice <alice@example.com> | 2021-03-01 |" in record["body"]
         assert "--- Message 2 | Bob <bob@example.com> | 2021-03-02 |" in record["body"]
@@ -149,6 +150,26 @@ class TestBuildThreadRecords:
         assert "--- Message 1 |" not in records[1]["body"]
         # Every part header names the thread and its part position
         assert all(f"part {r['part']}/{r['part_count']}" in r["body"] for r in records)
+
+    def test_default_part_cap_fits_dify_parent_chunk_limit(self):
+        # Dify's parent-chunk splitter is hard-capped at 4,000 tokens
+        # (~16K chars); the default part cap must stay safely below it so a
+        # thread record maps to one parent without being re-split.
+        messages = [
+            _record(
+                f"<m{i}@x>",
+                "Long thread" if i == 0 else "Re: Long thread",
+                f"Mon, 0{i + 1} Mar 2021 10:00:00 +0000",
+                references="<m0@x>" if i else "",
+                body="y" * 3000,
+            )
+            for i in range(5)
+        ]
+
+        records = build_thread_records([messages])  # default caps
+
+        assert len(records) > 1  # 15K chars of bodies exceeds the default part cap
+        assert all(len(r["body"]) < 16_000 for r in records)
 
     def test_singleton_thread_still_renders_thread_format(self):
         only = _record("<solo@x>", "Announcement", "Mon, 01 Mar 2021 10:00:00 +0000", body="One-off message body.")

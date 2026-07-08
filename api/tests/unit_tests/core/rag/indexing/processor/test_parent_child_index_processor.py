@@ -33,7 +33,9 @@ class TestParentChildIndexProcessor:
         return document
 
     def _segmentation(self) -> SimpleNamespace:
-        return SimpleNamespace(max_tokens=200, chunk_overlap=10, separator="\n")
+        return SimpleNamespace(
+            max_tokens=200, chunk_overlap=10, separator="\n", chunk_strategy=None, strategy_params=None
+        )
 
     def _paragraph_rules(self) -> SimpleNamespace:
         return SimpleNamespace(
@@ -78,6 +80,44 @@ class TestParentChildIndexProcessor:
                     [Document(page_content="text", metadata={})],
                     process_rule={"mode": "custom", "rules": {"enabled": True}},
                 )
+
+    def test_transform_paragraph_keeps_self_contained_record_as_one_parent(
+        self, processor: ParentChildIndexProcessor
+    ) -> None:
+        splitter = Mock()
+        record_document = Document(
+            page_content="Thread: subject\n\n--- Message 1 ---\nbody",
+            metadata={"dataset_id": "dataset-1", "document_id": "doc-1", "parent_unit": "record"},
+        )
+        child_docs = [ChildDocument(page_content="child-1", metadata={"dataset_id": "dataset-1"})]
+
+        with (
+            patch(
+                "core.rag.index_processor.processor.parent_child_index_processor.Rule.model_validate",
+                return_value=self._paragraph_rules(),
+            ),
+            patch.object(processor, "_get_splitter", return_value=splitter),
+            patch(
+                "core.rag.index_processor.processor.parent_child_index_processor.CleanProcessor.clean",
+                return_value=record_document.page_content,
+            ),
+            patch(
+                "core.rag.index_processor.processor.parent_child_index_processor.helper.generate_text_hash",
+                return_value="hash",
+            ),
+            patch.object(processor, "_get_content_files", return_value=[]),
+            patch.object(processor, "_split_child_nodes", return_value=child_docs),
+        ):
+            result = processor.transform(
+                [record_document],
+                process_rule={"mode": "custom", "rules": {"enabled": True}},
+                preview=False,
+            )
+
+        splitter.split_documents.assert_not_called()
+        assert len(result) == 1
+        assert result[0].page_content == record_document.page_content
+        assert result[0].children == child_docs
 
     def test_transform_paragraph_builds_parent_and_child_docs(self, processor: ParentChildIndexProcessor) -> None:
         splitter = Mock()

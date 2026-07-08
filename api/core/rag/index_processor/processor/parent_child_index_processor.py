@@ -72,8 +72,14 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                 # document clean
                 document_text = CleanProcessor.clean(document.page_content, process_rule)
                 document.page_content = document_text
-                # parse document to nodes
-                document_nodes = splitter.split_documents([document])
+                # Self-contained records (e.g. one-thread-per-line JSONL from the
+                # IETF mailarchive import) are already sized to fit one parent
+                # chunk; re-splitting them would cut mid-record.
+                if document.metadata and document.metadata.get("parent_unit") == "record":
+                    document_nodes = [document]
+                else:
+                    # parse document to nodes
+                    document_nodes = splitter.split_documents([document])
                 split_documents = []
                 for document_node in document_nodes:
                     if document_node.page_content.strip():

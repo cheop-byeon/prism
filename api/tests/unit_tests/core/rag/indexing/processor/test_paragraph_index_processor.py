@@ -41,7 +41,9 @@ class TestParagraphIndexProcessor:
         }
 
     def _rules(self) -> SimpleNamespace:
-        segmentation = SimpleNamespace(max_tokens=256, chunk_overlap=10, separator="\n")
+        segmentation = SimpleNamespace(
+            max_tokens=256, chunk_overlap=10, separator="\n", chunk_strategy=None, strategy_params=None
+        )
         return SimpleNamespace(segmentation=segmentation)
 
     def _llm_result(self, content: str = "summary") -> LLMResult:

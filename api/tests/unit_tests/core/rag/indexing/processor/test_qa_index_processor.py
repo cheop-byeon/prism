@@ -53,7 +53,9 @@ class TestQAIndexProcessor:
         }
 
     def _rules(self) -> SimpleNamespace:
-        segmentation = SimpleNamespace(max_tokens=256, chunk_overlap=10, separator="\n")
+        segmentation = SimpleNamespace(
+            max_tokens=256, chunk_overlap=10, separator="\n", chunk_strategy=None, strategy_params=None
+        )
         return SimpleNamespace(segmentation=segmentation)
 
     def test_extract_forwards_automatic_flag(self, processor: QAIndexProcessor) -> None:
