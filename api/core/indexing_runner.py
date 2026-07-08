@@ -634,7 +634,7 @@ class IndexingRunner:
             )
             create_keyword_thread.start()
 
-        max_workers = int(os.getenv("INDEXING_MAX_WORKERS", "1"))
+        max_workers = int(os.getenv("INDEXING_MAX_WORKERS", "10"))
         if dataset.indexing_technique == IndexTechniqueType.HIGH_QUALITY:
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 futures = []
