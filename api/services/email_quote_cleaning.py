@@ -46,7 +46,11 @@ _LIST_FOOTER_HINT_RE = re.compile(r"mailing list|@ietf\.org", re.IGNORECASE)
 _PGP_BEGIN_RE = re.compile(r"^-----BEGIN PGP (?:SIGNATURE|MESSAGE)-----")
 _PGP_END_RE = re.compile(r"^-----END PGP (?:SIGNATURE|MESSAGE)-----")
 _PGP_SIGNED_HEADER_RE = re.compile(r"^-----BEGIN PGP SIGNED MESSAGE-----")
-_ORIGINAL_MESSAGE_RE = re.compile(r"^\s*-{2,}\s*(?:original|forwarded) message\s*-{2,}\s*$", re.IGNORECASE)
+# Trailing "From:..." on the marker line covers mobile clients that jam the
+# forwarded headers onto the marker itself ("-------- Original message --------From: ...").
+_ORIGINAL_MESSAGE_RE = re.compile(
+    r"^\s*-{2,}\s*(?:original|forwarded) message\s*-{2,}\s*(?:From:.*)?$", re.IGNORECASE
+)
 _ATTRIBUTION_START_RE = re.compile(r"^\s*On \S")
 _ATTRIBUTION_END_RE = re.compile(r"wrote:\s*$")
 _ATTRIBUTION_NAME_RE = re.compile(r"(?:^|,)\s*([^,<>]{2,60}?)\s*(?:<[^>]*>)?\s*wrote:\s*$")

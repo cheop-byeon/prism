@@ -185,6 +185,24 @@ class TestAdvancedMode:
 
         assert result == body.strip()
 
+    def test_drops_mobile_client_original_message_on_marker_line(self):
+        # Samsung/mobile clients jam the forwarded headers onto the marker line
+        # itself: "-------- Original message --------From: ...".
+        body = (
+            "Thank you for this, answering these questions early will "
+            "definitely help while drafting the architecture document.\n"
+            "-------- Original message --------From: Michael Richardson "
+            "<mcr@example.ca> Date: 1/19/23 Subject: templates "
+            "Hi, the design team has been meeting on Mondays to complete "
+            "the contents of the architecture document.\n"
+        )
+
+        result = clean_email_body(body, mode="advanced")
+
+        assert "answering these questions early" in result
+        assert "Original message" not in result
+        assert "design team has been meeting" not in result
+
     def test_drops_original_message_marker_block(self):
         body = (
             "Forwarding the relevant part of the earlier discussion for "
