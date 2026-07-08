@@ -1062,6 +1062,15 @@ class IetfImportService:
             # ---- Date ----
             date = IetfImportService._decode_header(msg.get("Date", ""))
 
+            # ---- Threading headers (used by group_into_threads) ----
+            from_header = IetfImportService._decode_header(msg.get("From", "")).strip()
+            raw_message_id_header = (msg.get("Message-ID") or "").strip()
+            references_header = " ".join(
+                part
+                for part in ((msg.get("References") or "").strip(), (msg.get("In-Reply-To") or "").strip())
+                if part
+            )
+
             # ---- Body (text/plain only) ----
             raw_body = IetfImportService._extract_text_body(msg)
             body = raw_body.strip() if raw_body else None
@@ -1071,7 +1080,18 @@ class IetfImportService:
                 discarded += 1
                 continue
 
-            accepted.append({"id": message_id, "url": url, "subject": subject, "body": body, "date": date})
+            accepted.append(
+                {
+                    "id": message_id,
+                    "url": url,
+                    "subject": subject,
+                    "body": body,
+                    "date": date,
+                    "from": from_header,
+                    "message_id": raw_message_id_header,
+                    "references": references_header,
+                }
+            )
 
         preview_lines: list[str] = []
         if accepted:
@@ -1094,12 +1114,19 @@ class IetfImportService:
         search_in: list[str] | None = None,
         filter_emails: bool = True,
         quote_handling: QuoteHandling = "none",
+        group_threads: bool = False,
     ) -> tuple[dict, int]:
         """Download one mbox per calendar year in [sent_after, sent_before] and preprocess each.
 
         Returns a list of per-year result dicts, each containing:
             year, saved_path, host_path_hint, processed_path, processed_host_path_hint,
-            total_emails, discarded_emails, preview_lines
+            total_emails, discarded_emails, preview_lines (and total_threads in thread mode)
+
+        When group_threads is True, messages are threaded across the *whole*
+        selected range (threads cross year boundaries), then each thread is
+        bucketed into the year of its earliest message so the per-year file
+        and selection flow keep working. Each JSONL record is one thread
+        (or thread part) — see services.email_threading.
         """
         try:
             start_year = datetime.fromisoformat(sent_after).year
@@ -1141,6 +1168,15 @@ class IetfImportService:
             preprocess_result = IetfImportService.preprocess_mbox_file(
                 download_result["saved_path"], filter_emails=filter_emails, quote_handling=quote_handling
             )
+            if group_threads:
+                # Defer writing: threading runs across all years once downloads finish.
+                return {
+                    "year": year,
+                    "saved_path": download_result["saved_path"],
+                    "host_path_hint": download_result["host_path_hint"],
+                    "emails": preprocess_result["emails"],
+                    "discarded_emails": preprocess_result["discarded_emails"],
+                }
             processed_path, processed_host_path_hint = IetfImportService._write_preprocessed_email_records(
                 source_path=download_result["saved_path"],
                 emails=preprocess_result["emails"],
@@ -1165,8 +1201,57 @@ class IetfImportService:
                 result = future.result()  # re-raises any exception from the worker
                 year_result_map[result["year"]] = result
 
-        year_results = [year_result_map[y] for y in sorted(year_result_map)]
+        if group_threads:
+            year_results = IetfImportService._build_threaded_year_results(year_result_map)
+        else:
+            year_results = [year_result_map[y] for y in sorted(year_result_map)]
         return {"years": year_results}, 200
+
+    @staticmethod
+    def _build_threaded_year_results(year_result_map: dict[int, dict]) -> list[dict]:
+        """Thread pooled messages across all years, bucket threads by start year, write per-year files."""
+        from services.email_threading import build_thread_records, group_into_threads
+
+        pooled: list[dict] = []
+        for year in sorted(year_result_map):
+            for email_record in year_result_map[year].get("emails") or []:
+                email_record["_year"] = year
+                pooled.append(email_record)
+
+        threads_by_year: dict[int, list[list[dict]]] = {}
+        for thread in group_into_threads(pooled):
+            threads_by_year.setdefault(thread[0]["_year"], []).append(thread)
+
+        year_results: list[dict] = []
+        for year in sorted(year_result_map):
+            source = year_result_map[year]
+            year_threads = threads_by_year.get(year, [])
+            records = build_thread_records(year_threads)
+
+            processed_path: str | None = None
+            processed_host_path_hint: str | None = None
+            if records and source.get("saved_path"):
+                thread_source = Path(source["saved_path"])
+                thread_source = thread_source.with_name(f"{thread_source.stem}-threads{thread_source.suffix}")
+                processed_path, processed_host_path_hint = IetfImportService._write_preprocessed_email_records(
+                    source_path=thread_source.as_posix(),
+                    emails=records,
+                )
+
+            year_results.append(
+                {
+                    "year": year,
+                    "saved_path": source.get("saved_path"),
+                    "host_path_hint": source.get("host_path_hint"),
+                    "processed_path": processed_path,
+                    "processed_host_path_hint": processed_host_path_hint,
+                    "total_emails": sum(len(thread) for thread in year_threads),
+                    "total_threads": len(year_threads),
+                    "discarded_emails": source.get("discarded_emails", 0),
+                    "preview_lines": records[0]["body"].splitlines()[:10] if records else [],
+                }
+            )
+        return year_results
 
     @staticmethod
     def upload_preprocessed_file(processed_path: str) -> tuple[dict, int]:

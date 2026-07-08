@@ -64,6 +64,8 @@
   "stepOne.ietf.githubTokenHint": "Personal access token with repo or public_repo scope",
   "stepOne.ietf.githubWg": "Working group",
   "stepOne.ietf.githubWgPlaceholder": "Select or type a WG (e.g. httpapi)",
+  "stepOne.ietf.groupThreads": "Group messages into conversation threads (one record per thread)",
+  "stepOne.ietf.groupThreadsHint": "Messages are threaded via References/In-Reply-To headers across the whole date range; each thread becomes one record with per-message author, date and archive URL. Long threads are split into parts. In the next step, pair this with parent-child chunking so a retrieval hit returns the whole discussion.",
   "stepOne.ietf.import": "Import",
   "stepOne.ietf.importAnnotatedRfc": "Import Annotated RFC",
   "stepOne.ietf.importAsMbox": "Import as .mbox",

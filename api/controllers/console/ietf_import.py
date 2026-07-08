@@ -186,6 +186,7 @@ class IetfMailarchivePreprocessRequest(BaseModel):
     search_in: list[Literal["subject", "body"]] = Field(default=["subject"])
     filter_emails: bool = Field(default=True)
     quote_handling: Literal["none", "naive", "advanced"] = Field(default="none")
+    group_threads: bool = Field(default=False)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -212,6 +213,7 @@ class IetfMailarchiveMboxPreprocessApi(Resource):
             search_in=list(payload.search_in),
             filter_emails=payload.filter_emails,
             quote_handling=payload.quote_handling,
+            group_threads=payload.group_threads,
         )
 
 

@@ -64,6 +64,7 @@ type MailarchiveFormState = {
   searchIn: ('subject' | 'body')[]
   filterEmails: boolean
   quoteHandling: QuoteHandlingMode
+  groupThreads: boolean
 }
 
 type RfcFormState = {
@@ -91,6 +92,7 @@ const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
   searchIn: ['subject'],
   filterEmails: true,
   quoteHandling: 'none',
+  groupThreads: false,
 }
 
 const DEFAULT_RFC_FORM: RfcFormState = {
@@ -685,6 +687,7 @@ function IetfImporter({
         search_in: mailarchiveForm.searchIn,
         filter_emails: mailarchiveForm.filterEmails,
         quote_handling: mailarchiveForm.quoteHandling,
+        group_threads: mailarchiveForm.groupThreads,
       })
       setPreprocessResults(result.years)
       setOpen(false)
@@ -1194,6 +1197,20 @@ function IetfImporter({
                       {t('stepOne.ietf.quoteHandlingHint', { ns: 'datasetCreation' })}
                     </div>
                   </div>
+                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                    <input
+                      type="checkbox"
+                      data-testid="ietf-group-threads"
+                      checked={mailarchiveForm.groupThreads}
+                      onChange={e => setMailarchiveForm(prev => ({ ...prev, groupThreads: e.target.checked }))}
+                    />
+                    {t('stepOne.ietf.groupThreads', { ns: 'datasetCreation' })}
+                  </label>
+                  {mailarchiveForm.groupThreads && (
+                    <div className="text-xs text-text-tertiary">
+                      {t('stepOne.ietf.groupThreadsHint', { ns: 'datasetCreation' })}
+                    </div>
+                  )}
                 </div>
                 {mailarchiveForm.mailingList.trim() && (
                   <div
