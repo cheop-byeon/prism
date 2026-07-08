@@ -3125,6 +3125,11 @@ class SegmentService:
         "doc_hash",
         "dataset_id",
         "document_id",
+        # IETF mailarchive plumbing fields: threading keys and the
+        # parent-child routing marker are machine-facing, not chunk metadata.
+        "message_id",
+        "references",
+        "parent_unit",
     })
 
     # Parses the structured header embedded in IETF evolution diff chunks so

@@ -112,7 +112,7 @@ class TestBuildThreadRecords:
         record = records[0]
         assert record["id"] == "a@x"
         assert record["subject"] == "Retry design"
-        assert record["message_count"] == 2
+        assert record["message_count"] == "2"
         assert "Alice" in record["participants"]
         assert "Bob" in record["participants"]
         # Thread header + per-message markers with author, date, and URL
@@ -140,8 +140,10 @@ class TestBuildThreadRecords:
 
         assert len(records) > 1
         assert all(r["thread_id"] == "m0@x" for r in records)
-        assert [r["part"] for r in records] == list(range(1, len(records) + 1))
-        assert all(r["part_count"] == len(records) for r in records)
+        # Metadata values are strings (chunk metadata / vector store properties
+        # are string-typed by convention — see the annotated-RFC records).
+        assert [r["part"] for r in records] == [str(i) for i in range(1, len(records) + 1)]
+        assert all(r["part_count"] == str(len(records)) for r in records)
         # Distinct ids per part, all derived from the thread id
         assert len({r["id"] for r in records}) == len(records)
         assert all(r["id"].startswith("m0@x") for r in records)
@@ -177,7 +179,7 @@ class TestBuildThreadRecords:
         records = build_thread_records([[only]])
 
         assert len(records) == 1
-        assert records[0]["message_count"] == 1
+        assert records[0]["message_count"] == "1"
         assert records[0]["body"].startswith("Thread: Announcement (1 message")
         assert "One-off message body." in records[0]["body"]
 
@@ -188,4 +190,4 @@ class TestBuildThreadRecords:
         records = build_thread_records(group_into_threads([a, b]))
 
         assert len(records) == 1
-        assert records[0]["message_count"] == 2
+        assert records[0]["message_count"] == "2"

@@ -128,7 +128,7 @@ def main() -> None:
     sizes = sorted((len(t) for t in threads), reverse=True)
     multi = [s for s in sizes if s > 1]
     record_sizes = sorted((len(r["body"]) for r in thread_records), reverse=True)
-    split_threads = {r["thread_id"] for r in thread_records if r["part_count"] > 1}
+    split_threads = {r["thread_id"] for r in thread_records if int(r["part_count"]) > 1}
 
     singleton_count = len(sizes) - len(multi)
     print(f"messages:                    {len(records)} from {len(mbox_files)} file(s)")

@@ -232,10 +232,13 @@ def build_thread_records(
                     "subject": subject,
                     "date": str(thread[0].get("date") or ""),
                     "body": header + "\n\n" + "\n\n".join(blocks),
+                    # Counts are strings: chunk metadata / vector store
+                    # properties are string-typed by convention on this branch
+                    # (see the annotated-RFC records' change_count).
                     "thread_id": thread_id,
-                    "message_count": total,
-                    "part": part_index,
-                    "part_count": part_count,
+                    "message_count": str(total),
+                    "part": str(part_index),
+                    "part_count": str(part_count),
                     "participants": participants,
                     # Tells the parent-child index processor to use this record
                     # as one parent chunk instead of re-splitting it.
