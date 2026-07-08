@@ -7,6 +7,7 @@ const mockImportIetfDraftFile = vi.fn()
 const mockImportIetfRfcFile = vi.fn()
 const mockFetchIetfMailingLists = vi.fn()
 const mockFetchIetfRfcSuggestions = vi.fn()
+const mockFetchIetfWgDocuments = vi.fn()
 const mockToastSuccess = vi.fn()
 const mockToastError = vi.fn()
 
@@ -16,6 +17,7 @@ vi.mock('@/service/common', () => ({
   importIetfRfcFile: (...args: unknown[]) => mockImportIetfRfcFile(...args),
   fetchIetfMailingLists: (...args: unknown[]) => mockFetchIetfMailingLists(...args),
   fetchIetfRfcSuggestions: (...args: unknown[]) => mockFetchIetfRfcSuggestions(...args),
+  fetchIetfWgDocuments: (...args: unknown[]) => mockFetchIetfWgDocuments(...args),
 }))
 
 vi.mock('@/service/use-common', () => ({
@@ -52,6 +54,7 @@ describe('IetfImporter', () => {
     vi.clearAllMocks()
     mockFetchIetfMailingLists.mockResolvedValue({ lists: [] })
     mockFetchIetfRfcSuggestions.mockResolvedValue({ suggestions: [] })
+    mockFetchIetfWgDocuments.mockResolvedValue({ documents: [] })
   })
 
   it('should require a mailing list before preprocessing mailarchive content', async () => {
@@ -117,7 +120,7 @@ describe('IetfImporter', () => {
     await waitFor(() => {
       expect(mockDownloadAndPreprocessMailarchiveYears).toHaveBeenCalledWith(expect.objectContaining({
         mailing_list: 'quic',
-        refresh: false,
+        quote_handling: 'none',
       }))
     })
 
@@ -282,6 +285,7 @@ describe('IetfImporter', () => {
     await waitFor(() => {
       expect(mockImportIetfDraftFile).toHaveBeenCalledWith({
         draft_names: ['draft-ietf-quic-transport-02'],
+        format: 'txt',
       })
     })
 

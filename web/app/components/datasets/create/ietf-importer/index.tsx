@@ -53,6 +53,8 @@ type IetfImporterProps = {
 
 type IetfImportMode = 'mailarchive' | 'rfcs' | 'github'
 
+type QuoteHandlingMode = 'none' | 'naive' | 'advanced'
+
 type MailarchiveFormState = {
   mailingList: string
   sentAfter: string
@@ -61,6 +63,7 @@ type MailarchiveFormState = {
   subject: string
   searchIn: ('subject' | 'body')[]
   filterEmails: boolean
+  quoteHandling: QuoteHandlingMode
 }
 
 type RfcFormState = {
@@ -87,6 +90,7 @@ const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
   subject: '',
   searchIn: ['subject'],
   filterEmails: true,
+  quoteHandling: 'none',
 }
 
 const DEFAULT_RFC_FORM: RfcFormState = {
@@ -680,6 +684,7 @@ function IetfImporter({
         subject: trimOrUndefined(mailarchiveForm.subject),
         search_in: mailarchiveForm.searchIn,
         filter_emails: mailarchiveForm.filterEmails,
+        quote_handling: mailarchiveForm.quoteHandling,
       })
       setPreprocessResults(result.years)
       setOpen(false)
@@ -1158,6 +1163,37 @@ function IetfImporter({
                     />
                     {t('stepOne.ietf.filterEmails', { ns: 'datasetCreation' })}
                   </label>
+                  <div data-testid="ietf-quote-handling">
+                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                      {t('stepOne.ietf.quoteHandling', { ns: 'datasetCreation' })}
+                    </div>
+                    <div className="flex gap-2">
+                      {(
+                        [
+                          ['none', t('stepOne.ietf.quoteHandlingNone', { ns: 'datasetCreation' })],
+                          ['naive', t('stepOne.ietf.quoteHandlingNaive', { ns: 'datasetCreation' })],
+                          ['advanced', t('stepOne.ietf.quoteHandlingAdvanced', { ns: 'datasetCreation' })],
+                        ] as [QuoteHandlingMode, string][]
+                      ).map(([modeOption, label]) => (
+                        <button
+                          key={modeOption}
+                          type="button"
+                          data-testid={`ietf-quote-handling-${modeOption}`}
+                          onClick={() => setMailarchiveForm(prev => ({ ...prev, quoteHandling: modeOption }))}
+                          className={`rounded-md border px-3 py-1 text-xs transition-colors ${
+                            mailarchiveForm.quoteHandling === modeOption
+                              ? 'border-components-button-primary-bg bg-components-button-primary-bg text-components-button-primary-text'
+                              : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-state-base-hover'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="mt-1 text-xs text-text-tertiary">
+                      {t('stepOne.ietf.quoteHandlingHint', { ns: 'datasetCreation' })}
+                    </div>
+                  </div>
                 </div>
                 {mailarchiveForm.mailingList.trim() && (
                   <div

@@ -42,6 +42,7 @@ from dify_graph.file import helpers as file_helpers
 from extensions.ext_database import db
 from fields.file_fields import FileWithSignedUrl
 from libs.login import current_account_with_tenant
+from services.email_quote_cleaning import QuoteHandling, clean_email_body
 from services.file_service import FileService
 
 logger = logging.getLogger(__name__)
@@ -1004,7 +1005,9 @@ class IetfImportService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def preprocess_mbox_file(saved_path: str, filter_emails: bool = True) -> dict:
+    def preprocess_mbox_file(
+        saved_path: str, filter_emails: bool = True, quote_handling: QuoteHandling = "none"
+    ) -> dict:
         """Parse a local mbox file and extract clean {url, subject, body} records.
 
         Returns a dict with keys:
@@ -1015,6 +1018,9 @@ class IetfImportService:
 
         When filter_emails is False, all emails with a parseable message and non-empty
         body are accepted regardless of Archived-At presence or body quality.
+
+        quote_handling controls stripping of quoted reply chains / signatures from
+        the extracted bodies — see services.email_quote_cleaning.clean_email_body.
         """
         path = Path(saved_path)
         if not path.exists():
@@ -1059,6 +1065,8 @@ class IetfImportService:
             # ---- Body (text/plain only) ----
             raw_body = IetfImportService._extract_text_body(msg)
             body = raw_body.strip() if raw_body else None
+            if body and quote_handling != "none":
+                body = clean_email_body(body, mode=quote_handling)
             if not body or (filter_emails and not IetfImportService._is_natural_text(body)):
                 discarded += 1
                 continue
@@ -1085,6 +1093,7 @@ class IetfImportService:
         subject: str | None = None,
         search_in: list[str] | None = None,
         filter_emails: bool = True,
+        quote_handling: QuoteHandling = "none",
     ) -> tuple[dict, int]:
         """Download one mbox per calendar year in [sent_after, sent_before] and preprocess each.
 
@@ -1130,7 +1139,7 @@ class IetfImportService:
                     }
                 raise
             preprocess_result = IetfImportService.preprocess_mbox_file(
-                download_result["saved_path"], filter_emails=filter_emails
+                download_result["saved_path"], filter_emails=filter_emails, quote_handling=quote_handling
             )
             processed_path, processed_host_path_hint = IetfImportService._write_preprocessed_email_records(
                 source_path=download_result["saved_path"],
