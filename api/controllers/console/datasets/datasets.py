@@ -245,7 +245,6 @@ def _get_retrieval_methods_by_vector_type(vector_type: str | None, is_mock: bool
         VectorType.RELYT,
         VectorType.TIDB_VECTOR,
         VectorType.CHROMA,
-        VectorType.FAISS,
         VectorType.PGVECTO_RS,
         VectorType.VIKINGDB,
         VectorType.UPSTASH,

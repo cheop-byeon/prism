@@ -26,7 +26,6 @@ from .vdb.chroma_config import ChromaConfig
 from .vdb.clickzetta_config import ClickzettaConfig
 from .vdb.couchbase_config import CouchbaseConfig
 from .vdb.elasticsearch_config import ElasticsearchConfig
-from .vdb.faiss_config import FaissConfig
 from .vdb.hologres_config import HologresConfig
 from .vdb.huawei_cloud_config import HuaweiCloudConfig
 from .vdb.iris_config import IrisVectorConfig
@@ -349,7 +348,6 @@ class MiddlewareConfig(
     VectorStoreConfig,
     AnalyticdbConfig,
     ChromaConfig,
-    FaissConfig,
     ClickzettaConfig,
     HologresConfig,
     HuaweiCloudConfig,

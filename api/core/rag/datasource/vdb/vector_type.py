@@ -5,7 +5,6 @@ class VectorType(StrEnum):
     ALIBABACLOUD_MYSQL = "alibabacloud_mysql"
     ANALYTICDB = "analyticdb"
     CHROMA = "chroma"
-    FAISS = "faiss"
     MILVUS = "milvus"
     MYSCALE = "myscale"
     PGVECTOR = "pgvector"
