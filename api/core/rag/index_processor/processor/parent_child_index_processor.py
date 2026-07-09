@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import uuid
 from collections.abc import Mapping
 from typing import Any
@@ -245,6 +246,29 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                 docs.append(doc)
         return docs
 
+    # Message marker lines embedded by the IETF thread importer:
+    # "--- Message N | author | date | archive-URL ---"
+    _MESSAGE_BLOCK_SPLIT_RE = re.compile(r"^(?=--- Message \d+ \| )", re.MULTILINE)
+
+    @classmethod
+    def _message_aligned_blocks(cls, document_node: Document) -> list[str] | None:
+        """Split a self-contained thread record into per-message blocks.
+
+        Returns None for ordinary documents (no parent_unit marker or no
+        message markers), in which case the caller splits the whole document
+        as before. Dify has no per-child metadata, so keeping every child
+        within one message — under that message's marker line — is what keeps
+        author/date/URL provenance recoverable from the child text.
+        """
+        metadata = document_node.metadata or {}
+        if metadata.get("parent_unit") != "record":
+            return None
+        blocks = [block.strip() for block in cls._MESSAGE_BLOCK_SPLIT_RE.split(document_node.page_content)]
+        blocks = [block for block in blocks if block]
+        if len(blocks) < 2:
+            return None
+        return blocks
+
     def _split_child_nodes(
         self,
         document_node: Document,
@@ -263,9 +287,21 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
             embedding_model_instance=embedding_model_instance,
             strategy_params=rules.subchunk_segmentation.strategy_params,
         )
+        # Thread records: split children per message so no child straddles
+        # two messages and each message's children sit under its marker line.
+        message_blocks = self._message_aligned_blocks(document_node)
+        if message_blocks is not None:
+            source_documents = [
+                Document(page_content=block, metadata=document_node.metadata) for block in message_blocks
+            ]
+        else:
+            source_documents = [document_node]
+
         # parse document to child nodes
         child_nodes = []
-        child_documents = child_splitter.split_documents([document_node])
+        child_documents = []
+        for source_document in source_documents:
+            child_documents.extend(child_splitter.split_documents([source_document]))
         for child_document_node in child_documents:
             if child_document_node.page_content.strip():
                 doc_id = str(uuid.uuid4())

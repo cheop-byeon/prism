@@ -119,6 +119,54 @@ class TestParentChildIndexProcessor:
         assert result[0].page_content == record_document.page_content
         assert result[0].children == child_docs
 
+    def test_split_child_nodes_aligns_children_to_message_boundaries(
+        self, processor: ParentChildIndexProcessor
+    ) -> None:
+        # Thread records (parent_unit=record) must have their children split
+        # per message so no child chunk ever straddles two messages and each
+        # message's children sit under its identifying marker line.
+        record = Document(
+            page_content=(
+                "Thread: Retry design (2 messages, 2021-03-01 to 2021-03-02)\n\n"
+                "--- Message 1 | Alice <a@x> | 2021-03-01 | https://arch/aaa ---\n"
+                "MSGONE the initial proposal text.\n\n"
+                "--- Message 2 | Bob <b@x> | 2021-03-02 | https://arch/bbb ---\n"
+                "MSGTWO the objection text."
+            ),
+            metadata={"dataset_id": "d", "document_id": "doc", "parent_unit": "record"},
+        )
+        echo_splitter = Mock()
+        echo_splitter.split_documents.side_effect = lambda docs: [
+            Document(page_content=d.page_content, metadata=dict(d.metadata)) for d in docs
+        ]
+
+        with patch.object(processor, "_get_splitter", return_value=echo_splitter):
+            children = processor._split_child_nodes(record, self._paragraph_rules(), "custom", None)
+
+        assert len(children) == 3  # thread header + one block per message
+        for child in children:
+            assert not ("MSGONE" in child.page_content and "MSGTWO" in child.page_content)
+        assert children[1].page_content.startswith("--- Message 1 | Alice")
+        assert children[2].page_content.startswith("--- Message 2 | Bob")
+
+    def test_split_child_nodes_unchanged_for_plain_documents(self, processor: ParentChildIndexProcessor) -> None:
+        plain = Document(
+            page_content="Some ordinary document text\n\n--- Message 1 | not a thread record ---\nmore",
+            metadata={"dataset_id": "d", "document_id": "doc"},
+        )
+        echo_splitter = Mock()
+        echo_splitter.split_documents.side_effect = lambda docs: [
+            Document(page_content=d.page_content, metadata=dict(d.metadata)) for d in docs
+        ]
+
+        with patch.object(processor, "_get_splitter", return_value=echo_splitter):
+            children = processor._split_child_nodes(plain, self._paragraph_rules(), "custom", None)
+
+        # Without the parent_unit marker the whole document goes to the
+        # splitter in one piece, exactly as before.
+        assert len(children) == 1
+        echo_splitter.split_documents.assert_called_once()
+
     def test_transform_paragraph_builds_parent_and_child_docs(self, processor: ParentChildIndexProcessor) -> None:
         splitter = Mock()
         splitter.split_documents.return_value = [
