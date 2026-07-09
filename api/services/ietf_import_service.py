@@ -158,11 +158,9 @@ class IetfImportService:
 
         filename = sidecar_payload.filename
         destination = local_dir / filename
-        if destination.exists():
-            stem = destination.stem
-            suffix = destination.suffix
-            destination = local_dir / f"{stem}-dup{suffix}"
-
+        # Overwrite any previous download of the same list/date-range: the
+        # fresh download supersedes it (filters and sidecar dedup fixes can
+        # change content), and "-dup" copies just accumulated on every retry.
         destination.write_bytes(content)
 
         message_count = sidecar_payload.message_count
@@ -1378,11 +1376,10 @@ class IetfImportService:
         processed_dir.mkdir(parents=True, exist_ok=True)
 
         source = Path(source_path)
+        # Overwrite any previous run's output for the same source: the caller
+        # always uploads the path returned by the current run, so timestamped
+        # copies only accumulated as dead files.
         destination = processed_dir / f"{source.stem}.jsonl"
-        if destination.exists():
-            from datetime import datetime as _dt
-            ts = _dt.now().strftime("%Y%m%d%H%M%S")
-            destination = processed_dir / f"{source.stem}-{ts}.jsonl"
 
         with destination.open("w", encoding="utf-8") as f:
             for email_record in emails:
