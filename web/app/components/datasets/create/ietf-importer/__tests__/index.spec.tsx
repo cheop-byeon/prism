@@ -120,7 +120,7 @@ describe('IetfImporter', () => {
     await waitFor(() => {
       expect(mockDownloadAndPreprocessMailarchiveYears).toHaveBeenCalledWith(expect.objectContaining({
         mailing_list: 'quic',
-        quote_handling: 'none',
+        quote_handling: 'advanced',
       }))
     })
 

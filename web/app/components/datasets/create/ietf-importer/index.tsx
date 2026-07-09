@@ -91,7 +91,7 @@ const DEFAULT_MAILARCHIVE_FORM: MailarchiveFormState = {
   subject: '',
   searchIn: ['subject'],
   filterEmails: true,
-  quoteHandling: 'none',
+  quoteHandling: 'advanced',
   groupThreads: false,
 }
 
@@ -881,6 +881,14 @@ function IetfImporter({
               count: selectedPreprocessYears.length,
             })}
           </div>
+          {preprocessResults.every(item => item.total_emails === 0) && (
+            <div className="mt-3 text-xs leading-5 text-text-warning" data-testid="ietf-preprocess-all-discarded">
+              {t('stepOne.ietf.preprocessAllDiscarded', {
+                ns: 'datasetCreation',
+                discarded: preprocessResults.reduce((sum, item) => sum + item.discarded_emails, 0),
+              })}
+            </div>
+          )}
           <div className="mt-4 flex flex-wrap gap-2">
             {preprocessResults.filter(item => item.total_emails > 0).map(item => (
               <button

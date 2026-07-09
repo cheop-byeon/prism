@@ -1013,11 +1013,13 @@ class IetfImportService:
         Returns a dict with keys:
             emails            – list of accepted {id, url, subject, body} records
             total_emails      – number of accepted emails
-            discarded_emails  – number discarded (no Archived-At, or non-natural body)
+            discarded_emails  – number discarded (unparseable or non-natural body)
             preview_lines     – top 10 body lines of the first accepted email
 
-        When filter_emails is False, all emails with a parseable message and non-empty
-        body are accepted regardless of Archived-At presence or body quality.
+        Messages without an Archived-At header (IETF list mail before ~2014)
+        fall back to a mid:<message-id> identity instead of being discarded.
+        When filter_emails is False, all emails with a parseable message and
+        non-empty body are accepted regardless of body quality.
 
         quote_handling controls stripping of quoted reply chains / signatures from
         the extracted bodies — see services.email_quote_cleaning.clean_email_body.
@@ -1043,13 +1045,14 @@ class IetfImportService:
                 discarded += 1
                 continue
 
-            # ---- URL / ID from Archived-At ----
+            # ---- URL / ID from Archived-At, falling back to Message-ID ----
+            # Archived-At only exists on IETF list mail from ~2014 onwards;
+            # its absence says nothing about content quality, so older
+            # messages fall back to a mid: identity instead of being
+            # discarded by the quality filter.
             archived_at = msg.get("Archived-At", "").strip()
             url = archived_at.strip("<>").strip()
             if not url:
-                if filter_emails:
-                    discarded += 1
-                    continue
                 raw_mid = msg.get("Message-ID", "").strip().strip("<>")
                 message_id = raw_mid or str(len(accepted))
                 url = f"mid:{message_id}"
