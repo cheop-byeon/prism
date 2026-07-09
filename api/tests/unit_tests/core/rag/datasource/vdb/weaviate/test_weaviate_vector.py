@@ -36,6 +36,34 @@ class TestWeaviateVector(unittest.TestCase):
     def tearDown(self):
         weaviate_vector_module._weaviate_client = None
 
+    def test_get_uuids_prefers_doc_id_over_content_hash(self):
+        # Content-derived UUIDs silently deduplicate identical chunk texts in
+        # Weaviate (later insert overwrites earlier object), which orphans the
+        # overwritten chunks' doc_ids - their metadata lookups and retrieval
+        # mappings then miss. Unique per-chunk doc_ids must win.
+        from core.rag.models.document import Document
+
+        wv = WeaviateVector.__new__(WeaviateVector)
+        same_text = ">>"
+        doc_a = Document(page_content=same_text, metadata={"doc_id": "159b868c-4294-4680-b0fd-f3c56aefb177"})
+        doc_b = Document(page_content=same_text, metadata={"doc_id": "c048e710-265a-4da8-a5c4-c6ca4f26b0e7"})
+
+        uuids = wv._get_uuids([doc_a, doc_b])
+
+        assert uuids[0] != uuids[1]
+        assert uuids[0] == "159b868c-4294-4680-b0fd-f3c56aefb177"
+        assert uuids[1] == "c048e710-265a-4da8-a5c4-c6ca4f26b0e7"
+
+    def test_get_uuids_falls_back_to_content_hash_without_doc_id(self):
+        from core.rag.models.document import Document
+
+        wv = WeaviateVector.__new__(WeaviateVector)
+        doc = Document(page_content="some text", metadata={})
+
+        uuids = wv._get_uuids([doc, doc])
+
+        assert uuids[0] == uuids[1]  # deterministic content hash, as before
+
     def test_config_requires_endpoint(self):
         with pytest.raises(ValueError, match="config WEAVIATE_ENDPOINT is required"):
             WeaviateConfig(endpoint="")

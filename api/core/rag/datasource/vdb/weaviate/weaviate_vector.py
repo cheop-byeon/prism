@@ -292,16 +292,27 @@ class WeaviateVector(BaseVector):
 
     def _get_uuids(self, documents: list[Document]) -> list[str]:
         """
-        Generates deterministic UUIDs for documents based on their content.
+        Generates deterministic UUIDs for documents.
 
-        Uses UUID5 with URL namespace to ensure consistent IDs for identical content.
+        Prefers the chunk's own doc_id (unique per chunk): content-derived
+        UUIDs silently deduplicate identical chunk texts — Weaviate upserts by
+        UUID, so a later insert overwrites the earlier object, orphaning the
+        overwritten chunk's doc_id (metadata lookups and retrieval mappings by
+        doc_id then miss). Identical short fragments across chunks are normal
+        in parent-child datasets, so each chunk must keep its own object.
+
+        Falls back to a UUID5 content hash when no doc_id is present,
+        preserving the previous idempotency behavior for such documents.
         """
         URL_NAMESPACE = _uuid.UUID("6ba7b811-9dad-11d1-80b4-00c04fd430c8")
 
         uuids = []
         for doc in documents:
-            uuid_val = _uuid.uuid5(URL_NAMESPACE, doc.page_content)
-            uuids.append(str(uuid_val))
+            doc_id = str((doc.metadata or {}).get("doc_id") or "")
+            if doc_id and self._is_uuid(doc_id):
+                uuids.append(doc_id)
+            else:
+                uuids.append(str(_uuid.uuid5(URL_NAMESPACE, doc.page_content)))
 
         return uuids
 
