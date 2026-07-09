@@ -41,7 +41,7 @@ type ISegmentDetailProps = {
   onModalStateChange?: (isOpen: boolean) => void
 }
 
-const SKIP_METADATA_KEYS = new Set(['source', 'line', 'content', 'record_type', 'subject_line', 'email_id'])
+const SKIP_METADATA_KEYS = new Set(['source', 'line', 'content', 'body', 'record_type', 'subject_line', 'email_id'])
 
 /**
  * Show all the contents of the segment

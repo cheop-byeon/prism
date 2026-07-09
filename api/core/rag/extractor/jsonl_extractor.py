@@ -43,11 +43,16 @@ class JsonlExtractor(BaseExtractor):
             if not isinstance(record, dict):
                 raise ValueError(f"JSONL line {line_number} must be an object")
 
+            page_content, consumed_key = self._extract_page_content(record)
+            # Exclude the promoted text field from metadata: document metadata
+            # is copied onto every chunk (and every child chunk in
+            # parent-child mode), so leaking it would store the full record
+            # text once per chunk in the vector store.
             documents.append(
                 Document(
-                    page_content=self._extract_page_content(record),
+                    page_content=page_content,
                     metadata={
-                        **record,
+                        **{key: value for key, value in record.items() if key != consumed_key},
                         "source": self._file_path,
                         "line": line_number,
                     },
@@ -60,13 +65,14 @@ class JsonlExtractor(BaseExtractor):
         return documents
 
     @staticmethod
-    def _extract_page_content(record: dict) -> str:
+    def _extract_page_content(record: dict) -> tuple[str, str | None]:
+        """Return (page_content, consumed_field_name)."""
         body = record.get("body")
         if isinstance(body, str) and body.strip():
-            return body.strip()
+            return body.strip(), "body"
 
         content = record.get("content")
         if isinstance(content, str) and content.strip():
-            return content.strip()
+            return content.strip(), "content"
 
-        return json.dumps(record, ensure_ascii=False)
+        return json.dumps(record, ensure_ascii=False), None
