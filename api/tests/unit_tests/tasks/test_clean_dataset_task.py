@@ -69,6 +69,11 @@ def mock_db_session():
         # Setup scalars for select queries
         mock_session.scalars.return_value.all.return_value = []
 
+        # No other datasets share a collection binding in the mocked DB, so
+        # the task takes the index_processor.clean branch (not the
+        # shared-binding vector-filter branch).
+        mock_session.scalar.return_value = 0
+
         # Setup execute for JOIN queries
         mock_session.execute.return_value.all.return_value = []
 
@@ -147,6 +152,53 @@ def mock_upload_file():
 # ============================================================================
 # Note: Basic cleanup behavior is now covered by testcontainers-based
 # integration tests; no unit tests remain in this section.
+# ============================================================================
+# Test Segment / Child Chunk Cleanup
+# ============================================================================
+
+
+class TestSegmentAndChildChunkCleanup:
+    """Segments and child chunks must be deleted by dataset_id unconditionally.
+
+    Regression tests for two leaks observed on a live stack:
+    - a dataset whose documents were already gone kept all its segments
+      (deletion used to sit inside the ``if documents`` guard)
+    - parent-child datasets on a shared collection binding leaked every
+      ChildChunk row (the shared-binding branch never calls
+      index_processor.clean, previously the only child-chunk deletion path)
+    """
+
+    def test_segments_and_child_chunks_deleted_even_without_documents(
+        self,
+        dataset_id,
+        tenant_id,
+        mock_db_session,
+        mock_storage,
+        mock_index_processor_factory,
+        mock_get_image_upload_file_ids,
+    ):
+        session = mock_db_session.session
+        # No documents and no segments returned by the initial queries.
+        session.scalars.return_value.all.return_value = []
+
+        clean_dataset_task(
+            dataset_id=dataset_id,
+            tenant_id=tenant_id,
+            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
+            index_struct='{"type": "weaviate", "vector_store": {"class_prefix": "x"}}',
+            collection_binding_id=None,
+            doc_form=IndexStructureType.PARENT_CHILD_INDEX,
+        )
+
+        deleted_tables = {
+            call.args[0].table.name
+            for call in session.execute.call_args_list
+            if call.args and type(call.args[0]).__name__ == "Delete"
+        }
+        assert "document_segments" in deleted_tables
+        assert "child_chunks" in deleted_tables
+
+
 # ============================================================================
 # Test Error Handling
 # ============================================================================
@@ -272,8 +324,10 @@ class TestPipelineAndWorkflowDeletion:
             pipeline_id=None,
         )
 
-        # Assert - verify delete was called only for base queries (5 times)
-        assert mock_query.delete.call_count == 5
+        # Assert - verify delete was called only for base queries: process rule,
+        # dataset query, app join, dataset metadata + bindings, dataset
+        # permissions, and tag bindings (7 times)
+        assert mock_query.delete.call_count == 7
 
 
 # ============================================================================

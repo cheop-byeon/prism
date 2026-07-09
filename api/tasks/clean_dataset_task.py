@@ -12,6 +12,7 @@ from extensions.ext_storage import storage
 from models import WorkflowType
 from models.dataset import (
     AppDatasetJoin,
+    ChildChunk,
     Dataset,
     DatasetMetadata,
     DatasetMetadataBinding,
@@ -146,26 +147,30 @@ def clean_dataset_task(
                 for document in documents:
                     session.delete(document)
 
-                segment_ids = [segment.id for segment in segments]
-                for segment in segments:
-                    image_upload_file_ids = get_image_upload_file_ids(segment.content)
-                    image_files = session.query(UploadFile).where(UploadFile.id.in_(image_upload_file_ids)).all()
-                    for image_file in image_files:
-                        if image_file is None:
-                            continue
-                        try:
-                            storage.delete(image_file.key)
-                        except Exception:
-                            logger.exception(
-                                "Delete image_files failed when storage deleted, \
-                                              image_upload_file_is: %s",
-                                image_file.id,
-                            )
-                    stmt = delete(UploadFile).where(UploadFile.id.in_(image_upload_file_ids))
-                    session.execute(stmt)
+            for segment in segments:
+                image_upload_file_ids = get_image_upload_file_ids(segment.content)
+                image_files = session.query(UploadFile).where(UploadFile.id.in_(image_upload_file_ids)).all()
+                for image_file in image_files:
+                    if image_file is None:
+                        continue
+                    try:
+                        storage.delete(image_file.key)
+                    except Exception:
+                        logger.exception(
+                            "Delete image_files failed when storage deleted, \
+                                          image_upload_file_is: %s",
+                            image_file.id,
+                        )
+                stmt = delete(UploadFile).where(UploadFile.id.in_(image_upload_file_ids))
+                session.execute(stmt)
 
-                segment_delete_stmt = delete(DocumentSegment).where(DocumentSegment.id.in_(segment_ids))
-                session.execute(segment_delete_stmt)
+            # Delete segments and child chunks by dataset_id unconditionally:
+            # - segments can exist without documents (partially cleaned datasets)
+            # - the shared-collection-binding branch above never calls
+            #   index_processor.clean, so ChildChunk rows would otherwise leak
+            #   for parent-child datasets
+            session.execute(delete(DocumentSegment).where(DocumentSegment.dataset_id == dataset_id))
+            session.execute(delete(ChildChunk).where(ChildChunk.dataset_id == dataset_id))
             # delete segment attachments
             if attachments_with_bindings:
                 attachment_ids = [attachment_file.id for _, attachment_file in attachments_with_bindings]
