@@ -21,6 +21,7 @@ import Input from '@/app/components/base/input'
 import SegmentedControl from '@/app/components/base/segmented-control'
 import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitle } from '@/app/components/base/ui/dialog'
 import { toast } from '@/app/components/base/ui/toast'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/app/components/base/ui/tooltip'
 import {
   downloadAndPreprocessMailarchiveYears,
   fetchGithubImportStatus,
@@ -869,11 +870,20 @@ function IetfImporter({
 
       {preprocessResults && preprocessResults.length > 0 && (
         <div className="mb-5 max-w-[720px] rounded-2xl border border-divider-subtle bg-background-default-subtle p-4" data-testid="ietf-preprocess-results-panel">
-          <div className="text-sm font-semibold leading-5 text-text-secondary">
+          <div className="flex items-center gap-1 text-sm font-semibold leading-5 text-text-secondary">
             {t('stepOne.ietf.preprocessResults', { ns: 'datasetCreation' })}
-          </div>
-          <div className="mt-1 text-xs leading-4 text-text-tertiary">
-            {t('stepOne.ietf.preprocessResultsHint', { ns: 'datasetCreation' })}
+            <Tooltip>
+              <TooltipTrigger render={(
+                <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+              )}
+              />
+              <TooltipContent>
+                <div className="max-w-[300px] space-y-1">
+                  <div>{t('stepOne.ietf.preprocessResultsHint', { ns: 'datasetCreation' })}</div>
+                  <div>{t('stepOne.ietf.discardedExplanation', { ns: 'datasetCreation' })}</div>
+                </div>
+              </TooltipContent>
+            </Tooltip>
           </div>
           <div className="mt-1 text-xs leading-4 text-text-tertiary">
             {t('stepOne.ietf.preprocessSelectedCount', {
@@ -912,9 +922,6 @@ function IetfImporter({
                 })}
               </button>
             ))}
-          </div>
-          <div className="mt-3 text-xs leading-5 text-text-tertiary">
-            {t('stepOne.ietf.discardedExplanation', { ns: 'datasetCreation' })}
           </div>
         </div>
       )}
@@ -973,8 +980,17 @@ function IetfImporter({
               <div className="space-y-4" data-testid="ietf-mailarchive-form">
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
-                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                    <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
                       {t('stepOne.ietf.mailingList', { ns: 'datasetCreation' })}
+                      <Tooltip>
+                        <TooltipTrigger render={(
+                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                        )}
+                        />
+                        <TooltipContent>
+                          <div className="max-w-[280px]">{t('stepOne.ietf.preprocessImportHint', { ns: 'datasetCreation' })}</div>
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                     <div ref={dropdownRef} className="relative">
                       <Input
@@ -1166,17 +1182,37 @@ function IetfImporter({
                       ))}
                     </div>
                   </div>
-                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
-                    <input
-                      type="checkbox"
-                      checked={mailarchiveForm.filterEmails}
-                      onChange={e => setMailarchiveForm(prev => ({ ...prev, filterEmails: e.target.checked }))}
-                    />
-                    {t('stepOne.ietf.filterEmails', { ns: 'datasetCreation' })}
-                  </label>
+                  <div className="flex items-center gap-1">
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                      <input
+                        type="checkbox"
+                        checked={mailarchiveForm.filterEmails}
+                        onChange={e => setMailarchiveForm(prev => ({ ...prev, filterEmails: e.target.checked }))}
+                      />
+                      {t('stepOne.ietf.filterEmails', { ns: 'datasetCreation' })}
+                    </label>
+                    <Tooltip>
+                      <TooltipTrigger render={(
+                        <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                      )}
+                      />
+                      <TooltipContent>
+                        <div className="max-w-[280px]">{t('stepOne.ietf.discardedExplanation', { ns: 'datasetCreation' })}</div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                   <div data-testid="ietf-quote-handling">
-                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                    <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
                       {t('stepOne.ietf.quoteHandling', { ns: 'datasetCreation' })}
+                      <Tooltip>
+                        <TooltipTrigger render={(
+                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                        )}
+                        />
+                        <TooltipContent>
+                          <div className="max-w-[280px]">{t('stepOne.ietf.quoteHandlingHint', { ns: 'datasetCreation' })}</div>
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                     <div className="flex gap-2">
                       {(
@@ -1201,24 +1237,27 @@ function IetfImporter({
                         </button>
                       ))}
                     </div>
-                    <div className="mt-1 text-xs text-text-tertiary">
-                      {t('stepOne.ietf.quoteHandlingHint', { ns: 'datasetCreation' })}
-                    </div>
                   </div>
-                  <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
-                    <input
-                      type="checkbox"
-                      data-testid="ietf-group-threads"
-                      checked={mailarchiveForm.groupThreads}
-                      onChange={e => setMailarchiveForm(prev => ({ ...prev, groupThreads: e.target.checked }))}
-                    />
-                    {t('stepOne.ietf.groupThreads', { ns: 'datasetCreation' })}
-                  </label>
-                  {mailarchiveForm.groupThreads && (
-                    <div className="text-xs text-text-tertiary">
-                      {t('stepOne.ietf.groupThreadsHint', { ns: 'datasetCreation' })}
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1">
+                    <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                      <input
+                        type="checkbox"
+                        data-testid="ietf-group-threads"
+                        checked={mailarchiveForm.groupThreads}
+                        onChange={e => setMailarchiveForm(prev => ({ ...prev, groupThreads: e.target.checked }))}
+                      />
+                      {t('stepOne.ietf.groupThreads', { ns: 'datasetCreation' })}
+                    </label>
+                    <Tooltip>
+                      <TooltipTrigger render={(
+                        <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                      )}
+                      />
+                      <TooltipContent>
+                        <div className="max-w-[320px]">{t('stepOne.ietf.groupThreadsHint', { ns: 'datasetCreation' })}</div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
                 {mailarchiveForm.mailingList.trim() && (
                   <div
@@ -1266,21 +1305,24 @@ function IetfImporter({
                     )}
                   </div>
                 )}
-                <div className="text-xs text-text-tertiary">
-                  {t('stepOne.ietf.preprocessImportHint', { ns: 'datasetCreation' })}
-                </div>
               </div>
             )}
 
             {mode === 'rfcs' && (
               <div className="space-y-4" data-testid="ietf-rfc-form">
-                <div className="text-xs leading-4 text-text-tertiary">
-                  {t('stepOne.ietf.rfcFiltersHint', { ns: 'datasetCreation' })}
-                </div>
                 <div className="space-y-4">
                   <div>
-                    <div className="mb-1 text-xs font-medium text-text-secondary">
+                    <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
                       {t('stepOne.ietf.rfcId', { ns: 'datasetCreation' })}
+                      <Tooltip>
+                        <TooltipTrigger render={(
+                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                        )}
+                        />
+                        <TooltipContent>
+                          <div className="max-w-[280px]">{t('stepOne.ietf.rfcFiltersHint', { ns: 'datasetCreation' })}</div>
+                        </TooltipContent>
+                      </Tooltip>
                     </div>
                     <div ref={rfcDropdownRef} className="relative">
                       <Input
@@ -1529,14 +1571,19 @@ function IetfImporter({
             )}
             {mode === 'github' && (
               <div className="space-y-4" data-testid="ietf-github-form">
-                <div className="text-xs leading-4 text-text-tertiary">
-                  {t('stepOne.ietf.githubFiltersHint', { ns: 'datasetCreation' })}
-                </div>
-
                 {/* WG combobox */}
                 <div>
-                  <div className="mb-1 text-xs font-medium text-text-secondary">
+                  <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
                     {t('stepOne.ietf.githubWg', { ns: 'datasetCreation' })}
+                    <Tooltip>
+                      <TooltipTrigger render={(
+                        <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                      )}
+                      />
+                      <TooltipContent>
+                        <div className="max-w-[280px]">{t('stepOne.ietf.githubFiltersHint', { ns: 'datasetCreation' })}</div>
+                      </TooltipContent>
+                    </Tooltip>
                   </div>
                   <div className="relative" ref={wgDropdownRef}>
                     <Input
