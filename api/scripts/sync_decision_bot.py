@@ -40,6 +40,26 @@ _CODE = (
     "    return {'result': decision or query}\n"
 )
 
+# Looks up the selected decision's real diff text (retrieved from the
+# evolution dataset) and builds the mailarchive query from it; without a
+# selection, the typed question passes through untouched.
+_CODE_MIX = (
+    "def main(decision: str, query: str, evo: list) -> dict:\n"
+    "    decision = (decision or '').strip()\n"
+    "    query = (query or '').strip()\n"
+    "    change_text = ''\n"
+    "    if decision and evo:\n"
+    "        content = (evo[0].get('content') if isinstance(evo[0], dict) else '') or ''\n"
+    "        lines = content.split('\\n')\n"
+    "        change_text = '\\n'.join(lines[2:]).strip() if len(lines) > 2 else content\n"
+    "    if decision:\n"
+    "        base = change_text or decision\n"
+    "        mail_query = (base[:800] + ' ' + query).strip()\n"
+    "    else:\n"
+    "        mail_query = query\n"
+    "    return {'result': mail_query, 'change_text': change_text[:1500]}\n"
+)
+
 _SYSTEM_PROMPT = (
     "You are an assistant for IETF standards research. The user asks about a "
     "specification change - selected from the decision list, typed freely, "
@@ -99,9 +119,32 @@ def _build_options(draft_name: str, max_options: int) -> list[str]:
     return options
 
 
-def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tuple[str, str]) -> str:
+def _build_dsl(
+    app_name: str,
+    options: list[str],
+    dataset_id: str,
+    embedding: tuple[str, str],
+    evolution_dataset_id: str | None = None,
+) -> str:
     start_id, code_id, kr_id, llm_id, answer_id = "start1", "code1", "kr1", "llm1", "answer1"
+    evo_kr_id, mix_id = "krevo1", "codemix1"
     provider, model_name = embedding
+
+    retrieval_config = {
+        "top_k": 4,
+        "score_threshold": None,
+        "reranking_mode": "weighted_score",
+        "reranking_enable": False,
+        "weights": {
+            "weight_type": "customized",
+            "vector_setting": {
+                "vector_weight": 1,
+                "embedding_provider_name": provider,
+                "embedding_model_name": model_name,
+            },
+            "keyword_setting": {"keyword_weight": 0},
+        },
+    }
 
     nodes = [
         _node(start_id, {
@@ -134,24 +177,10 @@ def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tu
             "type": "knowledge-retrieval",
             "title": "Find discussions",
             "desc": "",
-            "query_variable_selector": [code_id, "result"],
+            "query_variable_selector": [mix_id if evolution_dataset_id else code_id, "result"],
             "dataset_ids": [dataset_id],
             "retrieval_mode": "multiple",
-            "multiple_retrieval_config": {
-                "top_k": 4,
-                "score_threshold": None,
-                "reranking_mode": "weighted_score",
-                "reranking_enable": False,
-                "weights": {
-                    "weight_type": "customized",
-                    "vector_setting": {
-                        "vector_weight": 1,
-                        "embedding_provider_name": provider,
-                        "embedding_model_name": model_name,
-                    },
-                    "keyword_setting": {"keyword_weight": 0},
-                },
-            },
+            "multiple_retrieval_config": retrieval_config,
         }, 638),
         _node(llm_id, {
             "type": "llm",
@@ -169,7 +198,12 @@ def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tu
                     "role": "user",
                     "text": (
                         f"Selected decision: {{{{#{start_id}.decision#}}}}\n"
-                        "Question: {{#sys.query#}}"
+                        + (
+                            f"What the change says:\n{{{{#{mix_id}.change_text#}}}}\n"
+                            if evolution_dataset_id
+                            else ""
+                        )
+                        + "Question: {{#sys.query#}}"
                     ),
                 },
             ],
@@ -186,12 +220,49 @@ def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tu
             "answer": f"{{{{#{llm_id}.text#}}}}",
         }, 1246),
     ]
-    edges = [
-        _edge(start_id, "start", code_id, "code"),
-        _edge(code_id, "code", kr_id, "knowledge-retrieval"),
-        _edge(kr_id, "knowledge-retrieval", llm_id, "llm"),
-        _edge(llm_id, "llm", answer_id, "answer"),
-    ]
+    if evolution_dataset_id:
+        nodes.insert(2, _node(evo_kr_id, {
+            "type": "knowledge-retrieval",
+            "title": "Look up change text",
+            "desc": "Fetches the selected decision's real diff from the evolution dataset.",
+            "query_variable_selector": [code_id, "result"],
+            "dataset_ids": [evolution_dataset_id],
+            "retrieval_mode": "multiple",
+            "multiple_retrieval_config": {**retrieval_config, "top_k": 1},
+        }, 486))
+        nodes.insert(3, _node(mix_id, {
+            "type": "code",
+            "title": "Build mail query",
+            "desc": "Diff text (plus the question) becomes the search query.",
+            "code_language": "python3",
+            "code": _CODE_MIX,
+            "variables": [
+                {"variable": "decision", "value_selector": [start_id, "decision"]},
+                {"variable": "query", "value_selector": ["sys", "query"]},
+                {"variable": "evo", "value_selector": [evo_kr_id, "result"]},
+            ],
+            "outputs": {
+                "result": {"type": "string", "children": None},
+                "change_text": {"type": "string", "children": None},
+            },
+        }, 562))
+
+    if evolution_dataset_id:
+        edges = [
+            _edge(start_id, "start", code_id, "code"),
+            _edge(code_id, "code", evo_kr_id, "knowledge-retrieval"),
+            _edge(evo_kr_id, "knowledge-retrieval", mix_id, "code"),
+            _edge(mix_id, "code", kr_id, "knowledge-retrieval"),
+            _edge(kr_id, "knowledge-retrieval", llm_id, "llm"),
+            _edge(llm_id, "llm", answer_id, "answer"),
+        ]
+    else:
+        edges = [
+            _edge(start_id, "start", code_id, "code"),
+            _edge(code_id, "code", kr_id, "knowledge-retrieval"),
+            _edge(kr_id, "knowledge-retrieval", llm_id, "llm"),
+            _edge(llm_id, "llm", answer_id, "answer"),
+        ]
 
     dsl = {
         "app": {
@@ -229,6 +300,8 @@ def main() -> None:
     parser.add_argument("--dataset", required=True, help="mailarchive dataset id to search")
     parser.add_argument("--app-name", default="Decision → Discussion")
     parser.add_argument("--app-id", default=None, help="overwrite this existing app instead of creating a new one")
+    parser.add_argument("--evolution-dataset", default=None,
+                        help="evolution dataset id; enables real-diff lookup for selected decisions")
     parser.add_argument("--max-options", type=int, default=60)
     args = parser.parse_args()
 
@@ -255,7 +328,7 @@ def main() -> None:
         options = _build_options(args.draft, args.max_options)
         print(f"{len(options)} decision options built from {args.draft}")
 
-        dsl = _build_dsl(args.app_name, options, args.dataset, embedding)
+        dsl = _build_dsl(args.app_name, options, args.dataset, embedding, args.evolution_dataset)
         result = AppDslService(db.session).import_app(
             account=account,
             import_mode="yaml-content",
