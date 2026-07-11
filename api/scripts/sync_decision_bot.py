@@ -2,9 +2,9 @@
 
 Builds a "Decision -> Discussion" chatbot: the Start form carries an optional
 Select variable listing the draft's imported section changes; the chat box
-stays available for free text. A code node picks whichever the user provided
-(selected decision wins), retrieves from the mailarchive dataset, and the LLM
-answers with the retrieved discussion as context.
+stays available for free text. A code node combines whatever the user
+provided (decision, question, or both) into the retrieval query, and the
+LLM answers the typed question with the retrieved discussion as context.
 
 Run inside the api container; re-run after new evolution imports to refresh
 the dropdown options (pass --app-id to overwrite the existing app in place):
@@ -33,14 +33,17 @@ _MAX_OPTION_CHARS = 64
 
 _CODE = (
     "def main(decision: str, query: str) -> dict:\n"
-    "    chosen = (decision or '').strip()\n"
-    "    return {'result': chosen if chosen else query}\n"
+    "    decision = (decision or '').strip()\n"
+    "    query = (query or '').strip()\n"
+    "    if decision and query:\n"
+    "        return {'result': f'{decision} {query}'}\n"
+    "    return {'result': decision or query}\n"
 )
 
 _SYSTEM_PROMPT = (
     "You are an assistant for IETF standards research. The user asks about a "
-    "specification change (either selected from the decision list or typed "
-    "freely). Use the retrieved mailing list discussion below to explain what "
+    "specification change - selected from the decision list, typed freely, "
+    "or both. Use the retrieved mailing list discussion below to explain what "
     "was discussed and decided, citing thread subjects and message URLs.\n\n"
     "Retrieved discussion:\n{{#context#}}"
 )
@@ -118,7 +121,7 @@ def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tu
         _node(code_id, {
             "type": "code",
             "title": "Pick query",
-            "desc": "Selected decision wins; otherwise the typed message.",
+            "desc": "Combines the selected decision with the typed question.",
             "code_language": "python3",
             "code": _CODE,
             "variables": [
@@ -162,11 +165,19 @@ def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tu
             },
             "prompt_template": [
                 {"role": "system", "text": _SYSTEM_PROMPT},
-                {"role": "user", "text": f"{{{{#{code_id}.result#}}}}"},
+                {
+                    "role": "user",
+                    "text": (
+                        f"Selected decision: {{{{#{start_id}.decision#}}}}\n"
+                        "Question: {{#sys.query#}}"
+                    ),
+                },
             ],
             "context": {"enabled": True, "variable_selector": [kr_id, "result"]},
             "vision": {"enabled": False, "configs": {"variable_selector": []}},
-            "memory": None,
+            # Conversation memory on (window off = keep the whole dialog), so
+            # follow-up questions in the same chat stay coherent.
+            "memory": {"window": {"enabled": False, "size": 50}},
         }, 942),
         _node(answer_id, {
             "type": "answer",
