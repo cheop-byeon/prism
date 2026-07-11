@@ -1,0 +1,263 @@
+"""Create/refresh a chatflow app whose users pick an imported change OR type freely.
+
+Builds a "Decision -> Discussion" chatbot: the Start form carries an optional
+Select variable listing the draft's imported section changes; the chat box
+stays available for free text. A code node picks whichever the user provided
+(selected decision wins), retrieves from the mailarchive dataset, and the LLM
+answers with the retrieved discussion as context.
+
+Run inside the api container; re-run after new evolution imports to refresh
+the dropdown options (pass --app-id to overwrite the existing app in place):
+
+    docker exec -w /app/api docker-api-1 python scripts/sync_decision_bot.py \
+        --draft draft-ietf-ledbat-congestion \
+        --dataset <mailarchive-dataset-id> \
+        [--app-name "Decision -> Discussion"] [--app-id <existing-app-id>] \
+        [--max-options 60]
+"""
+
+# ruff: noqa: T201 — stdout output is the point of a CLI tool
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, "/app/api")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+_MAX_OPTION_CHARS = 64
+
+_CODE = (
+    "def main(decision: str, query: str) -> dict:\n"
+    "    chosen = (decision or '').strip()\n"
+    "    return {'result': chosen if chosen else query}\n"
+)
+
+_SYSTEM_PROMPT = (
+    "You are an assistant for IETF standards research. The user asks about a "
+    "specification change (either selected from the decision list or typed "
+    "freely). Use the retrieved mailing list discussion below to explain what "
+    "was discussed and decided, citing thread subjects and message URLs.\n\n"
+    "Retrieved discussion:\n{{#context#}}"
+)
+
+
+def _node(node_id: str, data: dict, x: int) -> dict:
+    return {
+        "id": node_id,
+        "type": "custom",
+        "position": {"x": x, "y": 227},
+        "positionAbsolute": {"x": x, "y": 227},
+        "sourcePosition": "right",
+        "targetPosition": "left",
+        "selected": False,
+        "width": 244,
+        "height": 90,
+        "data": data,
+    }
+
+
+def _edge(source: str, source_type: str, target: str, target_type: str) -> dict:
+    return {
+        "id": f"{source}-{target}",
+        "type": "custom",
+        "source": source,
+        "sourceHandle": "source",
+        "target": target,
+        "targetHandle": "target",
+        "data": {"sourceType": source_type, "targetType": target_type},
+    }
+
+
+def _build_options(draft_name: str, max_options: int) -> list[str]:
+    from services.ietf_import_service import IetfImportService
+
+    sorted_revs, texts = IetfImportService._fetch_all_revisions(draft_name)
+    parsed = {rev: IetfImportService._parse_sections(texts[rev]) for rev in sorted_revs}
+    options: list[str] = []
+    seen: set[str] = set()
+    for from_rev, to_rev in zip(sorted_revs, sorted_revs[1:]):
+        for record in IetfImportService._diff_version_pair(
+            parsed[from_rev], parsed[to_rev], from_rev, to_rev, draft_name, skip_minor_edits=True
+        ):
+            label = (
+                f"§{record['section_id']} {record['from_rev']}→{record['to_rev']} "
+                f"{record['section_title']}"
+            )[:_MAX_OPTION_CHARS]
+            if label not in seen:
+                seen.add(label)
+                options.append(label)
+            if len(options) >= max_options:
+                return options
+    return options
+
+
+def _build_dsl(app_name: str, options: list[str], dataset_id: str, embedding: tuple[str, str]) -> str:
+    start_id, code_id, kr_id, llm_id, answer_id = "start1", "code1", "kr1", "llm1", "answer1"
+    provider, model_name = embedding
+
+    nodes = [
+        _node(start_id, {
+            "type": "start",
+            "title": "Start",
+            "desc": "",
+            "selected": False,
+            "variables": [{
+                "variable": "decision",
+                "label": "Decision (optional — or just type your question)",
+                "type": "select",
+                "required": False,
+                "max_length": None,
+                "options": options,
+            }],
+        }, 30),
+        _node(code_id, {
+            "type": "code",
+            "title": "Pick query",
+            "desc": "Selected decision wins; otherwise the typed message.",
+            "code_language": "python3",
+            "code": _CODE,
+            "variables": [
+                {"variable": "decision", "value_selector": [start_id, "decision"]},
+                {"variable": "query", "value_selector": ["sys", "query"]},
+            ],
+            "outputs": {"result": {"type": "string", "children": None}},
+        }, 334),
+        _node(kr_id, {
+            "type": "knowledge-retrieval",
+            "title": "Find discussions",
+            "desc": "",
+            "query_variable_selector": [code_id, "result"],
+            "dataset_ids": [dataset_id],
+            "retrieval_mode": "multiple",
+            "multiple_retrieval_config": {
+                "top_k": 4,
+                "score_threshold": None,
+                "reranking_mode": "weighted_score",
+                "reranking_enable": False,
+                "weights": {
+                    "weight_type": "customized",
+                    "vector_setting": {
+                        "vector_weight": 1,
+                        "embedding_provider_name": provider,
+                        "embedding_model_name": model_name,
+                    },
+                    "keyword_setting": {"keyword_weight": 0},
+                },
+            },
+        }, 638),
+        _node(llm_id, {
+            "type": "llm",
+            "title": "Answer",
+            "desc": "",
+            "model": {
+                "provider": "langgenius/openrouter/openrouter",
+                "name": "llama-3.3-70b-instruct",
+                "mode": "chat",
+                "completion_params": {"max_tokens": 1024, "temperature": 0.4, "top_p": 1},
+            },
+            "prompt_template": [
+                {"role": "system", "text": _SYSTEM_PROMPT},
+                {"role": "user", "text": f"{{{{#{code_id}.result#}}}}"},
+            ],
+            "context": {"enabled": True, "variable_selector": [kr_id, "result"]},
+            "vision": {"enabled": False, "configs": {"variable_selector": []}},
+            "memory": None,
+        }, 942),
+        _node(answer_id, {
+            "type": "answer",
+            "title": "Answer",
+            "desc": "",
+            "answer": f"{{{{#{llm_id}.text#}}}}",
+        }, 1246),
+    ]
+    edges = [
+        _edge(start_id, "start", code_id, "code"),
+        _edge(code_id, "code", kr_id, "knowledge-retrieval"),
+        _edge(kr_id, "knowledge-retrieval", llm_id, "llm"),
+        _edge(llm_id, "llm", answer_id, "answer"),
+    ]
+
+    dsl = {
+        "app": {
+            "name": app_name,
+            "description": "Pick an imported spec change or type a question; finds the mailing list discussion.",
+            "icon": "🔎",
+            "icon_background": "#E0F2FE",
+            "mode": "advanced-chat",
+            "use_icon_as_answer_icon": False,
+        },
+        "kind": "app",
+        "version": "0.6.0",
+        "workflow": {
+            "conversation_variables": [],
+            "environment_variables": [],
+            "features": {
+                "opening_statement": "Pick a decision from the form (or just ask in your own words).",
+                "suggested_questions": [],
+                "suggested_questions_after_answer": {"enabled": False},
+                "retriever_resource": {"enabled": True},
+                "sensitive_word_avoidance": {"enabled": False},
+                "speech_to_text": {"enabled": False},
+                "text_to_speech": {"enabled": False, "language": "", "voice": ""},
+                "file_upload": {"enabled": False},
+            },
+            "graph": {"nodes": nodes, "edges": edges},
+        },
+    }
+    return yaml.safe_dump(dsl, allow_unicode=True, sort_keys=False)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--draft", required=True, help="draft base name for the decision options")
+    parser.add_argument("--dataset", required=True, help="mailarchive dataset id to search")
+    parser.add_argument("--app-name", default="Decision → Discussion")
+    parser.add_argument("--app-id", default=None, help="overwrite this existing app instead of creating a new one")
+    parser.add_argument("--max-options", type=int, default=60)
+    args = parser.parse_args()
+
+    from app_factory import create_app
+
+    app = create_app()
+    with app.test_request_context():
+        from flask_login import login_user
+
+        from extensions.ext_database import db
+        from models.account import Account, Tenant
+        from models.dataset import Dataset
+        from services.app_dsl_service import AppDslService
+
+        account = db.session.query(Account).first()
+        account.current_tenant = db.session.query(Tenant).first()
+        login_user(account)
+
+        dataset = db.session.query(Dataset).filter_by(id=args.dataset).first()
+        if not dataset:
+            sys.exit(f"dataset not found: {args.dataset}")
+        embedding = (dataset.embedding_model_provider, dataset.embedding_model)
+
+        options = _build_options(args.draft, args.max_options)
+        print(f"{len(options)} decision options built from {args.draft}")
+
+        dsl = _build_dsl(args.app_name, options, args.dataset, embedding)
+        result = AppDslService(db.session).import_app(
+            account=account,
+            import_mode="yaml-content",
+            yaml_content=dsl,
+            app_id=args.app_id,
+        )
+        db.session.commit()
+        print(f"import status: {result.status}")
+        if result.error:
+            print(f"error: {result.error}")
+        print(f"app id: {result.app_id}")
+        print("Open Studio -> the app, then Preview (or Publish) to use it.")
+
+
+if __name__ == "__main__":
+    main()
