@@ -245,6 +245,8 @@ class IetfDraftEvolutionRequest(BaseModel):
     """Input payload for generating a section-level diff chain across all draft revisions."""
 
     draft_name: str = Field(..., min_length=1, description="Base draft name, e.g. draft-ietf-quic-transport")
+    diff_format: Literal["prose", "patch"] = Field(default="prose")
+    skip_minor_edits: bool = Field(default=False)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -254,7 +256,11 @@ class IetfDraftEvolutionApi(Resource):
     @login_required
     def post(self):
         payload = IetfDraftEvolutionRequest.model_validate(console_ns.payload)
-        return IetfImportService.generate_draft_evolution(payload.draft_name)
+        return IetfImportService.generate_draft_evolution(
+            payload.draft_name,
+            diff_format=payload.diff_format,
+            skip_minor_edits=payload.skip_minor_edits,
+        )
 
 
 @console_ns.route("/ietf/imports/draft-annotated-rfc")

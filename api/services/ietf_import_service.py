@@ -548,10 +548,28 @@ class IetfImportService:
         r'|full\s+copyright'
         r'|status\s+of\s+this\s+memo'
         r'|change\s+log'
+        r'|changes?\s+(?:from|since)\b.*'
+        r'|document\s+history'
         r'|revision\s+history'
+        r'|open\s+issues'
+        r'|editor\'?s?\s+notes?'
+        r'|index'
         r')\s*$',
         re.IGNORECASE,
     )
+
+    # RFC 2119 normative keywords: an edit touching one of these is always
+    # significant no matter how small ("MAY" -> "MUST" is one word).
+    _RFC2119_RE = re.compile(
+        r'\b(?:MUST(?:\s+NOT)?|SHALL(?:\s+NOT)?|SHOULD(?:\s+NOT)?'
+        r'|REQUIRED|RECOMMENDED|NOT\s+RECOMMENDED|MAY|OPTIONAL)\b'
+    )
+
+    # Word-level similarity at or above this marks a change as cosmetic
+    # (roughly a couple of words per fifty). Deliberately loose: the
+    # normative-keyword and digit guards, not the ratio, are what protect
+    # significant-but-tiny edits from being dropped.
+    _MINOR_EDIT_SIMILARITY = 0.95
 
     @staticmethod
     def _section_sort_key(sec_id: str) -> tuple:
@@ -634,12 +652,86 @@ class IetfImportService:
         return '\n\n'.join(blocks)
 
     @staticmethod
+    def _section_line_spans(text: str) -> dict[str, tuple[int, int]]:
+        """Map section id -> (start_line, end_line), 1-based, in the ORIGINAL text.
+
+        Computed against the raw downloaded revision (before page-break
+        stripping) so the numbers match what a reader sees opening the .txt.
+        ToC entries match the heading pattern too; the last occurrence wins,
+        which is the real body heading. A span runs from the heading line to
+        the line before the next heading (or end of file).
+        """
+        lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+        if lines and lines[-1] == "":
+            lines = lines[:-1]
+        headings: list[tuple[str, int]] = []
+        for index, line in enumerate(lines, start=1):
+            match = IetfImportService._SECTION_RE.match(line)
+            if match:
+                headings.append((match.group(1).rstrip("."), index))
+        spans: dict[str, tuple[int, int]] = {}
+        for position, (sec_id, start) in enumerate(headings):
+            end = headings[position + 1][1] - 1 if position + 1 < len(headings) else len(lines)
+            spans[sec_id] = (start, end)
+        return spans
+
+    @staticmethod
+    def _classify_edit(old_text: str, new_text: str) -> tuple[float, bool]:
+        """Return (word-level similarity, is_minor) for a modified section.
+
+        An edit is *minor* (spelling/punctuation-level) only when similarity
+        is at or above _MINOR_EDIT_SIMILARITY AND the changed words contain
+        no RFC 2119 keyword and no digits - tiny edits like "MAY" -> "MUST"
+        or "32" -> "64" are protocol-significant and must never be dropped.
+        """
+        old_words = old_text.split()
+        new_words = new_text.split()
+        matcher = difflib.SequenceMatcher(None, old_words, new_words, autojunk=False)
+        similarity = matcher.ratio()
+
+        changed_words: list[str] = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag != "equal":
+                changed_words.extend(old_words[i1:i2])
+                changed_words.extend(new_words[j1:j2])
+        changed_blob = " ".join(changed_words)
+
+        is_minor = (
+            similarity >= IetfImportService._MINOR_EDIT_SIMILARITY
+            and not IetfImportService._RFC2119_RE.search(changed_blob)
+            and not any(character.isdigit() for character in changed_blob)
+        )
+        return similarity, is_minor
+
+    @staticmethod
+    def _patch_diff(old_text: str, new_text: str, from_rev: str, to_rev: str) -> str:
+        """Unified diff of a section body; hunk offsets are section-relative.
+
+        Absolute anchoring in the original revision text comes from the
+        from_lines/to_lines record metadata, not the hunk headers.
+        """
+        diff_lines = difflib.unified_diff(
+            old_text.splitlines(),
+            new_text.splitlines(),
+            fromfile=f"rev {from_rev}",
+            tofile=f"rev {to_rev}",
+            lineterm="",
+            n=2,
+        )
+        return "\n".join(diff_lines)
+
+    @staticmethod
     def _diff_version_pair(
         old: dict[str, tuple[str, str]],
         new: dict[str, tuple[str, str]],
         from_rev: str,
         to_rev: str,
         draft_name: str,
+        *,
+        diff_format: Literal["prose", "patch"] = "prose",
+        old_spans: dict[str, tuple[int, int]] | None = None,
+        new_spans: dict[str, tuple[int, int]] | None = None,
+        skip_minor_edits: bool = False,
     ) -> list[dict]:
         """Return change records for every section that differs between two revisions."""
         records: list[dict] = []
@@ -649,6 +741,7 @@ class IetfImportService:
             new_entry = new.get(sec_id)
             old_text = old_entry[1] if old_entry else ''
             new_text = new_entry[1] if new_entry else ''
+            similarity: float | None = None
             if old_entry is None and new_entry is not None:
                 change_type = "added"
             elif old_entry is not None and new_entry is None:
@@ -656,6 +749,9 @@ class IetfImportService:
             elif old_entry is not None and new_entry is not None:
                 if ' '.join(old_text.split()) == ' '.join(new_text.split()):
                     continue  # identical text — skip
+                similarity, is_minor = IetfImportService._classify_edit(old_text, new_text)
+                if skip_minor_edits and is_minor:
+                    continue  # cosmetic edit (spelling/punctuation) — skip
                 change_type = "modified"
             else:
                 continue
@@ -664,12 +760,18 @@ class IetfImportService:
             if IetfImportService._SKIP_SECTION_RE.match(section_title):
                 continue
 
-            # Build human-readable prose body (no patch-format noise).
+            # Added/removed sections carry their full text in both formats;
+            # only "modified" bodies differ by diff_format.
             if change_type == "added":
                 body = f"New section added in rev {to_rev}:\n{new_text}"
             elif change_type == "removed":
                 body = f"Section removed after rev {from_rev}:\n{old_text}"
+            elif diff_format == "patch":
+                body = IetfImportService._patch_diff(old_text, new_text, from_rev, to_rev)
+                if not body:
+                    body = f"Before (rev {from_rev}):\n{old_text}\n\nAfter (rev {to_rev}):\n{new_text}"
             else:
+                # Human-readable prose body (embeds better than patch syntax).
                 body = IetfImportService._prose_diff(old_text, new_text, from_rev, to_rev)
                 if not body:
                     # No paragraph-level boundaries found — show full before/after.
@@ -688,7 +790,7 @@ class IetfImportService:
             content = f"{header}\n\n{body}"
             # `content` is promoted to page_content by JsonlExtractor; everything
             # else becomes chunk metadata (draft_name, from_rev, to_rev, …).
-            records.append({
+            record = {
                 "content": content,
                 "draft_name": draft_name,
                 "from_rev": from_rev,
@@ -696,7 +798,17 @@ class IetfImportService:
                 "section_id": sec_id,
                 "section_title": section_title,
                 "change_type": change_type,
-            })
+            }
+            # Line spans anchor the section in each ORIGINAL revision text.
+            # Only stable within a revision (RFC text is reflowed between
+            # revisions); section_id remains the cross-revision key.
+            if old_spans and sec_id in old_spans:
+                record["from_lines"] = f"{old_spans[sec_id][0]}-{old_spans[sec_id][1]}"
+            if new_spans and sec_id in new_spans:
+                record["to_lines"] = f"{new_spans[sec_id][0]}-{new_spans[sec_id][1]}"
+            if similarity is not None:
+                record["similarity"] = f"{similarity:.3f}"
+            records.append(record)
         return records
 
     @staticmethod
@@ -777,31 +889,48 @@ class IetfImportService:
         return lineage
 
     @staticmethod
-    def generate_draft_evolution(draft_name: str) -> tuple[dict, int]:
+    def generate_draft_evolution(
+        draft_name: str,
+        diff_format: Literal["prose", "patch"] = "prose",
+        skip_minor_edits: bool = False,
+    ) -> tuple[dict, int]:
         """Fetch every plain-text revision of a draft, diff them section by
         section, and upload the resulting change-log as a JSONL dataset file.
 
         Each JSONL line becomes one chunk via JsonlExtractor.  Fields:
-          content        — paragraph-level prose diff (promoted to page_content)
+          content        — diff body (promoted to page_content): paragraph-level
+                           prose (default, embeds better) or unified patch
           draft_name, from_rev, to_rev, section_id, section_title,
-          change_type (added|removed|modified)  — chunk metadata
+          change_type (added|removed|modified),
+          from_lines/to_lines (section's line span in each original revision
+          text; only stable within a revision)  — chunk metadata
 
         Boilerplate sections (ToC, References, Authors, Acknowledgements, …)
         are excluded; only normative content sections are diffed.
         """
         sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
         parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
+        spans = {rev: IetfImportService._section_line_spans(version_texts[rev]) for rev in sorted_revs}
 
         all_changes: list[dict] = []
         for from_rev, to_rev in zip(sorted_revs, sorted_revs[1:]):
             all_changes.extend(
                 IetfImportService._diff_version_pair(
-                    parsed[from_rev], parsed[to_rev], from_rev, to_rev, draft_name
+                    parsed[from_rev],
+                    parsed[to_rev],
+                    from_rev,
+                    to_rev,
+                    draft_name,
+                    diff_format=diff_format,
+                    old_spans=spans[from_rev],
+                    new_spans=spans[to_rev],
+                    skip_minor_edits=skip_minor_edits,
                 )
             )
 
         jsonl_bytes = '\n'.join(json.dumps(r) for r in all_changes).encode()
-        filename = f"{draft_name}-evolution.jsonl"
+        format_suffix = "-patch" if diff_format == "patch" else ""
+        filename = f"{draft_name}-evolution{format_suffix}.jsonl"
 
         try:
             user, _ = current_account_with_tenant()

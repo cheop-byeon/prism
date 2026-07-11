@@ -551,8 +551,8 @@ export const fetchIetfDraftRelations = (draftName: string): Promise<IetfDraftRel
   return get<IetfDraftRelations>('/ietf/draft/relations', { params: { draft_name: draftName } })
 }
 
-export const importIetfDraftEvolution = (draftName: string): Promise<UploadedConsoleFile> => {
-  return post<UploadedConsoleFile>('/ietf/imports/draft-evolution', { body: { draft_name: draftName } })
+export const importIetfDraftEvolution = (draftName: string, diffFormat: 'prose' | 'patch' = 'prose', skipMinorEdits = false): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/draft-evolution', { body: { draft_name: draftName, diff_format: diffFormat, skip_minor_edits: skipMinorEdits } })
 }
 
 export const importIetfDraftAnnotatedRfc = (draftName: string): Promise<UploadedConsoleFile> => {

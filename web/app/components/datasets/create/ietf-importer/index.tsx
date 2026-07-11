@@ -749,13 +749,16 @@ function IetfImporter({
     }
   }
 
+  const [evolutionDiffFormat, setEvolutionDiffFormat] = useState<'prose' | 'patch'>('prose')
+  const [evolutionSkipMinorEdits, setEvolutionSkipMinorEdits] = useState(true)
+
   const handleImportEvolution = async () => {
     const draftName = selectedRfc?.draft_base_name
     if (!draftName)
       return
     setIsImportingEvolution(true)
     try {
-      const file = await importIetfDraftEvolution(draftName)
+      const file = await importIetfDraftEvolution(draftName, evolutionDiffFormat, evolutionSkipMinorEdits)
       handleImportedFile(file)
     }
     catch (error) {
@@ -1530,6 +1533,60 @@ function IetfImporter({
                               ns: 'datasetCreation',
                               draft: selectedRfc.draft_base_name,
                             })}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="flex items-center gap-1 text-xs text-text-secondary">
+                              {t('stepOne.ietf.evolutionDiffFormat', { ns: 'datasetCreation' })}
+                              <Tooltip>
+                                <TooltipTrigger render={(
+                                  <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                                )}
+                                />
+                                <TooltipContent>
+                                  {t('stepOne.ietf.evolutionDiffFormatHint', { ns: 'datasetCreation' })}
+                                </TooltipContent>
+                              </Tooltip>
+                            </span>
+                            {(
+                              [
+                                ['prose', t('stepOne.ietf.evolutionDiffFormatProse', { ns: 'datasetCreation' })],
+                                ['patch', t('stepOne.ietf.evolutionDiffFormatPatch', { ns: 'datasetCreation' })],
+                              ] as ['prose' | 'patch', string][]
+                            ).map(([formatOption, label]) => (
+                              <button
+                                key={formatOption}
+                                type="button"
+                                data-testid={`ietf-evolution-format-${formatOption}`}
+                                onClick={() => setEvolutionDiffFormat(formatOption)}
+                                className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
+                                  evolutionDiffFormat === formatOption
+                                    ? 'border-components-button-primary-bg bg-components-button-primary-bg text-components-button-primary-text'
+                                    : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-state-base-hover'
+                                }`}
+                              >
+                                {label}
+                              </button>
+                            ))}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                              <input
+                                type="checkbox"
+                                data-testid="ietf-evolution-skip-minor"
+                                checked={evolutionSkipMinorEdits}
+                                onChange={e => setEvolutionSkipMinorEdits(e.target.checked)}
+                              />
+                              {t('stepOne.ietf.evolutionSkipMinor', { ns: 'datasetCreation' })}
+                            </label>
+                            <Tooltip>
+                              <TooltipTrigger render={(
+                                <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                              )}
+                              />
+                              <TooltipContent>
+                                {t('stepOne.ietf.evolutionSkipMinorHint', { ns: 'datasetCreation' })}
+                              </TooltipContent>
+                            </Tooltip>
                           </div>
                           <Button
                             size="small"
