@@ -172,13 +172,30 @@ class Bm25Keyword(BaseKeyword):
     # ------------------------------------------------------------------
 
     def _load_corpus(self) -> tuple[list[list[str]], list[str]]:
-        """Return (corpus_tokens, doc_ids) from the stored index."""
+        """Return (corpus_tokens, doc_ids) from the stored index.
+
+        Parses the raw JSON blob directly. DatasetKeywordTable.keyword_table_dict
+        must NOT be used here: its Jieba-specific decoder converts every list
+        value to a set, which raises on corpus_tokens (a list of lists is
+        unhashable) and destroys doc_ids ordering.
+        """
         dataset_keyword_table = self.dataset.dataset_keyword_table
         if dataset_keyword_table:
-            raw = dataset_keyword_table.keyword_table_dict
-            if raw and raw.get("__type__") == "bm25_index":
-                data = raw.get("__data__", {})
-                return data.get("corpus_tokens", []), data.get("doc_ids", [])
+            raw_text: str | None = None
+            if dataset_keyword_table.data_source_type == "database":
+                raw_text = dataset_keyword_table.keyword_table
+            else:
+                file_key = "keyword_files/" + self.dataset.tenant_id + "/" + self.dataset.id + ".txt"
+                if storage.exists(file_key):
+                    raw_text = storage.load_once(file_key).decode("utf-8")
+            if raw_text:
+                try:
+                    raw = orjson.loads(raw_text)
+                except orjson.JSONDecodeError:
+                    raw = None
+                if isinstance(raw, dict) and raw.get("__type__") == "bm25_index":
+                    data = raw.get("__data__", {})
+                    return data.get("corpus_tokens", []), data.get("doc_ids", [])
         else:
             from configs import dify_config
             keyword_data_source_type = dify_config.KEYWORD_DATA_SOURCE_TYPE
