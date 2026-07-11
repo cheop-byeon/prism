@@ -347,7 +347,53 @@ def main() -> None:
         if result.error:
             print(f"error: {result.error}")
         print(f"app id: {result.app_id}")
-        print("Open Studio -> the app, then Preview (or Publish) to use it.")
+
+        # Verify the draft workflow actually matches what we generated.
+        # An earlier --app-id refresh once reported "completed" without
+        # persisting anything, so never trust the status line alone.
+        _verify_draft(result.app_id, dsl)
+        print("verified: stored draft matches the generated DSL")
+        print("Open Studio -> the app, then Publish (the import only updates the draft).")
+
+
+def _verify_draft(app_id: str, dsl: str) -> None:
+    import json
+
+    from extensions.ext_database import db
+    from models.workflow import Workflow
+
+    expected = yaml.safe_load(dsl)["workflow"]
+    db.session.expire_all()
+    workflow = (
+        db.session.query(Workflow).filter_by(app_id=app_id, version="draft").first()
+    )
+    if workflow is None:
+        sys.exit("VERIFICATION FAILED: no draft workflow stored for the app")
+
+    stored_graph = json.loads(workflow.graph)
+    stored_features = json.loads(workflow.features)
+
+    expected_ids = {node["id"] for node in expected["graph"]["nodes"]}
+    stored_ids = {node["id"] for node in stored_graph.get("nodes", [])}
+    problems: list[str] = []
+    if not expected_ids <= stored_ids:
+        problems.append(f"missing nodes: {sorted(expected_ids - stored_ids)}")
+
+    for key in ("opening_statement", "suggested_questions"):
+        if stored_features.get(key) != expected["features"].get(key):
+            problems.append(f"feature mismatch: {key}")
+
+    expected_start = next(n for n in expected["graph"]["nodes"] if n["data"]["type"] == "start")
+    stored_start = next((n for n in stored_graph.get("nodes", []) if n["data"].get("type") == "start"), None)
+    expected_options = expected_start["data"]["variables"][0]["options"]
+    stored_options = (stored_start or {}).get("data", {}).get("variables", [{}])[0].get("options")
+    if stored_options != expected_options:
+        problems.append(
+            f"decision options mismatch: stored {len(stored_options or [])}, expected {len(expected_options)}"
+        )
+
+    if problems:
+        sys.exit("VERIFICATION FAILED: " + "; ".join(problems) + " — re-run the script or check the app in Studio")
 
 
 if __name__ == "__main__":
