@@ -534,7 +534,21 @@ class IetfImportService:
     # ------------------------------------------------------------------ #
 
     _SECTION_RE = re.compile(r'^(\d+(?:\.\d+)*|[A-Z](?:\.\d+)*)\.?\s{2,}(\S.*)$')
-    _PAGE_BREAK_RE = re.compile(r'\x0c[^\n]*\n(?:[^\n]*\n){0,3}', re.MULTILINE)
+    # One page break = optional footer line ("Author  Expires ...  [Page N]"),
+    # the form-feed line, at most ONE running-header line, then blank lines.
+    # The old pattern ate up to three lines after the form feed blindly, which
+    # could swallow the first body line of the next page; and it never removed
+    # the footer, which then leaked into section bodies (and from there into
+    # evolution diffs and retrieval queries built from them).
+    _PAGE_BREAK_RE = re.compile(
+        r'(?:^[^\n]*\[Page\s+\d+\][^\n]*\n)?'  # footer line before the break
+        r'\x0c[^\n]*\n'                         # form-feed line
+        r'(?:[^\n]*\S[^\n]*\n)?'                # one running-header line
+        r'(?:[ \t]*\n)*',                       # trailing blank lines
+        re.MULTILINE,
+    )
+    # Safety net for footers not adjacent to a form feed (flat text files).
+    _PAGE_FOOTER_LINE_RE = re.compile(r'^[^\n]*\[Page\s+\d+\]\s*$')
     # Sections that are structural / bibliographic rather than normative content.
     # Changes to these sections are noise in an evolution diff.
     _SKIP_SECTION_RE = re.compile(
@@ -598,6 +612,8 @@ class IetfImportService:
         current_lines: list[str] = []
 
         for line in text.splitlines():
+            if IetfImportService._PAGE_FOOTER_LINE_RE.match(line):
+                continue
             m = IetfImportService._SECTION_RE.match(line)
             if m:
                 if current_id is not None:

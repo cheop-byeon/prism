@@ -184,3 +184,39 @@ class TestSkipSections:
 
         assert len(IetfImportService._diff_version_pair(old, new, "00", "01", "d")) == 1
 
+
+class TestPageFurnitureStripping:
+    def test_footer_and_header_are_stripped_from_section_bodies(self):
+        text = (
+            "1.  Introduction\n\n"
+            "   First paragraph before the page break.\n\n"
+            "Shalunov               Expires September 23, 2010               [Page 3]\n"
+            "\x0c\n"
+            "Internet-Draft              LEDBAT                            March 2010\n\n"
+            "   Second paragraph after the page break.\n"
+        )
+
+        sections = IetfImportService._parse_sections(text)
+
+        body = sections["1"][1]
+        assert "First paragraph" in body
+        assert "Second paragraph" in body  # body line after the break survives
+        assert "[Page" not in body
+        assert "Expires September" not in body
+        assert "Internet-Draft" not in body
+
+    def test_stray_footer_without_formfeed_is_stripped(self):
+        text = (
+            "1.  Introduction\n\n"
+            "   Some body text here.\n"
+            "Shalunov               Expires September 23, 2010               [Page 7]\n"
+            "   More body text here.\n"
+        )
+
+        sections = IetfImportService._parse_sections(text)
+
+        body = sections["1"][1]
+        assert "Some body text" in body
+        assert "More body text" in body
+        assert "[Page" not in body
+
