@@ -279,8 +279,15 @@ def _build_dsl(
             "conversation_variables": [],
             "environment_variables": [],
             "features": {
-                "opening_statement": "Pick a decision from the form (or just ask in your own words).",
-                "suggested_questions": [],
+                "opening_statement": (
+                    "Pick a decision from the form, then click a suggestion below (or type your own question). "
+                    "No decision selected? Just ask freely."
+                ),
+                "suggested_questions": [
+                    "Why was this change made?",
+                    "Quote what this change says, then summarize the discussion behind it.",
+                    "What alternatives or objections were raised?",
+                ],
                 "suggested_questions_after_answer": {"enabled": False},
                 "retriever_resource": {"enabled": True},
                 "sensitive_word_avoidance": {"enabled": False},
