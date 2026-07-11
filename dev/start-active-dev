@@ -12,7 +12,7 @@ docker compose stop web nginx >/dev/null 2>&1 || true
 
 # Ensure core backend services are available for local frontend development.
 # Default VECTOR_STORE is weaviate in docker/.env, so include it here.
-docker compose up -d api worker worker_beat ietfdata_service weaviate
+docker compose up -d api worker worker_beat ietfdata_service weaviate sandbox ssrf_proxy plugin_daemon
 
 cd "${REPO_ROOT}/web"
 
