@@ -57,7 +57,8 @@ _CODE_MIX = (
     "        mail_query = (base[:800] + ' ' + query).strip()\n"
     "    else:\n"
     "        mail_query = query\n"
-    "    return {'result': mail_query, 'change_text': change_text[:1500]}\n"
+    "    display = ('What the change says:\\n' + change_text[:1200] + '\\n\\n---\\n') if change_text else ''\n"
+    "    return {'result': mail_query, 'change_text': change_text[:1500], 'display_text': display}\n"
 )
 
 _SYSTEM_PROMPT = (
@@ -244,15 +245,27 @@ def _build_dsl(
             "outputs": {
                 "result": {"type": "string", "children": None},
                 "change_text": {"type": "string", "children": None},
+                "display_text": {"type": "string", "children": None},
             },
         }, 562))
 
+    show_id = "answershow1"
     if evolution_dataset_id:
+        # Streams the resolved diff text to the user IMMEDIATELY (before the
+        # mail retrieval + LLM answer), so picking a decision visibly shows
+        # what the change says. Empty when no decision is selected.
+        nodes.insert(4, _node(show_id, {
+            "type": "answer",
+            "title": "Show change",
+            "desc": "",
+            "answer": f"{{{{#{mix_id}.display_text#}}}}",
+        }, 714))
         edges = [
             _edge(start_id, "start", code_id, "code"),
             _edge(code_id, "code", evo_kr_id, "knowledge-retrieval"),
             _edge(evo_kr_id, "knowledge-retrieval", mix_id, "code"),
-            _edge(mix_id, "code", kr_id, "knowledge-retrieval"),
+            _edge(mix_id, "code", show_id, "answer"),
+            _edge(show_id, "answer", kr_id, "knowledge-retrieval"),
             _edge(kr_id, "knowledge-retrieval", llm_id, "llm"),
             _edge(llm_id, "llm", answer_id, "answer"),
         ]
@@ -288,7 +301,7 @@ def _build_dsl(
                     "Quote what this change says, then summarize the discussion behind it.",
                     "What alternatives or objections were raised?",
                 ],
-                "suggested_questions_after_answer": {"enabled": False},
+                "suggested_questions_after_answer": {"enabled": True},
                 "retriever_resource": {"enabled": True},
                 "sensitive_word_avoidance": {"enabled": False},
                 "speech_to_text": {"enabled": False},
