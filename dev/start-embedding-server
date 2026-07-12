@@ -9,8 +9,8 @@
 # agrees with the fp16 PyTorch reference at cosine 0.985-0.9998
 # (reference vectors: ~/Models/rfc-dralign-reference-vecs.json).
 #
-# Dify model provider (OpenAI-API-compatible, Text Embedding):
-#   endpoint: http://host.docker.internal:11434/v1
+# Dify model provider (native Ollama provider, Text Embedding):
+#   base_url: http://host.docker.internal:11434
 #   model:    rfc-dralign-q8   (4096 dims)
 #
 # Ollama itself is an external host service (not part of this repo) — start
@@ -39,4 +39,4 @@ fi
 
 curl -s http://localhost:11434/api/embed \
   -d "{\"model\":\"$MODEL_NAME\",\"input\":\"health check\"}" \
-  | grep -q embeddings && echo "embedding endpoint OK — Dify endpoint: http://host.docker.internal:11434/v1"
+  | grep -q embeddings && echo "embedding endpoint OK — Dify (Ollama provider) base_url: http://host.docker.internal:11434"
