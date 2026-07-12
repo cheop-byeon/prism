@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Serve the RFC-DRAlign-QN embedding model locally (free, Metal-accelerated).
+#
+# Replaces the Colab + cloudflare-tunnel setup: llama-server runs the q8_0
+# GGUF on the M-series GPU, and a tiny shim reproduces the model's
+# double-EOS tokenization (see dev/rfc-dralign-embed-shim.py).
+#
+# Dify model provider (OpenAI-API-compatible, Text Embedding):
+#   endpoint: http://host.docker.internal:8090/v1
+#   model:    rfc-dralign-q8   (4096 dims)
+
+set -euo pipefail
+
+MODEL="${RFC_DRALIGN_GGUF:-$HOME/Models/rfc-dralign-q8.gguf}"
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+
+if [ ! -f "$MODEL" ]; then
+  echo "GGUF not found: $MODEL" >&2
+  exit 1
+fi
+
+if ! lsof -iTCP:8089 -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+  echo "starting llama-server on :8089 ..."
+  nohup llama-server -m "$MODEL" \
+    --embedding --pooling last \
+    -c 4096 -b 4096 -ub 4096 \
+    --override-kv tokenizer.ggml.add_eos_token=bool:true \
+    --host 127.0.0.1 --port 8089 \
+    > /tmp/llama-server-rfc-dralign.log 2>&1 &
+  until curl -s http://127.0.0.1:8089/health | grep -q ok; do sleep 2; done
+fi
+echo "llama-server ready on :8089"
+
+if ! lsof -iTCP:8090 -sTCP:LISTEN -n -P >/dev/null 2>&1; then
+  echo "starting embed shim on :8090 ..."
+  nohup python3 "$SCRIPT_DIR/rfc-dralign-embed-shim.py" --port 8090 \
+    > /tmp/rfc-dralign-shim.log 2>&1 &
+  sleep 1
+fi
+echo "shim ready on :8090 — Dify endpoint: http://host.docker.internal:8090/v1"
