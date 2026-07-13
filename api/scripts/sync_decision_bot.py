@@ -223,6 +223,9 @@ def _build_dsl(
             ],
             "context": {"enabled": True, "variable_selector": [kr_id, "result"]},
             "vision": {"enabled": False, "configs": {"variable_selector": []}},
+            # Free-tier OpenRouter models return transient 429s under load;
+            # retry twice with a pause instead of surfacing an empty answer.
+            "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
             # Conversation memory on (window off = keep the whole dialog), so
             # follow-up questions in the same chat stay coherent.
             "memory": {"window": {"enabled": False, "size": 50}},
