@@ -43,21 +43,34 @@ _CODE = (
 # Looks up the selected decision's real diff text (retrieved from the
 # evolution dataset) and builds the mailarchive query from it; without a
 # selection, the typed question passes through untouched.
+# Two-stage retrieval for ANY input: stage 1 (kr_evo) resolves the decision -
+# from the dropdown label OR the user's free text - to the best-matching
+# change record; stage 2 searches the mail archive with the change's own
+# wording. In free-text mode the diff excerpt is BLENDED with (not
+# substituted for) the typed text, so a weak stage-1 match adds noise but
+# cannot hijack the search; the resolved change is displayed so mismatches
+# are visible. Queries are never constrained to the dropdown's options.
 _CODE_MIX = (
     "def main(decision: str, query: str, evo: list) -> dict:\n"
     "    decision = (decision or '').strip()\n"
     "    query = (query or '').strip()\n"
-    "    change_text = ''\n"
-    "    if decision and evo:\n"
+    "    change_text, header = '', ''\n"
+    "    if evo:\n"
     "        content = (evo[0].get('content') if isinstance(evo[0], dict) else '') or ''\n"
     "        lines = content.split('\\n')\n"
+    "        header = lines[0].strip() if lines else ''\n"
     "        change_text = '\\n'.join(lines[2:]).strip() if len(lines) > 2 else content\n"
     "    if decision:\n"
     "        base = change_text or decision\n"
     "        mail_query = (base[:800] + ' ' + query).strip()\n"
+    "        display = ('What the change says:\\n' + change_text[:1200] + '\\n\\n---\\n') if change_text else ''\n"
+    "    elif query and change_text:\n"
+    "        mail_query = (query + ' ' + change_text[:400]).strip()\n"
+    "        excerpt = change_text[:600]\n"
+    "        display = ('Best-matching change: ' + header + '\\n' + excerpt + '\\n\\n---\\n') if header else ''\n"
     "    else:\n"
     "        mail_query = query\n"
-    "    display = ('What the change says:\\n' + change_text[:1200] + '\\n\\n---\\n') if change_text else ''\n"
+    "        display = ''\n"
     "    return {'result': mail_query, 'change_text': change_text[:1500], 'display_text': display}\n"
 )
 
