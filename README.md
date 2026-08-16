@@ -1,73 +1,19 @@
-![cover-v5-optimized](./images/GitHub_README_if.png)
+# IETF Knowledge Base — a personal project built on Dify
 
-<p align="center">
-  <a href="https://cloud.dify.ai">Dify Cloud</a> ·
-  <a href="https://docs.dify.ai/getting-started/install-self-hosted">Self-hosting</a> ·
-  <a href="https://docs.dify.ai">Documentation</a> ·
-  <a href="https://dify.ai/pricing">Dify edition overview</a>
-</p>
+<img src="./images/GitHub_README_if.png" alt="Dify" width="200" align="right">
 
-<p align="center">
-    <a href="https://dify.ai" target="_blank">
-        <img alt="Static Badge" src="https://img.shields.io/badge/Product-F04438"></a>
-    <a href="https://dify.ai/pricing" target="_blank">
-        <img alt="Static Badge" src="https://img.shields.io/badge/free-pricing?logo=free&color=%20%23155EEF&label=pricing&labelColor=%20%23528bff"></a>
-    <a href="https://discord.gg/FngNHpbcY7" target="_blank">
-        <img src="https://img.shields.io/discord/1082486657678311454?logo=discord&labelColor=%20%235462eb&logoColor=%20%23f5f5f5&color=%20%235462eb"
-            alt="chat on Discord"></a>
-    <a href="https://reddit.com/r/difyai" target="_blank">  
-        <img src="https://img.shields.io/reddit/subreddit-subscribers/difyai?style=plastic&logo=reddit&label=r%2Fdifyai&labelColor=white"
-            alt="join Reddit"></a>
-    <a href="https://twitter.com/intent/follow?screen_name=dify_ai" target="_blank">
-        <img src="https://img.shields.io/twitter/follow/dify_ai?logo=X&color=%20%23f5f5f5"
-            alt="follow on X(Twitter)"></a>
-    <a href="https://www.linkedin.com/company/langgenius/" target="_blank">
-        <img src="https://custom-icon-badges.demolab.com/badge/LinkedIn-0A66C2?logo=linkedin-white&logoColor=fff"
-            alt="follow on LinkedIn"></a>
-    <a href="https://hub.docker.com/u/langgenius" target="_blank">
-        <img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/langgenius/dify-web?labelColor=%20%23FDB062&color=%20%23f79009"></a>
-    <a href="https://github.com/langgenius/dify/graphs/commit-activity" target="_blank">
-        <img alt="Commits last month" src="https://img.shields.io/github/commit-activity/m/langgenius/dify?labelColor=%20%2332b583&color=%20%2312b76a"></a>
-    <a href="https://github.com/langgenius/dify/" target="_blank">
-        <img alt="Issues closed" src="https://img.shields.io/github/issues-search?query=repo%3Alanggenius%2Fdify%20is%3Aclosed&label=issues%20closed&labelColor=%20%237d89b0&color=%20%235d6b98"></a>
-    <a href="https://github.com/langgenius/dify/discussions/" target="_blank">
-        <img alt="Discussion posts" src="https://img.shields.io/github/discussions/langgenius/dify?labelColor=%20%239b8afb&color=%20%237a5af8"></a>
-    <a href="https://insights.linuxfoundation.org/project/langgenius-dify" target="_blank">
-        <img alt="LFX Health Score" src="https://insights.linuxfoundation.org/api/badge/health-score?project=langgenius-dify"></a>
-    <a href="https://insights.linuxfoundation.org/project/langgenius-dify" target="_blank">
-        <img alt="LFX Contributors" src="https://insights.linuxfoundation.org/api/badge/contributors?project=langgenius-dify"></a>
-    <a href="https://insights.linuxfoundation.org/project/langgenius-dify" target="_blank">
-        <img alt="LFX Active Contributors" src="https://insights.linuxfoundation.org/api/badge/active-contributors?project=langgenius-dify"></a>
-</p>
+This repo is build upon [Dify](https://github.com/langgenius/dify), an open-source LLM app development platform, I extended with a pipeline for importing IETF standards data (mailing lists, RFCs, internet-drafts, and working-group GitHub repos) into Dify knowledge bases for RAG.
 
-<p align="center">
-  <a href="./README.md"><img alt="README in English" src="https://img.shields.io/badge/English-d9d9d9"></a>
-  <a href="./docs/zh-TW/README.md"><img alt="繁體中文文件" src="https://img.shields.io/badge/繁體中文-d9d9d9"></a>
-  <a href="./docs/zh-CN/README.md"><img alt="简体中文文件" src="https://img.shields.io/badge/简体中文-d9d9d9"></a>
-  <a href="./docs/ja-JP/README.md"><img alt="日本語のREADME" src="https://img.shields.io/badge/日本語-d9d9d9"></a>
-  <a href="./docs/es-ES/README.md"><img alt="README en Español" src="https://img.shields.io/badge/Español-d9d9d9"></a>
-  <a href="./docs/fr-FR/README.md"><img alt="README en Français" src="https://img.shields.io/badge/Français-d9d9d9"></a>
-  <a href="./docs/tlh/README.md"><img alt="README tlhIngan Hol" src="https://img.shields.io/badge/Klingon-d9d9d9"></a>
-  <a href="./docs/ko-KR/README.md"><img alt="README in Korean" src="https://img.shields.io/badge/한국어-d9d9d9"></a>
-  <a href="./docs/ar-SA/README.md"><img alt="README بالعربية" src="https://img.shields.io/badge/العربية-d9d9d9"></a>
-  <a href="./docs/tr-TR/README.md"><img alt="Türkçe README" src="https://img.shields.io/badge/Türkçe-d9d9d9"></a>
-  <a href="./docs/vi-VN/README.md"><img alt="README Tiếng Việt" src="https://img.shields.io/badge/Ti%E1%BA%BFng%20Vi%E1%BB%87t-d9d9d9"></a>
-  <a href="./docs/de-DE/README.md"><img alt="README in Deutsch" src="https://img.shields.io/badge/German-d9d9d9"></a>
-  <a href="./docs/bn-BD/README.md"><img alt="README in বাংলা" src="https://img.shields.io/badge/বাংলা-d9d9d9"></a>
-</p>
-
-Dify is an open-source LLM app development platform. Its intuitive interface combines AI workflow, RAG pipeline, agent capabilities, model management, observability features (including [Opik](https://www.comet.com/docs/opik/integrations/dify), [Langfuse](https://docs.langfuse.com), and [Arize Phoenix](https://docs.arize.com/phoenix)) and more, letting you quickly go from prototype to production. Here's a list of the core features:
+For everything about Dify itself — install docs, general features, community, contributing — see the [upstream repository](https://github.com/langgenius/dify). This README only covers what's specific to this project.
 
 ## Quick start
 
-> Before installing Dify, make sure your machine meets the following minimum system requirements:
+> Before installing, make sure your machine meets the following minimum system requirements:
 >
 > - CPU >= 2 Core
 > - RAM >= 4 GiB
 
-<br/>
-
-The easiest way to start the Dify server is through [Docker Compose](docker/docker-compose.yaml). Before running Dify with the following commands, make sure that [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed on your machine:
+The easiest way to start the server is through [Docker Compose](docker/docker-compose.yaml). Make sure [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed, then:
 
 ```bash
 cd dify
@@ -76,155 +22,152 @@ cp .env.example .env
 docker compose up -d
 ```
 
-After running, you can access the Dify dashboard in your browser at [http://localhost/install](http://localhost/install) and start the initialization process.
+Access the dashboard at [http://localhost/install](http://localhost/install) and start the initialization process.
 
-#### Seeking help
+## My additions
 
-Please refer to our [FAQ](https://docs.dify.ai/getting-started/install-self-hosted/faqs) if you encounter problems setting up Dify. Reach out to [the community and us](#community--contact) if you are still having issues.
+IETF standards work is scattered across mailing-list archives, an RFC index, draft revisions, and GitHub. There was no way to ask an LLM things like "what changed in this draft, and why did the working group decide that?" — answering that needs both the spec text *and* the mailing-list discussion behind each change, linked together. This project builds that pipeline on top of Dify's RAG stack.
 
-> If you'd like to contribute to Dify or do additional development, refer to our [guide to deploying from source code](https://docs.dify.ai/getting-started/install-self-hosted/local-source-code)
+### Ingestion
 
-## Key features
+A Python 3.13 sidecar service (`tools/ietfdata_service/`, FastAPI) handles all IETF-specific data access, since the `ietfdata` library needs a newer Python than Dify's API runtime — the two talk over HTTP (`IETFDATA_SERVICE_URL`, internal-network-only, no host port). It exposes:
 
-**1. Workflow**:
-Build and test powerful AI workflows on a visual canvas, leveraging all the following features and beyond.
+- **Mailing lists** — `GET /mailarchive/lists`, per-list sync status, and a background-thread `POST /sync`; the import endpoint itself (`POST /import/mailarchive`) supports boolean query parsing (`AND`/`OR`/quoted phrases) against subject/body, JSONL or mbox output, pagination or `fetch_all`, and dedups by `Message-ID` (IETF's IMAP double-delivers messages).
+- **RFCs & drafts** — `GET /rfcs/suggestions` (autocomplete search that also builds each draft's full version history by cross-referencing the Datatracker's submission records — this is what backs the draft-evolution version tracking), format-availability probing (txt/html/pdf/xml), and bulk import by ID or by filter (since/until/stream/wg/status).
+- **Text cleanup** — a front/back-matter stripper (`_extract_technical_body_text`) that removes RFC/I-D title pages, boilerplate, and page headers/footers from form-feed-paginated plaintext before anything gets chunked.
 
-**2. Comprehensive model support**:
-Seamless integration with hundreds of proprietary / open-source LLMs from dozens of inference providers and self-hosted solutions, covering GPT, Mistral, Llama3, and any OpenAI API-compatible models. A full list of supported model providers can be found [here](https://docs.dify.ai/getting-started/readme/model-providers).
+The sidecar's mailarchive output (JSONL) and mbox exports needed new extractors on Dify's side: `api/core/rag/extractor/jsonl_extractor.py` parses newline-delimited JSON (one record per line, `body`/`content` promoted to chunk text, every other field kept as metadata), registered for `.jsonl` alongside a plain-text `.mbox` fallback in `extract_processor.py`.
 
-![providers-v5](https://github.com/langgenius/dify/assets/13230914/5a17bdbe-097a-4100-8363-40255b70f6e3)
+GitHub import (issues/PRs, async via Celery with progress tracking and resume-on-failure) is a separate, Dify-native path — `api/services/github_import_service.py` + `api/tasks/github_import_task.py` — with three interchangeable loader backends (raw GraphQL, LangChain's `GitHubIssuesLoader`, LlamaIndex's `GitHubRepositoryIssuesReader`), exporting one JSONL record per issue/PR.
 
-**3. Prompt IDE**:
-Intuitive interface for crafting prompts, comparing model performance, and adding additional features such as text-to-speech to a chat-based app.
+### Conversation threading & text quality
 
-**4. RAG Pipeline**:
-Extensive RAG capabilities that cover everything from document ingestion to retrieval, with out-of-box support for text extraction from PDFs, PPTs, and other common document formats.
+Raw mailarchive messages are grouped into threads rather than indexed as isolated emails (`api/services/email_threading.py`), with configurable quote-removal (`api/services/email_quote_cleaning.py`) so replies don't drown the signal in repeated quoted text. Both have offline eval harnesses (`api/scripts/eval_threading.py`, `api/scripts/eval_quote_cleaning.py`) that sample real mbox messages, compare cleaning modes, and write side-by-side markdown reports — used to tune the cleaning heuristics against real archive data before trusting them in the ingestion path.
 
-**5. Agent capabilities**:
-You can define agents based on LLM Function Calling or ReAct, and add pre-built or custom tools for the agent. Dify provides 50+ built-in tools for AI agents, such as Google Search, DALL·E, Stable Diffusion and WolframAlpha.
+### Draft evolution & annotated RFCs
 
-**6. LLMOps**:
-Monitor and analyze application logs and performance over time. You could continuously improve prompts, datasets, and models based on production data and annotations.
+A section-level diff chain walks every revision of a draft and produces paragraph-level prose diffs (`change_type`, `from_rev`, `to_rev`, `section_id`), and the final RFC is annotated with per-section lineage (`first_seen_rev`, `last_changed_rev`, `change_count`) so retrieval can distinguish long-stable text from recently-changed text.
 
-**7. Backend-as-a-Service**:
-All of Dify's offerings come with corresponding APIs, so you could effortlessly integrate Dify into your own business logic.
+`api/scripts/link_evolution_to_threads.py` connects that diff data to discussion: for every section change, it uses the change text as a retrieval query against a mailarchive dataset and reports the best-matching threads, flagging whether each match falls inside or outside the revision's actual submission-date window (fetched from the sidecar). This is the offline tool that answers "which discussion actually caused this change?" — and the same idea, packaged as a live query-time flow, is the decision bot below.
 
-## Using Dify
+### Pluggable chunking strategies
 
-- **Cloud <br/>**
-  We host a [Dify Cloud](https://dify.ai) service for anyone to try with zero setup. It provides all the capabilities of the self-deployed version, and includes 200 free GPT-4 calls in the sandbox plan.
+Stock Dify ships one splitter (recursive character splitting) plus a QA mode. This fork adds a real strategy system — not IETF-specific, it's now available to any dataset — spread across four files under `api/core/rag/splitter/`:
 
-- **Self-hosting Dify Community Edition<br/>**
-  Quickly get Dify running in your environment with this [starter guide](#quick-start).
-  Use our [documentation](https://docs.dify.ai) for further references and more in-depth instructions.
+- **`chunk_strategy.py`** is the registry: a `ChunkStrategy` literal of 24 named strategies, grouped into a `StrategyCategory` enum (`CHARACTER`, `TOKEN`, `BOUNDARY`, `FRAMEWORK`) that determines which sizing inputs apply, plus lookup helpers for each strategy's provider and default separators.
+- **10 custom strategies** (`recursive` [default], `paragraph`, `sentence`, `markdown`, `html`, `json`, `code`, `latex`, `token`, `semantic`) — `paragraph` and `semantic` are new splitters in `fixed_text_splitter.py`: `ParagraphSplitter` (blank-line boundaries, no size enforcement) and `SemanticTextSplitter` (groups sentences by embedding cosine similarity, falling back to NLTK/regex sentence tokenization, then to paragraph splitting if no embedding model is configured).
+- **7 LlamaIndex-backed strategies** (`li_*`, `llamaindex_splitters.py`) and **7 LangChain-backed strategies** (`lc_*`, `langchain_splitters.py`) — thin adapters onto each framework's own node parsers/splitters (sentence, token, markdown/HTML header, code, semantic chunkers). Both import their framework lazily and raise a clear `pip install` hint if it's missing, so the module loads fine either way.
 
-- **Dify for enterprise / organizations<br/>**
-  We provide additional enterprise-centric features. [Send us an email](mailto:business@dify.ai?subject=%5BGitHub%5DBusiness%20License%20Inquiry) to discuss your enterprise needs. <br/>
+`index_processor_base.py`'s `_get_splitter()` was rewritten to dispatch on `StrategyCategory`: framework strategies go through a new `_get_framework_splitter()` factory; boundary strategies pick `SemanticTextSplitter`/`ParagraphSplitter`; character/token strategies keep the original splitter with strategy-specific separators instead of one hardcoded set. This flows end-to-end — `chunk_strategy` + a `strategy_params` dict live in `DatasetProcessRule.rules` (DB), the document-creation API, and a new provider/strategy selector plus a dynamically-rendered parameter form in `general-chunking-options.tsx` — and it applies to parent-child (hierarchical) mode too, not just flat chunking.
 
-  > For startups and small businesses using AWS, check out [Dify Premium on AWS Marketplace](https://aws.amazon.com/marketplace/pp/prodview-t22mebxzwjhu6) and deploy it to your own AWS VPC with one click. It's an affordable AMI offering with the option to create apps with custom logo and branding.
+The one IETF-specific piece riding on top of this general system: `parent_child_index_processor.py` aligns child-chunk boundaries to `--- Message N | ... ---` markers for mailarchive thread records, so a child chunk never straddles two emails.
 
-## Staying ahead
+### "Decision → Discussion" chatflow (Prism)
 
-Star Dify on GitHub and be instantly notified of new releases.
+The piece that actually answers *why*, published as a Dify workflow via `api/scripts/sync_decision_bot.py`.
 
-![star-us](https://github.com/langgenius/dify/assets/13230914/b823edc1-6388-4e25-ad45-2f6b187adbb4)
+**Why not a single corpus and a single retrieval pass.** "Why was this change made?" isn't one lookup, it's two, over two fundamentally different kinds of text — and neither one is served well by the retrieval method that suits the other:
+
+- The **evolution corpus** is small, structured, exact: each entry is a tagged fact — *this section, this revision range, this change type, in this draft*. Keyword search is what actually finds the right one; folding it into a big vector index full of free-flowing prose would just dilute it with noise.
+- The **mailing-list corpus** is the opposite — large, unstructured, paraphrase-heavy natural language, where the same argument gets restated a dozen different ways across a thread. That's exactly the case semantic search is for, and exactly the case keyword search handles badly.
+
+One corpus with one retrieval pass would have to compromise on both. Splitting them also makes the two-hop shape of the actual question possible: you can't search for a decision's discussion until you know *which* decision, so the first stage's job is disambiguation, and the second stage's query is literally built from what the first stage found — not something a single pass could produce.
+
+```mermaid
+flowchart TB
+    subgraph corpora["Build the Corpora (via ietfdata service)"]
+        direction LR
+        subgraph decisionCorpus["Decision Corpus"]
+            direction TB
+            d1["Crawl Drafts"] --> d2["Diff & Label"] --> d3["Index: Keyword / BM25"]
+        end
+        subgraph emailCorpus["WG Email Corpus"]
+            direction TB
+            e1["Crawl Mailing List"] --> e2["Embed"] --> e3["Index: Vector"]
+        end
+    end
+
+    query(["User Query"]) --> stage1
+    decisionCorpus -.-> stage1
+
+    subgraph stage1["1 · Locate the Decision"]
+        direction TB
+        s1a["Keyword Search"] --> s1b["Rank & Select"] --> s1c["Rewrite Query"]
+    end
+
+    stage1 -->|"the decision → mail_query"| stage2
+    emailCorpus -.-> stage2
+
+    subgraph stage2["2 · Retrieve the Discussion"]
+        direction TB
+        s2a["Embed Query"] --> s2b["Semantic Search"]
+    end
+
+    stage2 -->|"the discussion → context"| stage3
+
+    subgraph stage3["3 · Synthesize the Answer"]
+        direction TB
+        s3a["Explain, Grounded"] --> s3b["Format Sources"] --> s3c["Compose Answer"]
+    end
+
+    stage1 -.->|"the decision, direct"| stage3
+```
+
+Current design is a single linear flow — `start → retrieve → pick decision → retrieve → explain → format sources → answer`:
+
+1. The typed query retrieves the best-matching spec change from the evolution dataset (keyword-weighted).
+2. A code node resolves the top candidate into a human-readable header (section, revision range, change type, draft) and blends the change text with the original query into a new search query — *not* a straight rewrite, a blend of both.
+3. That blended query retrieves the mailing-list discussion behind that specific change (semantic search, via the fine-tuned embedding model below).
+4. The LLM (`llama-3.3-70b-instruct` via OpenRouter, temp 0.3) is grounded in the retrieved discussion and forced into three fixed headings — **why the change was made**, **what the change says**, **alternatives/objections raised** — with retry-on-failure (2 retries, 8s backoff) since free-tier OpenRouter returns transient 429s under load.
+5. Sources are deduped and listed with similarity scores; the other candidate changes are shown alongside the answer so a near-miss match is easy to notice and re-query.
+
+An earlier iteration let the user pick a change from a dropdown instead of typing freely, and had a separate node for follow-up-question chips — both were tried and removed in favor of the simpler always-free-text design above.
+
+The script itself also verifies its own deploys: after publishing the workflow via `AppDslService.import_app()`, it reloads the stored row from the DB and asserts the node IDs and opening statement actually match what was generated, since a prior `--app-id` refresh once reported success without persisting.
+
+### Embedding & retrieval infrastructure
+
+A custom embedding model (`RFC-DRAlign-QN`) fine-tuned for aligning RFC/draft text, quantized to GGUF and served via a host-level Ollama install (validated at cosine 0.985–0.9998 against the fp16 reference) — see [Local development](#local-development) below for how it's registered.
+
+**Per-dataset keyword store.** Stock Dify's Economical (keyword-only) indexing mode only had Jieba, a TF-IDF-style overlap ranker. Migration `a1b2c3d4e5f6_add_keyword_store_to_datasets` adds a `datasets.keyword_store` column (default `'bm25'`), and `Keyword._init_keyword()` now prefers that per-dataset value over the old server-wide config. `api/core/rag/datasource/keyword/bm25/bm25.py` is a from-scratch `Bm25Keyword` implementation: it stores the full tokenized corpus in the existing keyword-table storage slot, tokenizes with a minimal regex + ~90-word stopword list (no NLP dependency), ranks with `rank_bm25.BM25Plus` computed per query, and guards concurrent index updates with a Redis lock. It's selectable per dataset via a radio control shown when Economical mode is chosen in the create-dataset wizard.
+
+**Weaviate hardening.** Weaviate's hybrid/BM25 full-text search already existed in stock Dify — what this fork changed is correctness under the new chunking strategies above: chunk UUIDs are now derived from each chunk's own `doc_id` instead of a hash of its text, since identical short chunks (common with paragraph/semantic/framework splitting) were colliding and silently overwriting each other under the old content-hash scheme; metadata keys that would collide with Weaviate's own reserved properties (`id`, `vector`) are now guarded against; differently-named source fields (`message_id`/`messageId`, `source_url`/`link`, etc.) are canonicalized into a fixed set of display properties; and a new `get_by_ids()` method fetches chunks by ID for the metadata inspection below.
+
+### Chunk metadata inspection
+
+The console's chunk detail view can only show whatever fields stock Dify hardcodes. Two new endpoints — `GET .../segments/<id>` and `GET .../segments/<id>/child_chunks/<id>` — attach a `metadata` object built by `SegmentService.get_chunk_metadata()`: it tries the vector store's `get_by_ids()` first, falls back to regex-parsing a structured header line embedded in the chunk's own text, and for continuation chunks walks back through up to 20 preceding segments to find the nearest chunk that carries one.
+
+The frontend renders whatever comes back generically — known fields (the draft-evolution lineage fields `from_rev`/`to_rev`/`section_id`/`change_type`/etc., and canonical email fields `url`/`subject`/`id`/`date`) get friendly labels; anything else falls back to an auto-generated, title-cased label. So new metadata the pipeline starts attaching later shows up in the UI without a frontend change — this is what makes draft-evolution lineage and thread provenance actually inspectable per chunk, not just present in the index.
+
+### Import UI
+
+A React import wizard (`web/app/components/datasets/create/ietf-importer/`) with WG-aware auto-fill — backed by a ~380-entry working-group → GitHub-repo mapping (`wg-repos.ts`) — and an I-D/RFC info card synced against the Datatracker (predecessors, replaces/replaced-by, published-as RFC).
+
+### Exploratory / in progress
+
+A couple of root-level scripts (`gh2csv_code.py`, `gh2csv_ids.py`) are an earlier, standalone exploration of the same "decision → discussion" idea applied to GitHub PRs instead of mailing-list threads — for each merged PR, aggregating its own comments plus the comments/reviews of every issue it closed into one record. Not wired into the app; kept as a reference for a possible PR-centric counterpart to the mailing-list chatflow. `WG-list(update).md` is the staging source used to refresh `wg-repos.ts` above.
+
+This is still actively evolving — see the commit history on `feature/ietf-mailarchive-import` for the current state of the work.
+
+## Local development
+
+The quick-start above (`docker compose up -d` with the published images) is the fastest way to just run the app. Day-to-day development on this fork uses a different, more granular setup — everything lives in `dev/`:
+
+- **`dev/setup`** — one-time bootstrap: copies the `.env.example` files (`api/`, `web/`, `docker/middleware.env.example`), then `uv sync --group dev` and `pnpm install`.
+- **`dev/start-active-dev`** — the main hybrid loop: backend (`api worker worker_beat ietfdata_service weaviate sandbox ssrf_proxy plugin_daemon`) runs in Docker via `docker-compose.override.yaml`, which builds a local `dify-local-api:dev` image from `../api` instead of pulling `langgenius/dify-api`; the frontend runs natively (`pnpm dev`) for hot reload.
+- **`dev/rebuild-backend`** — after backend code/dependency changes: clears the old `dify-local-api:dev` image and build cache, rebuilds `api` + `ietfdata_service`, force-recreates both, and tails their logs.
+- **`dev/start-api`** / **`dev/start-web`** — fully native (no Docker) versions of each side, for working against `dev/start-docker-compose`'s middleware-only stack (Postgres/Redis/Weaviate).
+- **`dev/set-vector-store <store>`** — patches `VECTOR_STORE` in `docker/.env` and rebuilds.
+
+The `ietfdata_service` sidecar is always included in the Docker set (it's defined in the base `docker-compose.yaml`, not the override) and is reachable only on the internal network at `http://ietfdata_service:8010` — there's no host port for it.
+
+**The embedding model has no compose service or env var at all.** `RFC-DRAlign-QN` is served by a host-level Ollama install, not a container: `dev/start-embedding-server` looks for the GGUF at `$HOME/Models/rfc-dralign-q8-pooled.gguf` (override with `RFC_DRALIGN_GGUF`), registers it with `ollama create rfc-dralign-q8` if not already present, and health-checks `http://localhost:11434/api/embed`. Dify itself is then pointed at it manually, once, via Settings → Model Provider → Ollama, with `base_url: http://host.docker.internal:11434` and model `rfc-dralign-q8` (4096 dims) — this step doesn't show up in any `.env` file, so it's easy to miss on a fresh machine.
 
 ## Advanced Setup
 
 ### Custom configurations
 
-If you need to customize the configuration, please refer to the comments in our [.env.example](docker/.env.example) file and update the corresponding values in your `.env` file. Additionally, you might need to make adjustments to the `docker-compose.yaml` file itself, such as changing image versions, port mappings, or volume mounts, based on your specific deployment environment and requirements. After making any changes, please re-run `docker compose up -d`. You can find the full list of available environment variables [here](https://docs.dify.ai/getting-started/install-self-hosted/environments).
-
-#### Customizing Suggested Questions
-
-You can now customize the "Suggested Questions After Answer" feature to better fit your use case. For example, to generate longer, more technical questions:
-
-```bash
-# In your .env file
-SUGGESTED_QUESTIONS_PROMPT='Please help me predict the five most likely technical follow-up questions a developer would ask. Focus on implementation details, best practices, and architecture considerations. Keep each question between 40-60 characters. Output must be JSON array: ["question1","question2","question3","question4","question5"]'
-SUGGESTED_QUESTIONS_MAX_TOKENS=512
-SUGGESTED_QUESTIONS_TEMPERATURE=0.3
-```
-
-See the [Suggested Questions Configuration Guide](docs/suggested-questions-configuration.md) for detailed examples and usage instructions.
-
-### Metrics Monitoring with Grafana
-
-Import the dashboard to Grafana, using Dify's PostgreSQL database as data source, to monitor metrics in granularity of apps, tenants, messages, and more.
-
-- [Grafana Dashboard by @bowenliang123](https://github.com/bowenliang123/dify-grafana-dashboard)
-
-### Deployment with Kubernetes
-
-If you'd like to configure a highly-available setup, there are community-contributed [Helm Charts](https://helm.sh/) and YAML files which allow Dify to be deployed on Kubernetes.
-
-- [Helm Chart by @LeoQuote](https://github.com/douban/charts/tree/master/charts/dify)
-- [Helm Chart by @BorisPolonsky](https://github.com/BorisPolonsky/dify-helm)
-- [Helm Chart by @magicsong](https://github.com/magicsong/ai-charts)
-- [YAML file by @Winson-030](https://github.com/Winson-030/dify-kubernetes)
-- [YAML file by @wyy-holding](https://github.com/wyy-holding/dify-k8s)
-- [🚀 NEW! YAML files (Supports Dify v1.6.0) by @Zhoneym](https://github.com/Zhoneym/DifyAI-Kubernetes)
-
-#### Using Terraform for Deployment
-
-Deploy Dify to Cloud Platform with a single click using [terraform](https://www.terraform.io/)
-
-##### Azure Global
-
-- [Azure Terraform by @nikawang](https://github.com/nikawang/dify-azure-terraform)
-
-##### Google Cloud
-
-- [Google Cloud Terraform by @sotazum](https://github.com/DeNA/dify-google-cloud-terraform)
-
-#### Using AWS CDK for Deployment
-
-Deploy Dify to AWS with [CDK](https://aws.amazon.com/cdk/)
-
-##### AWS
-
-- [AWS CDK by @KevinZhao (EKS based)](https://github.com/aws-samples/solution-for-deploying-dify-on-aws)
-- [AWS CDK by @tmokmss (ECS based)](https://github.com/aws-samples/dify-self-hosted-on-aws)
-
-#### Using Alibaba Cloud Computing Nest
-
-Quickly deploy Dify to Alibaba cloud with [Alibaba Cloud Computing Nest](https://computenest.console.aliyun.com/service/instance/create/default?type=user&ServiceName=Dify%E7%A4%BE%E5%8C%BA%E7%89%88)
-
-#### Using Alibaba Cloud Data Management
-
-One-Click deploy Dify to Alibaba Cloud with [Alibaba Cloud Data Management](https://www.alibabacloud.com/help/en/dms/dify-in-invitational-preview/)
-
-#### Deploy to AKS with Azure Devops Pipeline
-
-One-Click deploy Dify to AKS with [Azure Devops Pipeline Helm Chart by @LeoZhang](https://github.com/Ruiruiz30/Dify-helm-chart-AKS)
-
-## Contributing
-
-For those who'd like to contribute code, see our [Contribution Guide](https://github.com/langgenius/dify/blob/main/CONTRIBUTING.md).
-At the same time, please consider supporting Dify by sharing it on social media and at events and conferences.
-
-> We are looking for contributors to help translate Dify into languages other than Mandarin or English. If you are interested in helping, please see the [i18n README](https://github.com/langgenius/dify/blob/main/web/i18n-config/README.md) for more information, and leave us a comment in the `global-users` channel of our [Discord Community Server](https://discord.gg/8Tpq4AcN9c).
-
-## Community & contact
-
-- [GitHub Discussion](https://github.com/langgenius/dify/discussions). Best for: sharing feedback and asking questions.
-- [GitHub Issues](https://github.com/langgenius/dify/issues). Best for: bugs you encounter using Dify.AI, and feature proposals. See our [Contribution Guide](https://github.com/langgenius/dify/blob/main/CONTRIBUTING.md).
-- [Discord](https://discord.gg/FngNHpbcY7). Best for: sharing your applications and hanging out with the community.
-- [X(Twitter)](https://twitter.com/dify_ai). Best for: sharing your applications and hanging out with the community.
-
-**Contributors**
-
-<a href="https://github.com/langgenius/dify/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=langgenius/dify" />
-</a>
-
-## Star history
-
-[![Star History Chart](https://api.star-history.com/svg?repos=langgenius/dify&type=Date)](https://star-history.com/#langgenius/dify&Date)
-
-## Security disclosure
-
-To protect your privacy, please avoid posting security issues on GitHub. Instead, report issues to security@dify.ai, and our team will respond with detailed answer.
+If you need to customize the configuration, refer to the comments in [.env.example](docker/.env.example) and update the corresponding values in your `.env` file. You may also need to adjust `docker-compose.yaml` (image versions, port mappings, volume mounts) for your environment. After changes, re-run `docker compose up -d`. Full list of environment variables [here](https://docs.dify.ai/getting-started/install-self-hosted/environments).
 
 ## License
 
