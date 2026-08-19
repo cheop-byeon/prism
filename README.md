@@ -1,10 +1,15 @@
-# IETF Knowledge Base — a personal project built on Dify
+# Prism
 
-<img src="./images/GitHub_README_if.png" alt="Dify" width="200" align="right">
+<img src="./images/prism-logo.png" alt="Prism" width="200" align="right">
+<sup>*[Spectrum icons](https://www.flaticon.com/free-icons/spectrum)*</sup>
 
-This repo is build upon [Dify](https://github.com/langgenius/dify), an open-source LLM app development platform, I extended with a pipeline for importing IETF standards data (mailing lists, RFCs, internet-drafts, and working-group GitHub repos) into Dify knowledge bases for RAG.
+This repo is build upon [Dify](https://github.com/langgenius/dify), an open-source LLM app development platform, extended with a pipeline for importing IETF standards data (mailing lists, RFCs, internet-drafts, and working-group GitHub repos) into Dify knowledge bases for RAG.
 
 For everything about Dify itself — install docs, general features, community, contributing — see the [upstream repository](https://github.com/langgenius/dify). This README only covers what's specific to this project.
+
+## Background
+
+Prism is based on the [Ph.D. project](https://folk.universitetetioslo.no/michawe/research/projects/rdr/index.html) of Jie Bian, extracting and explaining the design rationale behind RFC/Internet-Draft decisions from the discussion that produced them. See the [project page](https://folk.universitetetioslo.no/michawe/research/projects/rdr/index.html) for further research details, and [mwelzl/prism](https://github.com/mwelzl/prism) for the companion search-engine repository this fork feeds into.
 
 ## Quick start
 
