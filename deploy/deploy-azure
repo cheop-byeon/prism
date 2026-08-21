@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# Provisions an Azure VM sized for the Prism (Dify) stack, using the
+# 30-day free-trial credit. Run this on YOUR machine (needs an
+# interactive `az login`) — it creates billed resources under your
+# Azure account, so review the variables below before running.
+#
+# Usage:
+#   deploy/deploy-azure
+#
+# See deploy/azure-deploy.md for the full step-by-step walkthrough,
+# including everything that happens after this script.
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# FILL THESE IN before running
+# ---------------------------------------------------------------------------
+RESOURCE_GROUP="prism-demo-rg"          # any name you like
+LOCATION="westeurope"                   # see note below before changing this
+VM_NAME="prism-vm"
+ADMIN_USER="prism"                      # Linux username you'll SSH in as
+VM_SIZE="Standard_D4s_v5"               # 4 vCPU / 16GB — fits Postgres+Redis+Weaviate+api/worker/web+Ollama
+DATA_DISK_GB=128                        # separate disk for Docker/containerd/Ollama data — see note below
+SSH_KEY_PATH="$HOME/.ssh/id_ed25519_azure.pub"  # run `ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519_azure` first if this doesn't exist
+# ---------------------------------------------------------------------------
+#
+# NOTE on LOCATION: trial subscriptions often can't get GPU/D-series
+# capacity in smaller regions — we hit "SkuNotAvailable" in norwayeast on
+# the first attempt. westeurope and northeurope are Azure's best-stocked
+# European regions and are far more likely to have capacity. To check a
+# region before committing:
+#   az vm list-skus --location <region> --size Standard_D4 --all --output table
+# An empty "Restrictions" column means it's deployable there. This command
+# is genuinely slow (can take 30-60s+, especially with --all) — that's
+# normal, not a hang.
+#
+# NOTE on DATA_DISK_GB: the default Azure Ubuntu OS disk is only ~30GB.
+# Between Docker images, the embedding model (~8GB) and its runtime copy,
+# and Postgres/Weaviate data, that fills up fast and produces confusing
+# "no space left on device" errors deep inside unrelated commands (Docker
+# builds, Ollama model creation, etc.). This script attaches a separate
+# data disk at creation time so you never have to discover this the hard
+# way — deploy/vm-setup formats and mounts it, then redirects Docker's,
+# containerd's, and Ollama's storage there before anything heavy happens.
+
+echo "==> Logging into Azure (opens a browser window)"
+az login
+
+echo "==> Creating resource group: $RESOURCE_GROUP in $LOCATION"
+az group create --name "$RESOURCE_GROUP" --location "$LOCATION"
+
+echo "==> Writing cloud-init (installs Docker automatically on first boot)"
+cat > cloud-init.yaml <<EOF
+#cloud-config
+package_update: true
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker ${ADMIN_USER}
+  - systemctl enable docker
+EOF
+
+echo "==> Creating the VM with a $DATA_DISK_GB GB data disk attached (this takes a few minutes)"
+az vm create \
+  --resource-group "$RESOURCE_GROUP" \
+  --name "$VM_NAME" \
+  --image Ubuntu2404 \
+  --size "$VM_SIZE" \
+  --admin-username "$ADMIN_USER" \
+  --ssh-key-values "$SSH_KEY_PATH" \
+  --custom-data cloud-init.yaml \
+  --public-ip-sku Standard \
+  --data-disk-sizes-gb "$DATA_DISK_GB"
+
+echo "==> Opening ports 80 and 443 (22 is opened by az vm create automatically)"
+az vm open-port --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --port 80  --priority 1001
+az vm open-port --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --port 443 --priority 1002
+
+PUBLIC_IP=$(az vm show -d --resource-group "$RESOURCE_GROUP" --name "$VM_NAME" --query publicIps -o tsv)
+echo ""
+echo "==> Done. Public IP: $PUBLIC_IP"
+echo "==> SSH in with: ssh -i ${SSH_KEY_PATH%.pub} ${ADMIN_USER}@${PUBLIC_IP}"
+echo "==> Next: deploy/azure-deploy.md, starting with 'Mount the data disk'."
+echo ""
+echo "==> Cost reminders:"
+echo "    - Stop billing when idle:   az vm deallocate --resource-group $RESOURCE_GROUP --name $VM_NAME"
+echo "    - Resume:                   az vm start      --resource-group $RESOURCE_GROUP --name $VM_NAME"
+echo "    - Tear everything down:     az group delete  --name $RESOURCE_GROUP --yes"

@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Rebuild and redeploy this fork's custom-built images on the VM, then
+# restart nginx so it picks up their new container IPs.
+#
+# This is the VM equivalent of dev/rebuild-backend + dev/start-active-dev
+# combined — there's no native `pnpm dev` frontend process on the VM like
+# there is locally, everything here is a Docker image, so one script
+# covers both. Run this after pulling new code (git pull) or editing
+# anything under api/ or web/.
+#
+# Usage: deploy/rebuild [service ...]
+#   No arguments: rebuilds api, worker, worker_beat, web (everything this
+#   fork builds from source) and restarts nginx.
+#   With arguments: rebuilds only the named services, still restarts
+#   nginx afterward regardless (it caches upstream IPs no matter which
+#   service changed).
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+cd "${SCRIPT_DIR}/../docker"
+
+SERVICES=("$@")
+if [ ${#SERVICES[@]} -eq 0 ]; then
+  SERVICES=(api worker worker_beat web)
+fi
+
+COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.override.yaml)
+
+echo "==> Removing stale dify-local-api:dev / dify-local-web:dev images and build cache..."
+docker rmi dify-local-api:dev dify-local-web:dev 2>/dev/null || true
+docker image prune -f
+docker builder prune -f
+
+echo "==> Building: ${SERVICES[*]}"
+"${COMPOSE[@]}" build "${SERVICES[@]}"
+
+echo "==> Redeploying: ${SERVICES[*]}"
+# --no-deps: only touch the named services. Without it, Compose also
+# recreates whatever they depend_on using the SAME -f files passed here —
+# harmless in this case since we always pass both files, but --no-deps is
+# what keeps this predictable regardless of which services get named.
+"${COMPOSE[@]}" up -d --no-deps "${SERVICES[@]}"
+
+echo "==> Restarting nginx (picks up the new container IPs)"
+"${COMPOSE[@]}" restart --no-deps nginx
+
+echo "==> Waiting for api to be healthy..."
+for i in $(seq 1 30); do
+  if "${COMPOSE[@]}" exec -T api curl -sf -m 3 http://localhost:5001/console/api/system-features >/dev/null 2>&1; then
+    echo "    api is up."
+    break
+  fi
+  sleep 2
+done
+
+echo "==> Recent api logs:"
+"${COMPOSE[@]}" logs --tail=20 api
+
+echo "==> Container status:"
+"${COMPOSE[@]}" ps

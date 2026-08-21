@@ -1,0 +1,333 @@
+#!/usr/bin/env bash
+# Run this ON THE VM, after SSHing in with the command deploy/deploy-azure printed.
+# Sets up storage, Docker/containerd, Ollama, and the repo correctly the
+# first time — folds in everything that went wrong the hard way in an
+# earlier live deploy. See deploy/azure-deploy.md for the full walkthrough
+# this script is one part of.
+#
+# This script pauses at a few points for actions that must happen on your
+# LAPTOP (adding a GitHub deploy key, scp-ing files over) — follow the
+# printed instructions, then press Enter to continue.
+#
+# Usage (on the VM):
+#   ./vm-setup
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# FILL THESE IN before running
+# ---------------------------------------------------------------------------
+REPO_URL="git@github.com:cheop-byeon/dify.git"   # your private repo
+BRANCH="feature/ietf-mailarchive-import"
+GGUF_FILENAME="rfc-dralign-q8-pooled.gguf"        # must match what you scp over
+ADMIN_USER="$(whoami)"
+# ---------------------------------------------------------------------------
+
+echo "==> Waiting for cloud-init (Docker install) to finish"
+cloud-init status --wait || true
+
+# ---------------------------------------------------------------------------
+# Phase 1 — mount the data disk
+#
+# We deliberately don't guess the device name: attaching the disk at VM
+# creation vs. after can number it differently, and formatting the wrong
+# device is destructive. Read the lsblk output yourself before typing it in.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Data disk setup"
+lsblk
+echo ""
+echo "    Find the disk that's the right size, has TYPE=disk, and no"
+echo "    existing partitions/mountpoint. That's the data disk — do not"
+echo "    pick the OS disk (the one with a partition mounted at '/')."
+read -rp "    Device name (e.g. sdb, without /dev/): " DATA_DEV_NAME
+DATA_DEV="/dev/${DATA_DEV_NAME}"
+
+if [ ! -b "$DATA_DEV" ]; then
+  echo "ERROR: $DATA_DEV is not a block device. Aborting." >&2
+  exit 1
+fi
+
+echo "==> About to format $DATA_DEV as ext4 and mount at /mnt/data. This destroys anything currently on it."
+read -rp "    Type 'yes' to continue: " CONFIRM
+[ "$CONFIRM" = "yes" ] || { echo "Aborted."; exit 1; }
+
+sudo parted "$DATA_DEV" --script mklabel gpt mkpart primary ext4 0% 100%
+sudo mkfs.ext4 "${DATA_DEV}1"
+sudo mkdir -p /mnt/data
+sudo mount "${DATA_DEV}1" /mnt/data
+UUID=$(sudo blkid -s UUID -o value "${DATA_DEV}1")
+echo "UUID=${UUID}  /mnt/data  ext4  defaults,nofail  0  2" | sudo tee -a /etc/fstab
+sudo chown "${ADMIN_USER}:${ADMIN_USER}" /mnt/data
+echo "    /mnt/data ready."
+
+# ---------------------------------------------------------------------------
+# Phase 2 — redirect Docker's AND containerd's storage to the data disk
+#
+# These are two separate settings. Docker's data-root (daemon.json) only
+# covers classic image/container storage; BuildKit/buildx (used by `docker
+# compose build`) goes through containerd's own root, configured
+# separately in /etc/containerd/config.toml. Missing either one means
+# builds silently fill up the 30GB OS disk regardless of the other fix.
+# We do this before pulling/building anything, so there's no existing data
+# to migrate — just point both at /mnt/data from the start.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Redirecting Docker + containerd storage to /mnt/data"
+sudo systemctl stop docker 2>/dev/null || true
+sudo systemctl stop containerd 2>/dev/null || true
+
+sudo rm -rf /var/lib/docker /var/lib/containerd
+sudo mkdir -p /mnt/data/docker /mnt/data/containerd /mnt/data/containerd-state
+
+sudo tee /etc/docker/daemon.json > /dev/null <<'EOF'
+{
+  "data-root": "/mnt/data/docker"
+}
+EOF
+
+if [ ! -f /etc/containerd/config.toml ]; then
+  sudo mkdir -p /etc/containerd
+  containerd config default | sudo tee /etc/containerd/config.toml > /dev/null
+fi
+sudo sed -i 's|^root = .*|root = "/mnt/data/containerd"|' /etc/containerd/config.toml
+sudo sed -i 's|^state = .*|state = "/mnt/data/containerd-state"|' /etc/containerd/config.toml
+
+sudo systemctl start containerd
+sudo systemctl start docker
+
+DOCKER_ROOT=$(docker info 2>/dev/null | grep "Docker Root Dir" | awk '{print $NF}')
+if [ "$DOCKER_ROOT" != "/mnt/data/docker" ]; then
+  echo "ERROR: Docker Root Dir is '$DOCKER_ROOT', expected /mnt/data/docker. Check /etc/docker/daemon.json." >&2
+  exit 1
+fi
+echo "    Confirmed: Docker and containerd are using /mnt/data."
+
+# ---------------------------------------------------------------------------
+# Phase 3 — give this VM its own GitHub access (deploy key)
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Setting up a GitHub deploy key for this VM"
+if [ ! -f "$HOME/.ssh/id_ed25519_vm" ]; then
+  ssh-keygen -t ed25519 -C "$(hostname)" -f "$HOME/.ssh/id_ed25519_vm" -N ""
+fi
+mkdir -p "$HOME/.ssh"
+if ! grep -q "^Host github.com$" "$HOME/.ssh/config" 2>/dev/null; then
+  cat >> "$HOME/.ssh/config" <<EOF
+Host github.com
+    IdentityFile ~/.ssh/id_ed25519_vm
+    IdentitiesOnly yes
+EOF
+fi
+chmod 600 "$HOME/.ssh/config"
+
+echo ""
+echo "    PAUSE: add this public key as a read-only Deploy Key on your repo"
+echo "    (GitHub -> repo -> Settings -> Deploy keys -> Add deploy key):"
+echo ""
+cat "$HOME/.ssh/id_ed25519_vm.pub"
+echo ""
+read -rp "    Press Enter once the deploy key is added..." _
+
+ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+
+# ---------------------------------------------------------------------------
+# Phase 4 — clone the repo
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Cloning $REPO_URL ($BRANCH)"
+git clone "$REPO_URL"
+cd dify
+git checkout "$BRANCH"
+
+# ---------------------------------------------------------------------------
+# Phase 5 — get the gitignored override file over from your laptop
+# docker-compose.override.yaml is intentionally not committed (it's a local
+# dev convenience), so a fresh clone never has it.
+# ---------------------------------------------------------------------------
+echo ""
+echo "    PAUSE: from your LAPTOP (separate terminal), run:"
+echo "      scp -i <your azure ssh key> docker/docker-compose.override.yaml ${ADMIN_USER}@<this-vm-ip>:~/dify/docker/"
+echo ""
+read -rp "    Press Enter once that copy has finished..." _
+
+cd docker
+
+# The override file's `web` service is tuned for local dev (copies in an
+# already-built .next/standalone from your Mac, which doesn't exist here).
+# On the VM we need the full from-source build instead: context = web/
+# itself, not the repo root.
+echo "==> Patching the copied override file's web build for a from-source build on this VM"
+python3 - <<'PYEOF'
+import re
+path = "docker-compose.override.yaml"
+with open(path) as f:
+    content = f.read()
+content = content.replace(
+    "      context: ../\n      dockerfile: web/Dockerfile.local-standalone",
+    "      context: ../web\n      dockerfile: Dockerfile",
+)
+with open(path, "w") as f:
+    f.write(content)
+PYEOF
+grep -A3 "^  web:" docker-compose.override.yaml
+
+# ---------------------------------------------------------------------------
+# Phase 6 — a root .dockerignore, so the web build's context doesn't try to
+# tar up docker/volumes/ (Postgres/Weaviate data, certbot's restricted
+# Let's Encrypt keys) — without this the build either fails on a
+# permission error or is needlessly slow.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Writing root .dockerignore"
+cat > ../.dockerignore <<'EOF'
+.git
+.gitignore
+docker/volumes/
+.env
+.env.*
+logs
+*.log*
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.next
+**/.pnpm-store
+.husky
+**/.venv
+**/__pycache__
+**/*.pyc
+.vscode
+.idea
+*.iml
+*.iws
+*.ipr
+EOF
+
+# ---------------------------------------------------------------------------
+# Phase 7 — Ollama, listening on all interfaces (not just localhost) so
+# containers can reach it via host.docker.internal, with its model
+# storage on the data disk instead of the 30GB OS disk.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Installing Ollama"
+curl -fsSL https://ollama.com/install.sh | sh
+
+sudo mkdir -p /mnt/data/ollama-models
+sudo chown ollama:ollama /mnt/data/ollama-models
+sudo mkdir -p /etc/systemd/system/ollama.service.d
+cat <<'EOF' | sudo tee /etc/systemd/system/ollama.service.d/override.conf
+[Service]
+Environment="OLLAMA_MODELS=/mnt/data/ollama-models"
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+
+LISTEN=$(sudo ss -tlnp | grep 11434 || true)
+if [[ "$LISTEN" != *"*:11434"* ]]; then
+  echo "WARNING: Ollama doesn't appear to be listening on all interfaces yet. Check: sudo ss -tlnp | grep 11434" >&2
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 8 — register the embedding model. Registering via a real Modelfile
+# on disk (not piping a Modelfile via stdin with `-f -`) — the stdin form
+# has been unreliable on a fresh Ollama install and fails with a
+# "no Modelfile or safetensors files found" error that has nothing to do
+# with the actual problem.
+# ---------------------------------------------------------------------------
+mkdir -p /mnt/data/Models
+echo ""
+echo "    PAUSE: from your LAPTOP, copy the embedding model over:"
+echo "      scp -i <your azure ssh key> ~/Models/${GGUF_FILENAME} ${ADMIN_USER}@<this-vm-ip>:/mnt/data/Models/"
+echo ""
+read -rp "    Press Enter once that copy has finished..." _
+
+cat > /mnt/data/Models/Modelfile <<EOF
+FROM /mnt/data/Models/${GGUF_FILENAME}
+EOF
+ollama create rfc-dralign-q8 -f /mnt/data/Models/Modelfile
+
+# ---------------------------------------------------------------------------
+# Phase 9 — .env with generated secrets. Leave the URL vars
+# (CONSOLE_API_URL / APP_API_URL / APP_WEB_URL / FILES_URL) blank — nginx
+# fronts everything on one origin, and blank/relative is the correct
+# default for that, not a placeholder to fill in.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Preparing .env"
+cp .env.example .env
+
+SECRET_KEY=$(openssl rand -base64 42)
+DB_PASS=$(openssl rand -hex 16)
+REDIS_PASS=$(openssl rand -hex 16)
+
+sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env
+sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" .env
+sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" .env
+sed -i "s|^CELERY_BROKER_URL=.*|CELERY_BROKER_URL=redis://:${REDIS_PASS}@redis:6379/1|" .env
+
+# ---------------------------------------------------------------------------
+# Phase 10 — Linux-only Docker networking fix. host.docker.internal
+# resolves automatically on Docker Desktop for Mac; on a Linux Docker
+# daemon it needs an explicit extra_hosts entry, on every service that
+# needs to reach Ollama on the host: api, worker, and plugin_daemon
+# (plugin credential validation runs through plugin_daemon, not api).
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Adding host.docker.internal routing to api, worker, plugin_daemon"
+for svc in api worker plugin_daemon; do
+  LINE=$(grep -n "^  ${svc}:\$" docker-compose.yaml | head -1 | cut -d: -f1)
+  if [ -z "$LINE" ]; then
+    echo "    WARNING: couldn't find service '${svc}' in docker-compose.yaml, skipping" >&2
+    continue
+  fi
+  RESTART_LINE=$((LINE + 2))
+  CHECK=$(sed -n "${RESTART_LINE}p" docker-compose.yaml)
+  if [[ "$CHECK" != *"restart: always"* ]]; then
+    echo "    WARNING: line $RESTART_LINE for '${svc}' isn't 'restart: always' (got: $CHECK) — add extra_hosts manually" >&2
+    continue
+  fi
+  awk -v n="$RESTART_LINE" 'NR==n{print; print "    extra_hosts:"; print "      - \"host.docker.internal:host-gateway\""; next} {print}' \
+    docker-compose.yaml > /tmp/dc.yaml && mv /tmp/dc.yaml docker-compose.yaml
+  echo "    added to ${svc}"
+done
+
+docker compose config >/dev/null   # validates the YAML is still well-formed
+
+echo ""
+echo "================================================================"
+echo " Setup done. What's left is intentionally manual (build takes"
+echo " real time and each step benefits from watching the output):"
+echo "================================================================"
+echo ""
+echo "  cd ~/dify/docker"
+echo ""
+echo "  # Build the custom images (several minutes, especially web):"
+echo "  docker compose -f docker-compose.yaml -f docker-compose.override.yaml build api worker worker_beat web"
+echo ""
+echo "  # Bring up the full stack:"
+echo "  docker compose -f docker-compose.yaml -f docker-compose.override.yaml up -d"
+echo ""
+echo "  IMPORTANT: from now on, always pass BOTH -f files together for"
+echo "  ANY compose command that touches api/worker/worker_beat/web —"
+echo "  including ones scoped to a different service like nginx, since"
+echo "  Compose also resolves that service's dependencies using whichever"
+echo "  files you passed. Using only docker-compose.yaml silently reverts"
+echo "  those four services to their stock (broken, for this fork) images."
+echo ""
+echo "  If you only need to touch ONE service and don't want Compose to"
+echo "  also touch its dependencies, add --no-deps, e.g.:"
+echo "    docker compose -f docker-compose.yaml -f docker-compose.override.yaml restart --no-deps nginx"
+echo ""
+echo "  After any restart of api/worker/web, nginx caches their OLD"
+echo "  container IP and will 502 until it's restarted too:"
+echo "    docker compose -f docker-compose.yaml -f docker-compose.override.yaml restart nginx"
+echo ""
+echo "  Then open http://<this-vm-ip>/install to finish Dify's first-run"
+echo "  setup, and register the embedding model at Settings -> Model"
+echo "  Provider -> Ollama:"
+echo "    base_url: http://host.docker.internal:11434"
+echo "    model:    rfc-dralign-q8  (Text Embedding, 4096 dims)"
+echo ""
+echo "  See deploy/azure-deploy.md for the domain + HTTPS steps after that."

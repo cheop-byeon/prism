@@ -1,0 +1,39 @@
+# Root-level .dockerignore — applies to any build whose context is the repo
+# root (e.g. web/Dockerfile via docker-compose.override.yaml's `context: ../`).
+# Without this, Docker tries to tar up the entire monorepo as build context,
+# including docker/volumes/ (Postgres/Weaviate data, certbot's restricted
+# Let's Encrypt keys) — slow at best, permission-denied at worst.
+
+.git
+.gitignore
+
+# Runtime state — never needed to build an image from source.
+docker/volumes/
+
+.env
+.env.*
+
+# Logs
+logs
+*.log*
+
+# node
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.next
+**/.pnpm-store
+.husky
+
+# Python
+**/.venv
+**/__pycache__
+**/*.pyc
+
+# editors
+.vscode
+.idea
+*.iml
+*.iws
+*.ipr
