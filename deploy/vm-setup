@@ -19,6 +19,7 @@ set -euo pipefail
 REPO_URL="git@github.com:cheop-byeon/dify.git"   # your private repo
 BRANCH="feature/ietf-mailarchive-import"
 GGUF_FILENAME="rfc-dralign-q8-pooled.gguf"        # must match what you scp over
+OLLAMA_NUM_THREAD=4                               # match the VM's vCPU count (VM_SIZE in deploy-azure)
 ADMIN_USER="$(whoami)"
 # ---------------------------------------------------------------------------
 
@@ -235,6 +236,13 @@ fi
 # has been unreliable on a fresh Ollama install and fails with a
 # "no Modelfile or safetensors files found" error that has nothing to do
 # with the actual problem.
+#
+# num_thread is set explicitly in the Modelfile because Ollama has no
+# effective service-level env var for this (OLLAMA_NUM_THREADS is not a
+# real setting, despite looking like one — see ollama/ollama#9784) and
+# defaults to a lower thread count than the VM's full vCPU count on its
+# own, which throttles indexing throughput more than the CPU-only
+# hardware already does.
 # ---------------------------------------------------------------------------
 mkdir -p /mnt/data/Models
 echo ""
@@ -245,6 +253,7 @@ read -rp "    Press Enter once that copy has finished..." _
 
 cat > /mnt/data/Models/Modelfile <<EOF
 FROM /mnt/data/Models/${GGUF_FILENAME}
+PARAMETER num_thread ${OLLAMA_NUM_THREAD}
 EOF
 ollama create rfc-dralign-q8 -f /mnt/data/Models/Modelfile
 
