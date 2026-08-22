@@ -4,27 +4,27 @@ single-pass design and why it deliberately avoids branches/stored state).
 
 This variant answers a real gap in that design: the original always takes
 `cands[0]` from stage-1 retrieval and asks the user to rephrase if it grabbed
-the wrong change. Here, stage 1 shows the top 3 candidates and waits for the
-user to pick one, instead of guessing. This does NOT reintroduce the old
-dropdown's problem (a capped, pre-generated list that gates what's
+the wrong change. Here, stage 1 shows up to the top 10 candidates and waits
+for the user to pick one, instead of guessing. This does NOT reintroduce the
+old dropdown's problem (a capped, pre-generated list that gates what's
 reachable) — retrieval still runs unconstrained on free text every time;
 only the disambiguation step becomes interactive.
 
 Two-path graph, one IF-ELSE node deciding which path a given message takes:
 
-    start -> code (detect: is this message "1"/"2"/"3" replying to a
+    start -> code (detect: is this message a bare number replying to a
                    just-shown option set, or a fresh query?)
           -> if-else
                [true]  code (resolve the stored pick)
                        -> assigner (clear the stored candidates)
                        -> knowledge-retrieval (stage 2: the discussion)
                        -> llm -> code (sources) -> answer (full explanation)
-               [false] knowledge-retrieval (stage 1: top-3 candidates)
+               [false] knowledge-retrieval (stage 1: top-10 candidates)
                        -> code (build the numbered options + encode them)
-                       -> assigner (store the 3 candidates on the conversation)
+                       -> assigner (store the candidates on the conversation)
                        -> answer ("which one did you mean?")
 
-The 3 candidates are handed between turns via a conversation variable
+The candidates are handed between turns via a conversation variable
 (`pending_candidates`), encoded as plain text (header\\u0001body, joined by
 \\u0002) rather than JSON — no imports needed in the sandboxed code nodes,
 matching this project's existing code-node style.
@@ -52,7 +52,7 @@ sys.path.insert(0, "/app/api")
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from sync_decision_bot import (  # noqa: E402 — path must be set up first
+from sync_decision_bot import (
     _FORMAT_SOURCES,
     _SYSTEM_PROMPT,
     _edge,
@@ -63,16 +63,18 @@ from sync_decision_bot import (  # noqa: E402 — path must be set up first
 )
 
 # Stage-1 -> "is this a pick, or a fresh query?" The only messages treated as
-# a pick are a bare "1"/"2"/"3" arriving while there's a stored candidate set
-# from the previous turn; anything else (including "1" typed as part of an
-# unrelated search) falls through to a fresh search, since `pending` is only
-# non-empty right after we've just shown options.
+# a pick are a bare positive integer (matched by isdigit(), not a hardcoded
+# list — so this stays correct regardless of how many candidates stage 1
+# shows) arriving while there's a stored candidate set from the previous
+# turn; anything else (including a number typed as part of an unrelated
+# search) falls through to a fresh search, since `pending` is only non-empty
+# right after we've just shown options.
 _DETECT_PICK = '''
 def main(query, pending):
     q = (query or "").strip()
     is_pick = "false"
     picked_index = -1
-    if q in ("1", "2", "3") and pending:
+    if q.isdigit() and int(q) >= 1 and pending:
         items = [p for p in pending.split("\\u0002") if p]
         if items:
             is_pick = "true"
@@ -80,12 +82,14 @@ def main(query, pending):
     return {"is_pick": is_pick, "picked_index": picked_index}
 '''
 
-# Stage-1 (fresh query) -> top 3 candidates, shown as numbered options and
+# Stage-1 (fresh query) -> top 10 candidates, shown as numbered options and
 # encoded onto the conversation variable for the next turn to resolve.
 # Marker-parsing logic duplicated from sync_decision_bot.py's _PICK rather
 # than imported, since it has to run inside Dify's sandboxed code node as a
 # self-contained string, not as a real Python import.
-_PICK_TOP3 = '''
+_MAX_CANDIDATES = 10
+
+_PICK_TOP_N = '''
 def _parse_marker(line):
     label = ""
     left = line
@@ -139,21 +143,28 @@ def main(evo):
         content = (item.get("content") if isinstance(item, dict) else "") or ""
         header, body = _split_change(content)
         cands.append({"header": header, "body": body})
-    top3 = cands[:3]
-    if not top3:
+    # 10 here must match _MAX_CANDIDATES (and the evolution knowledge-retrieval
+    # node's top_k) in the generator script -- this is a plain hardcoded
+    # literal, not interpolated, since this whole block is a string embedded
+    # in the generated DSL, not live Python the generator script controls at
+    # runtime.
+    top = cands[:10]
+    if not top:
         return {
             "options_text": "No matching draft changes found for that query \\u2014 try different keywords.",
             "candidates_json": "",
         }
     lines = []
     encoded = []
-    for i, c in enumerate(top3):
+    for i, c in enumerate(top):
         snip = " ".join(c["body"].split())[:220]
         lines.append(str(i + 1) + ". **" + c["header"] + "**\\n   " + snip)
         safe_header = c["header"].replace("\\u0001", " ").replace("\\u0002", " ")
         safe_body = c["body"][:1500].replace("\\u0001", " ").replace("\\u0002", " ")
         encoded.append(safe_header + "\\u0001" + safe_body)
-    options_text = "\\n\\n".join(lines) + "\\n\\n_Reply with 1, 2, or 3 \\u2014 or rephrase for different results._"
+    reply_hint = "1" if len(top) == 1 else ("1 or 2" if len(top) == 2 else "1 to " + str(len(top)))
+    footer = "\\n\\n_Reply with " + reply_hint + " \\u2014 or rephrase for different results._"
+    options_text = "\\n\\n".join(lines) + footer
     return {"options_text": options_text, "candidates_json": "\\u0002".join(encoded)}
 '''
 
@@ -230,9 +241,9 @@ def _build_dsl(
     llm_id = "llm2"
     fmtsrc_id = "fmtsrc2"
     answer_final_id = "answerfinal1"
-    # [false] branch — fresh query, top-3 candidates, wait for a pick
+    # [false] branch — fresh query, up to _MAX_CANDIDATES candidates, wait for a pick
     evokr_id = "evokr1"
-    top3_id = "top3pick1"
+    toppick_id = "toppick1"
     store_id = "store1"
     answer_options_id = "answeroptions1"
 
@@ -363,14 +374,14 @@ def _build_dsl(
             "query_variable_selector": ["sys", "query"],
             "dataset_ids": [evolution_dataset_id],
             "retrieval_mode": "multiple",
-            "multiple_retrieval_config": _retrieval_config(evo_embedding, 5),
+            "multiple_retrieval_config": _retrieval_config(evo_embedding, _MAX_CANDIDATES),
         }, 820, 480),
-        _node(top3_id, {
+        _node(toppick_id, {
             "type": "code",
-            "title": "Build top-3 options",
-            "desc": "Numbers the top 3 candidates and encodes them for the next turn.",
+            "title": "Build candidate options",
+            "desc": f"Numbers up to the top {_MAX_CANDIDATES} candidates and encodes them for the next turn.",
             "code_language": "python3",
-            "code": _PICK_TOP3,
+            "code": _PICK_TOP_N,
             "variables": [{"variable": "evo", "value_selector": [evokr_id, "result"]}],
             "outputs": {
                 "options_text": {"type": "string", "children": None},
@@ -380,16 +391,16 @@ def _build_dsl(
         _node(store_id, {
             "type": "assigner",
             "title": "Store candidates",
-            "desc": "Saves the top-3 so the next message can pick one.",
+            "desc": "Saves the candidates so the next message can pick one.",
             "assigned_variable_selector": ["conversation", "pending_candidates"],
             "write_mode": "over-write",
-            "input_variable_selector": [top3_id, "candidates_json"],
+            "input_variable_selector": [toppick_id, "candidates_json"],
         }, 1340, 480),
         _node(answer_options_id, {
             "type": "answer",
             "title": "Answer (options)",
             "desc": "",
-            "answer": f"## 🔎 A few possible matches\n\n{{{{#{top3_id}.options_text#}}}}",
+            "answer": f"## 🔎 A few possible matches\n\n{{{{#{toppick_id}.options_text#}}}}",
         }, 1640, 480),
     ]
 
@@ -403,8 +414,8 @@ def _build_dsl(
         _edge(emailkr_id, "knowledge-retrieval", llm_id, "llm"),
         _edge(llm_id, "llm", fmtsrc_id, "code"),
         _edge(fmtsrc_id, "code", answer_final_id, "answer"),
-        _edge(evokr_id, "knowledge-retrieval", top3_id, "code"),
-        _edge(top3_id, "code", store_id, "assigner"),
+        _edge(evokr_id, "knowledge-retrieval", toppick_id, "code"),
+        _edge(toppick_id, "code", store_id, "assigner"),
         _edge(store_id, "assigner", answer_options_id, "answer"),
     ]
 
