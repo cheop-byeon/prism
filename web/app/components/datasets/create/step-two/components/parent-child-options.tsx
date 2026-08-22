@@ -2,7 +2,7 @@
 
 import type { FC } from 'react'
 import type { ParentChildConfig } from '../hooks'
-import type { ParentMode, PreProcessingRule, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
+import type { ChunkStrategy, ParentMode, PreProcessingRule, StrategyProvider, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
 import { RiSearchEyeLine } from '@remixicon/react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
@@ -10,15 +10,25 @@ import Checkbox from '@/app/components/base/checkbox'
 import Divider from '@/app/components/base/divider'
 import { ParentChildChunk } from '@/app/components/base/icons/src/vender/knowledge'
 import RadioCard from '@/app/components/base/radio-card'
+import SegmentedControl from '@/app/components/base/segmented-control'
 import SummaryIndexSetting from '@/app/components/datasets/settings/summary-index-setting'
 import { IS_CE_EDITION } from '@/config'
-import { ChunkingMode } from '@/models/datasets'
+import {
+  ChunkingMode,
+  CUSTOM_STRATEGIES,
+  getStrategyCategory,
+  LANGCHAIN_STRATEGIES,
+  LLAMAINDEX_STRATEGIES,
+  STRATEGY_PARAM_SCHEMAS,
+} from '@/models/datasets'
 import FileList from '../../assets/file-list-3-fill.svg'
 import Note from '../../assets/note-mod.svg'
 import BlueEffect from '../../assets/option-card-effect-blue.svg'
 import s from '../index.module.css'
+import { FrameworkParamInput } from './framework-param-input'
 import { DelimiterInput, MaxLengthInput } from './inputs'
 import { OptionCard } from './option-card'
+import { getStrategyLabelKey } from './strategy-label-keys'
 
 type TextLabelProps = {
   children: React.ReactNode
@@ -26,6 +36,126 @@ type TextLabelProps = {
 
 const TextLabel: FC<TextLabelProps> = ({ children }) => {
   return <label className="text-text-secondary system-sm-semibold">{children}</label>
+}
+
+type LevelStrategyConfig = {
+  delimiter: string
+  maxLength: number
+  chunkStrategy: ChunkStrategy
+  strategyProvider: StrategyProvider
+  strategyParams: Record<string, unknown>
+}
+
+type LevelStrategySectionProps = {
+  level: LevelStrategyConfig
+  delimiterTooltip?: string
+  onDelimiterChange: (value: string) => void
+  onMaxLengthChange: (value: number) => void
+  onStrategyProviderChange: (provider: StrategyProvider) => void
+  onStrategyChange: (strategy: ChunkStrategy) => void
+  onStrategyParamChange: (key: string, value: unknown) => void
+}
+
+// Shared by the parent and child sections below — each level (parent/child)
+// picks its own strategy independently, e.g. child can use `semantic` while
+// parent stays on `paragraph`/`recursive`. Mirrors GeneralChunkingOptions'
+// provider + strategy + framework-param-form pattern, just scoped to one level.
+const LevelStrategySection: FC<LevelStrategySectionProps> = ({
+  level,
+  delimiterTooltip,
+  onDelimiterChange,
+  onMaxLengthChange,
+  onStrategyProviderChange,
+  onStrategyChange,
+  onStrategyParamChange,
+}) => {
+  const { t } = useTranslation()
+
+  const strategyCategory = getStrategyCategory(level.chunkStrategy)
+  const isFramework = strategyCategory === 'framework'
+  const activeStrategies
+    = level.strategyProvider === 'llamaindex'
+      ? LLAMAINDEX_STRATEGIES
+      : level.strategyProvider === 'langchain'
+        ? LANGCHAIN_STRATEGIES
+        : CUSTOM_STRATEGIES
+  const providerOptions = [
+    { value: 'custom' as StrategyProvider, text: t('stepTwo.chunkStrategyProviderCustom', { ns: 'datasetCreation' }) },
+    { value: 'llamaindex' as StrategyProvider, text: t('stepTwo.chunkStrategyProviderLlamaIndex', { ns: 'datasetCreation' }) },
+    { value: 'langchain' as StrategyProvider, text: t('stepTwo.chunkStrategyProviderLangChain', { ns: 'datasetCreation' }) },
+  ]
+  const frameworkSchema = STRATEGY_PARAM_SCHEMAS[level.chunkStrategy]
+
+  return (
+    <div className="mt-2 flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
+        <TextLabel>{t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}</TextLabel>
+        <SegmentedControl
+          options={providerOptions}
+          value={level.strategyProvider}
+          onChange={value => onStrategyProviderChange(value as StrategyProvider)}
+        />
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <TextLabel>{t('stepTwo.chunkStrategy', { ns: 'datasetCreation' })}</TextLabel>
+        <select
+          className="h-9 rounded-lg border border-components-panel-border bg-components-panel-bg px-3 text-sm text-text-primary"
+          value={level.chunkStrategy}
+          onChange={e => onStrategyChange(e.target.value as ChunkStrategy)}
+        >
+          {activeStrategies.map(strategy => (
+            <option key={strategy} value={strategy}>
+              {t(getStrategyLabelKey(strategy), { ns: 'datasetCreation', defaultValue: getStrategyLabelKey(strategy) })}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {isFramework && frameworkSchema && frameworkSchema.params.length > 0 && (
+        <div className="flex flex-wrap gap-3">
+          {frameworkSchema.params.map(param => (
+            <FrameworkParamInput
+              key={param.key}
+              paramKey={param.key}
+              type={param.type}
+              labelKey={param.labelKey}
+              value={level.strategyParams[param.key] ?? param.defaultValue}
+              options={param.options}
+              min={param.min}
+              max={param.max}
+              onChange={onStrategyParamChange}
+            />
+          ))}
+        </div>
+      )}
+
+      {isFramework && frameworkSchema && frameworkSchema.params.length === 0 && (
+        <p className="text-text-secondary system-xs-regular">
+          {t('stepTwo.frameworkNoParams', { ns: 'datasetCreation' })}
+        </p>
+      )}
+
+      {!isFramework && strategyCategory !== 'boundary' && (
+        <div className="flex gap-3">
+          {strategyCategory === 'character' && (
+            <DelimiterInput
+              value={level.delimiter}
+              tooltip={delimiterTooltip}
+              onChange={e => onDelimiterChange(e.target.value)}
+            />
+          )}
+          <MaxLengthInput
+            unit={strategyCategory === 'token'
+              ? t('stepTwo.tokens', { ns: 'datasetCreation' })
+              : t('stepTwo.characters', { ns: 'datasetCreation' })}
+            value={level.maxLength}
+            onChange={onMaxLengthChange}
+          />
+        </div>
+      )}
+    </div>
+  )
 }
 
 type ParentChildOptionsProps = {
@@ -46,6 +176,12 @@ type ParentChildOptionsProps = {
   onParentMaxLengthChange: (value: number) => void
   onChildDelimiterChange: (value: string) => void
   onChildMaxLengthChange: (value: number) => void
+  onParentStrategyProviderChange: (provider: StrategyProvider) => void
+  onChildStrategyProviderChange: (provider: StrategyProvider) => void
+  onParentStrategyChange: (strategy: ChunkStrategy) => void
+  onChildStrategyChange: (strategy: ChunkStrategy) => void
+  onParentStrategyParamChange: (key: string, value: unknown) => void
+  onChildStrategyParamChange: (key: string, value: unknown) => void
   onRuleToggle: (id: string) => void
   onPreview: () => void
   onReset: () => void
@@ -66,6 +202,12 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
   onParentMaxLengthChange,
   onChildDelimiterChange,
   onChildMaxLengthChange,
+  onParentStrategyProviderChange,
+  onChildStrategyProviderChange,
+  onParentStrategyChange,
+  onChildStrategyChange,
+  onParentStrategyParamChange,
+  onChildStrategyParamChange,
   onRuleToggle,
   onSummaryIndexSettingChange,
   onPreview,
@@ -123,18 +265,15 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
             isChosen={parentChildConfig.chunkForContext === 'paragraph'}
             onChosen={() => onChunkForContextChange('paragraph')}
             chosenConfig={(
-              <div className="flex gap-3">
-                <DelimiterInput
-                  value={parentChildConfig.parent.delimiter}
-                  tooltip={t('stepTwo.parentChildDelimiterTip', { ns: 'datasetCreation' })!}
-                  onChange={e => onParentDelimiterChange(e.target.value)}
-                />
-                <MaxLengthInput
-                  unit="characters"
-                  value={parentChildConfig.parent.maxLength}
-                  onChange={onParentMaxLengthChange}
-                />
-              </div>
+              <LevelStrategySection
+                level={parentChildConfig.parent}
+                delimiterTooltip={t('stepTwo.parentChildDelimiterTip', { ns: 'datasetCreation' })!}
+                onDelimiterChange={onParentDelimiterChange}
+                onMaxLengthChange={onParentMaxLengthChange}
+                onStrategyProviderChange={onParentStrategyProviderChange}
+                onStrategyChange={onParentStrategyChange}
+                onStrategyParamChange={onParentStrategyParamChange}
+              />
             )}
           />
           <RadioCard
@@ -155,18 +294,15 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
             </div>
             <Divider className="grow" bgStyle="gradient" />
           </div>
-          <div className="mt-1 flex gap-3">
-            <DelimiterInput
-              value={parentChildConfig.child.delimiter}
-              tooltip={t('stepTwo.parentChildChunkDelimiterTip', { ns: 'datasetCreation' })!}
-              onChange={e => onChildDelimiterChange(e.target.value)}
-            />
-            <MaxLengthInput
-              unit="characters"
-              value={parentChildConfig.child.maxLength}
-              onChange={onChildMaxLengthChange}
-            />
-          </div>
+          <LevelStrategySection
+            level={parentChildConfig.child}
+            delimiterTooltip={t('stepTwo.parentChildChunkDelimiterTip', { ns: 'datasetCreation' })!}
+            onDelimiterChange={onChildDelimiterChange}
+            onMaxLengthChange={onChildMaxLengthChange}
+            onStrategyProviderChange={onChildStrategyProviderChange}
+            onStrategyChange={onChildStrategyChange}
+            onStrategyParamChange={onChildStrategyParamChange}
+          />
         </div>
 
         {/* Rules */}

@@ -17,10 +17,16 @@ export type ParentChildConfig = {
   parent: {
     delimiter: string
     maxLength: number
+    chunkStrategy: ChunkStrategy
+    strategyProvider: StrategyProvider
+    strategyParams: Record<string, unknown>
   }
   child: {
     delimiter: string
     maxLength: number
+    chunkStrategy: ChunkStrategy
+    strategyProvider: StrategyProvider
+    strategyParams: Record<string, unknown>
   }
 }
 
@@ -29,10 +35,16 @@ export const defaultParentChildConfig: ParentChildConfig = {
   parent: {
     delimiter: '\\n\\n',
     maxLength: 1024,
+    chunkStrategy: DEFAULT_CUSTOM_STRATEGY,
+    strategyProvider: 'custom',
+    strategyParams: {},
   },
   child: {
     delimiter: '\\n',
     maxLength: 512,
+    chunkStrategy: DEFAULT_CUSTOM_STRATEGY,
+    strategyProvider: 'custom',
+    strategyParams: {},
   },
 }
 
@@ -162,15 +174,25 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
     setDefaultConfig(rulesConfig)
 
     if (isHierarchical) {
+      const parentStrategy = rulesConfig.segmentation.chunk_strategy || DEFAULT_CUSTOM_STRATEGY
+      const childStrategy = rulesConfig.subchunk_segmentation?.chunk_strategy || DEFAULT_CUSTOM_STRATEGY
       setParentChildConfig({
         chunkForContext: rulesConfig.parent_mode || 'paragraph',
         parent: {
           delimiter: escape(rulesConfig.segmentation.separator ?? '\\n\\n'),
           maxLength: rulesConfig.segmentation.max_tokens ?? 1024,
+          chunkStrategy: parentStrategy,
+          strategyProvider: getStrategyProvider(parentStrategy),
+          strategyParams: rulesConfig.segmentation.strategy_params as Record<string, unknown>
+            ?? buildDefaultStrategyParams(parentStrategy),
         },
         child: {
           delimiter: escape(rulesConfig.subchunk_segmentation?.separator ?? '\\n'),
           maxLength: rulesConfig.subchunk_segmentation?.max_tokens ?? 512,
+          chunkStrategy: childStrategy,
+          strategyProvider: getStrategyProvider(childStrategy),
+          strategyParams: rulesConfig.subchunk_segmentation?.strategy_params as Record<string, unknown>
+            ?? buildDefaultStrategyParams(childStrategy),
         },
       })
     }
@@ -183,20 +205,30 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
     const isFramework = category === 'framework'
 
     if (docForm === ChunkingMode.parentChild) {
+      const buildLevelSegmentation = (level: ParentChildConfig['parent'] | ParentChildConfig['child']): Segmentation => {
+        const levelCategory = getStrategyCategory(level.chunkStrategy)
+        if (levelCategory === 'framework') {
+          return {
+            chunk_strategy: level.chunkStrategy,
+            strategy_params: level.strategyParams,
+          }
+        }
+        if (levelCategory === 'boundary')
+          return { chunk_strategy: level.chunkStrategy }
+
+        return {
+          separator: unescape(level.delimiter),
+          max_tokens: level.maxLength,
+          chunk_strategy: level.chunkStrategy,
+        }
+      }
+
       return {
         rules: {
           pre_processing_rules: rules,
-          segmentation: {
-            separator: unescape(parentChildConfig.parent.delimiter),
-            max_tokens: parentChildConfig.parent.maxLength,
-            chunk_strategy: chunkStrategy,
-          },
+          segmentation: buildLevelSegmentation(parentChildConfig.parent),
           parent_mode: parentChildConfig.chunkForContext,
-          subchunk_segmentation: {
-            separator: unescape(parentChildConfig.child.delimiter),
-            max_tokens: parentChildConfig.child.maxLength,
-            chunk_strategy: chunkStrategy,
-          },
+          subchunk_segmentation: buildLevelSegmentation(parentChildConfig.child),
         },
         mode: 'hierarchical',
         summary_index_setting: summaryIndexSettingRef.current,
@@ -267,6 +299,49 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
     setParentChildConfig(prev => ({ ...prev, chunkForContext: mode }))
   }, [])
 
+  // Per-level (parent/child) strategy handlers — each level's strategy is
+  // independent, e.g. child can use `semantic` while parent stays `paragraph`.
+  const updateLevelStrategyProvider = useCallback((level: 'parent' | 'child', provider: StrategyProvider) => {
+    const newStrategy = getDefaultStrategyForProvider(provider)
+    setParentChildConfig(prev => ({
+      ...prev,
+      [level]: {
+        ...prev[level],
+        strategyProvider: provider,
+        chunkStrategy: newStrategy,
+        strategyParams: buildDefaultStrategyParams(newStrategy),
+      },
+    }))
+  }, [])
+
+  const updateLevelStrategy = useCallback((level: 'parent' | 'child', strategy: ChunkStrategy) => {
+    setParentChildConfig(prev => ({
+      ...prev,
+      [level]: {
+        ...prev[level],
+        chunkStrategy: strategy,
+        strategyParams: buildDefaultStrategyParams(strategy),
+      },
+    }))
+  }, [])
+
+  const updateLevelStrategyParam = useCallback((level: 'parent' | 'child', key: string, value: unknown) => {
+    setParentChildConfig(prev => ({
+      ...prev,
+      [level]: {
+        ...prev[level],
+        strategyParams: { ...prev[level].strategyParams, [key]: value },
+      },
+    }))
+  }, [])
+
+  const updateParentStrategyProvider = useCallback((provider: StrategyProvider) => updateLevelStrategyProvider('parent', provider), [updateLevelStrategyProvider])
+  const updateChildStrategyProvider = useCallback((provider: StrategyProvider) => updateLevelStrategyProvider('child', provider), [updateLevelStrategyProvider])
+  const updateParentStrategy = useCallback((strategy: ChunkStrategy) => updateLevelStrategy('parent', strategy), [updateLevelStrategy])
+  const updateChildStrategy = useCallback((strategy: ChunkStrategy) => updateLevelStrategy('child', strategy), [updateLevelStrategy])
+  const updateParentStrategyParam = useCallback((key: string, value: unknown) => updateLevelStrategyParam('parent', key, value), [updateLevelStrategyParam])
+  const updateChildStrategyParam = useCallback((key: string, value: unknown) => updateLevelStrategyParam('child', key, value), [updateLevelStrategyParam])
+
   return {
     // General chunking state
     segmentationType,
@@ -301,6 +376,12 @@ export const useSegmentationState = (options: UseSegmentationStateOptions = {}) 
     updateParentConfig,
     updateChildConfig,
     setChunkForContext,
+    updateParentStrategyProvider,
+    updateChildStrategyProvider,
+    updateParentStrategy,
+    updateChildStrategy,
+    updateParentStrategyParam,
+    updateChildStrategyParam,
 
     // Actions
     resetToDefaults,

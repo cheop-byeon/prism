@@ -26,8 +26,8 @@ const createRules = (): PreProcessingRule[] => [
 
 const createParentChildConfig = (overrides?: Partial<ParentChildConfig>): ParentChildConfig => ({
   chunkForContext: 'paragraph',
-  parent: { delimiter: '\\n\\n', maxLength: 2000 },
-  child: { delimiter: '\\n', maxLength: 500 },
+  parent: { delimiter: '\\n\\n', maxLength: 2000, chunkStrategy: 'recursive', strategyProvider: 'custom', strategyParams: {} },
+  child: { delimiter: '\\n', maxLength: 500, chunkStrategy: 'recursive', strategyProvider: 'custom', strategyParams: {} },
   ...overrides,
 })
 
@@ -44,6 +44,12 @@ const defaultProps = {
   onParentMaxLengthChange: vi.fn(),
   onChildDelimiterChange: vi.fn(),
   onChildMaxLengthChange: vi.fn(),
+  onParentStrategyProviderChange: vi.fn(),
+  onChildStrategyProviderChange: vi.fn(),
+  onParentStrategyChange: vi.fn(),
+  onChildStrategyChange: vi.fn(),
+  onParentStrategyParamChange: vi.fn(),
+  onChildStrategyParamChange: vi.fn(),
   onRuleToggle: vi.fn(),
   onPreview: vi.fn(),
   onReset: vi.fn(),
@@ -133,6 +139,45 @@ describe('ParentChildOptions', () => {
       render(<ParentChildOptions {...defaultProps} parentChildConfig={config} onChunkForContextChange={onChunkForContextChange} />)
       fireEvent.click(screen.getByText(`${ns}.stepTwo.paragraph`))
       expect(onChunkForContextChange).toHaveBeenCalledWith('paragraph')
+    })
+  })
+
+  describe('Per-level chunk strategy', () => {
+    it('should render an independent strategy selector for both parent and child', () => {
+      render(<ParentChildOptions {...defaultProps} />)
+      // Provider label + strategy label appear once per level (parent's
+      // paragraph section is expanded by default, plus the child section).
+      expect(screen.getAllByText(`${ns}.stepTwo.chunkStrategy`)).toHaveLength(2)
+      expect(screen.getAllByText(`${ns}.stepTwo.chunkStrategyProvider`)).toHaveLength(2)
+    })
+
+    it('should let the child level select "semantic" independently of the parent', () => {
+      const onChildStrategyChange = vi.fn()
+      const onParentStrategyChange = vi.fn()
+      render(<ParentChildOptions {...defaultProps} onChildStrategyChange={onChildStrategyChange} onParentStrategyChange={onParentStrategyChange} />)
+
+      const strategySelects = screen.getAllByRole('combobox').filter(
+        el => el.tagName === 'SELECT' && el.querySelector('option[value="semantic"]'),
+      )
+      // Parent's paragraph section renders first, child's second.
+      expect(strategySelects).toHaveLength(2)
+      const childSelect = strategySelects[1]
+
+      fireEvent.change(childSelect, { target: { value: 'semantic' } })
+
+      expect(onChildStrategyChange).toHaveBeenCalledWith('semantic')
+      expect(onParentStrategyChange).not.toHaveBeenCalled()
+    })
+
+    it('should hide the delimiter/max-length inputs for a boundary strategy like "semantic"', () => {
+      // Parent stays on the default `recursive` (character category, still
+      // shows "characters"); only the child switches to `semantic`, so the
+      // unit label should appear once (parent) instead of twice (parent+child).
+      const config = createParentChildConfig({
+        child: { delimiter: '\\n', maxLength: 500, chunkStrategy: 'semantic', strategyProvider: 'custom', strategyParams: {} },
+      })
+      render(<ParentChildOptions {...defaultProps} parentChildConfig={config} />)
+      expect(screen.getAllByText(`${ns}.stepTwo.characters`)).toHaveLength(1)
     })
   })
 

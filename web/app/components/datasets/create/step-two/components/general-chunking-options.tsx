@@ -21,8 +21,10 @@ import {
 import SettingCog from '../../assets/setting-gear-mod.svg'
 import s from '../index.module.css'
 import LanguageSelect from '../language-select'
+import { FrameworkParamInput } from './framework-param-input'
 import { DelimiterInput, MaxLengthInput, OverlapInput } from './inputs'
 import { OptionCard } from './option-card'
+import { getStrategyLabelKey } from './strategy-label-keys'
 
 type TextLabelProps = {
   children: React.ReactNode
@@ -65,105 +67,6 @@ type GeneralChunkingOptionsProps = {
   showSummaryIndexSetting?: boolean
   summaryIndexSetting?: SummaryIndexSettingType
   onSummaryIndexSettingChange?: (payload: SummaryIndexSettingType) => void
-}
-
-const CUSTOM_STRATEGY_LABEL_KEYS: Record<string, string> = {
-  recursive: 'stepTwo.chunkStrategyRecursive',
-  paragraph: 'stepTwo.chunkStrategyParagraph',
-  sentence: 'stepTwo.chunkStrategySentence',
-  markdown: 'stepTwo.chunkStrategyMarkdown',
-  html: 'stepTwo.chunkStrategyHtml',
-  json: 'stepTwo.chunkStrategyJson',
-  code: 'stepTwo.chunkStrategyCode',
-  latex: 'stepTwo.chunkStrategyLatex',
-  token: 'stepTwo.chunkStrategyToken',
-  semantic: 'stepTwo.chunkStrategySemantic',
-}
-
-const LLAMAINDEX_STRATEGY_LABEL_KEYS: Record<string, string> = {
-  li_sentence: 'stepTwo.chunkStrategyLiSentence',
-  li_token: 'stepTwo.chunkStrategyLiToken',
-  li_fixed: 'stepTwo.chunkStrategyLiFixed',
-  li_semantic: 'stepTwo.chunkStrategyLiSemantic',
-  li_markdown: 'stepTwo.chunkStrategyLiMarkdown',
-  li_html: 'stepTwo.chunkStrategyLiHtml',
-  li_code: 'stepTwo.chunkStrategyLiCode',
-}
-
-const LANGCHAIN_STRATEGY_LABEL_KEYS: Record<string, string> = {
-  lc_recursive: 'stepTwo.chunkStrategyLcRecursive',
-  lc_character: 'stepTwo.chunkStrategyLcCharacter',
-  lc_token: 'stepTwo.chunkStrategyLcToken',
-  lc_markdown_header: 'stepTwo.chunkStrategyLcMarkdownHeader',
-  lc_html_header: 'stepTwo.chunkStrategyLcHtmlHeader',
-  lc_semantic: 'stepTwo.chunkStrategyLcSemantic',
-  lc_python: 'stepTwo.chunkStrategyLcPython',
-}
-
-function getStrategyLabelKey(strategy: ChunkStrategy): string {
-  return (
-    CUSTOM_STRATEGY_LABEL_KEYS[strategy]
-    ?? LLAMAINDEX_STRATEGY_LABEL_KEYS[strategy]
-    ?? LANGCHAIN_STRATEGY_LABEL_KEYS[strategy]
-    ?? strategy
-  )
-}
-
-type FrameworkParamInputProps = {
-  paramKey: string
-  type: 'int' | 'float' | 'string' | 'select'
-  labelKey: string
-  value: unknown
-  options?: string[]
-  min?: number
-  max?: number
-  onChange: (key: string, value: unknown) => void
-}
-
-const FrameworkParamInput: FC<FrameworkParamInputProps> = ({
-  paramKey,
-  type,
-  labelKey,
-  value,
-  options,
-  min,
-  max,
-  onChange,
-}) => {
-  const { t } = useTranslation()
-  const label = t(labelKey, { ns: 'datasetCreation', defaultValue: labelKey })
-
-  if (type === 'select' && options) {
-    return (
-      <div className="flex flex-1 flex-col gap-1">
-        <TextLabel>{label}</TextLabel>
-        <select
-          className="h-9 rounded-lg border border-components-panel-border bg-components-panel-bg px-3 text-sm text-text-primary"
-          value={String(value ?? options[0])}
-          onChange={e => onChange(paramKey, e.target.value)}
-        >
-          {options.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
-          ))}
-        </select>
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex flex-1 flex-col gap-1">
-      <TextLabel>{label}</TextLabel>
-      <input
-        type="number"
-        className="h-9 rounded-lg border border-components-panel-border bg-components-panel-bg px-3 text-sm text-text-primary"
-        value={String(value ?? '')}
-        min={min}
-        max={max}
-        step={type === 'float' ? 0.01 : 1}
-        onChange={e => onChange(paramKey, type === 'float' ? Number.parseFloat(e.target.value) : Number.parseInt(e.target.value, 10))}
-      />
-    </div>
-  )
 }
 
 export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({

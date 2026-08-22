@@ -247,6 +247,12 @@ const StepTwo: FC<StepTwoProps> = ({
             onParentMaxLengthChange={v => segmentation.updateParentConfig('maxLength', v)}
             onChildDelimiterChange={v => segmentation.updateChildConfig('delimiter', v)}
             onChildMaxLengthChange={v => segmentation.updateChildConfig('maxLength', v)}
+            onParentStrategyProviderChange={segmentation.updateParentStrategyProvider}
+            onChildStrategyProviderChange={segmentation.updateChildStrategyProvider}
+            onParentStrategyChange={segmentation.updateParentStrategy}
+            onChildStrategyChange={segmentation.updateChildStrategy}
+            onParentStrategyParamChange={segmentation.updateParentStrategyParam}
+            onChildStrategyParamChange={segmentation.updateChildStrategyParam}
             onRuleToggle={segmentation.toggleRule}
             onPreview={updatePreview}
             onReset={segmentation.resetToDefaults}
