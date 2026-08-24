@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from sync_decision_bot import (
+    _FAITHCHECK_SYSTEM_PROMPT,
     _FORMAT_SOURCES,
     _JUDGE_SYSTEM_PROMPT,
     _PARSE_JUDGMENT,
@@ -301,6 +302,7 @@ def _build_dsl(
     ctxprep_id = "ctxprep2"
     hasdisc_id = "hasdisc2"
     llm_id = "llm2"
+    faithcheck_id = "faithcheck2"
     sanitize_id = "sanitize2"
     fmtsrc_id = "fmtsrc2"
     answer_final_id = "answerfinal1"
@@ -501,15 +503,33 @@ def _build_dsl(
             "vision": {"enabled": False, "configs": {"variable_selector": []}},
             "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
         }, 2390, 120),
+        _node(faithcheck_id, {
+            "type": "llm",
+            "title": "Fact-check against excerpts",
+            "desc": "Rewrites the draft, dropping any claim the retrieved excerpts don't actually support.",
+            "model": {
+                "provider": "langgenius/openrouter/openrouter",
+                "name": "google/gemini-2.5-flash",
+                "mode": "chat",
+                "completion_params": {"max_tokens": 1800, "temperature": 0, "top_p": 1},
+            },
+            "prompt_template": [
+                {"role": "system", "text": _FAITHCHECK_SYSTEM_PROMPT},
+                {"role": "user", "text": f"Draft to fact-check:\n{{{{#{llm_id}.text#}}}}"},
+            ],
+            "context": {"enabled": True, "variable_selector": [ctxprep_id, "context_hits"]},
+            "vision": {"enabled": False, "configs": {"variable_selector": []}},
+            "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
+        }, 2540, 120),
         _node(sanitize_id, {
             "type": "code",
             "title": "Sanitize alternatives",
-            "desc": "Drops any 'Alternative:' line that cites the draft itself instead of a retrieved message.",
+            "desc": "Backstop: drops any 'Alternative:' line still citing the draft itself, not a message.",
             "code_language": "python3",
             "code": _SANITIZE_ALTERNATIVES,
-            "variables": [{"variable": "text", "value_selector": [llm_id, "text"]}],
+            "variables": [{"variable": "text", "value_selector": [faithcheck_id, "text"]}],
             "outputs": {"text": {"type": "string", "children": None}},
-        }, 2540, 120),
+        }, 2690, 120),
         _node(fmtsrc_id, {
             "type": "code",
             "title": "List sources",
@@ -518,7 +538,7 @@ def _build_dsl(
             "code": _FORMAT_SOURCES,
             "variables": [{"variable": "hits", "value_selector": [judgeparse_id, "filtered_hits"]}],
             "outputs": {"sources_text": {"type": "string", "children": None}},
-        }, 2690, 120),
+        }, 2840, 120),
         _node(answer_final_id, {
             "type": "answer",
             "title": "Answer (explanation)",
@@ -533,7 +553,7 @@ def _build_dsl(
                 f"{{{{#{fmtsrc_id}.sources_text#}}}}"
                 f"{{{{#{resolve_id}.others_text#}}}}"
             ),
-        }, 2840, 120),
+        }, 3090, 120),
         _node(nodisc_answer_id, {
             "type": "answer",
             "title": "Answer (no discussion found)",
@@ -604,7 +624,8 @@ def _build_dsl(
         _edge(ctxprep_id, "code", hasdisc_id, "if-else"),
         _edge_h(hasdisc_id, "if-else", llm_id, "llm", "true"),
         _edge_h(hasdisc_id, "if-else", nodisc_answer_id, "answer", "false"),
-        _edge(llm_id, "llm", sanitize_id, "code"),
+        _edge(llm_id, "llm", faithcheck_id, "llm"),
+        _edge(faithcheck_id, "llm", sanitize_id, "code"),
         _edge(sanitize_id, "code", fmtsrc_id, "code"),
         _edge(fmtsrc_id, "code", answer_final_id, "answer"),
         _edge(evokr_id, "knowledge-retrieval", toppick_id, "code"),

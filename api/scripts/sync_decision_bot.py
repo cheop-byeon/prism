@@ -409,7 +409,7 @@ _SYSTEM_PROMPT = (
     "WHY. It is already shown to the user above your answer, in a '## Decision "
     "under study' block — do not restate or quote it again, and do not paraphrase "
     "it as if paraphrasing explained it. Spend your entire answer on WHY, "
-    "structured under exactly these two headings (keep them verbatim, bold, on "
+    "structured under exactly these three headings (keep them verbatim, bold, on "
     "their own line):\n\n"
     "**Rationale for the adopted approach** — the strongest supporting "
     "argument(s) for whatever was actually adopted (a value, a design choice, "
@@ -418,18 +418,31 @@ _SYSTEM_PROMPT = (
     "something a specific retrieved message actually says. If the retrieved "
     "discussion does not clearly explain the motivation, say so explicitly "
     "rather than inferring a rationale from the decision text itself.\n"
-    "**Alternatives considered** — every other approach, proposal, or option "
-    "that a specific retrieved mailing-list message actually proposes for "
-    "this same issue, one per line in the form: **Alternative: <short "
-    "description>** — proposed by [a named person or message from the "
-    "retrieved discussion], rationale: ... The source of every alternative "
-    "must be a retrieved message — never 'the draft', 'the original draft', "
-    "or 'the updated draft' itself, and never the decision's own before/after "
-    "text repackaged as a proposal. Only list an alternative that a message "
-    "explicitly raises — never invent one implied by the decision text, and "
+    "**Alternatives considered** — ONLY a genuinely different approach, value, "
+    "or design that a specific retrieved message actually proposes as a "
+    "considered option for this same issue — one per line, in the form: "
+    "**Alternative: <short description>** — proposed by [a named person or "
+    "message from the retrieved discussion], rationale: ... A message stating "
+    "what it believes the CURRENT value already is (even if that belief turns "
+    "out to be mistaken and gets corrected elsewhere in the thread) is NOT an "
+    "alternative — that belongs under 'Other relevant discussion' below "
+    "instead, correctly framed as a mistaken belief / correction, not as a "
+    "proposal. The source of every alternative must be a retrieved message — "
+    "never 'the draft', 'the original draft', or 'the updated draft' itself, "
+    "and never the decision's own before/after text repackaged as a proposal. "
+    "Only list an alternative that a message explicitly proposes as a "
+    "considered option — never invent one implied by the decision text, and "
     "never invent an 'implicitly rejected' alternative that no message "
     "states. If no retrieved message proposes a genuine alternative, say so "
-    "in one line instead of padding this section.\n\n"
+    "in one line instead of padding this section.\n"
+    "**Other relevant discussion** — anything else in the retrieved messages "
+    "worth surfacing that ISN'T a genuine proposed alternative: a mistaken "
+    "belief that got corrected, an open question or concern that was raised "
+    "but never clearly resolved in the retrieved discussion, an objection to "
+    "the adopted approach that didn't come with a concrete alternative "
+    "attached. Same per-item citation discipline as alternatives (name the "
+    "person/message), and say so in one line if there's nothing here instead "
+    "of padding this section with a restatement of the rationale.\n\n"
     "The retrieved discussion is matched by topic similarity, not guaranteed to "
     "agree with the decision: the same issue is often debated across multiple "
     "revisions, with different messages arguing for different outcomes than the "
@@ -442,6 +455,73 @@ _SYSTEM_PROMPT = (
     "message URLs where they appear. If a heading isn't covered by the "
     "discussion, say so briefly rather than inventing content — never "
     "substitute the decision text itself as a stand-in for missing discussion.\n\n"
+    "Retrieved discussion:\n{{#context#}}"
+)
+
+# The sanitizer above is a cheap mechanical backstop -- it only catches the
+# specific phrase pattern "proposed by the draft/document/...". It can't
+# catch a claim that's dressed up as a real citation: a real person's name,
+# a real message reference, but the actual claim attributed to them isn't
+# what they said (verified in testing -- a claim from the decision text's
+# own continuation got credited to a specific person's specific email that
+# never mentioned it). Catching that needs semantic verification against
+# the actual excerpts, not phrase-matching, hence a second LLM call. Rather
+# than decompose-verify-strip as three separate steps, this rewrites the
+# draft directly: kept claims stay close to their original wording, dropped
+# claims are just gone (no hedging), and if a whole section would end up
+# empty, it's replaced with an honest "not explained in the discussion" /
+# "no alternatives proposed" line instead of staying blank or padded.
+_FAITHCHECK_SYSTEM_PROMPT = (
+    "You are fact-checking a draft explanation against the mailing-list "
+    "excerpts it is supposed to be grounded in (given to you as retrieved "
+    "context). The draft has three sections: 'Rationale for the adopted "
+    "approach', 'Alternatives considered', and 'Other relevant discussion'.\n\n"
+    "You are checking TWO different things, not just one:\n\n"
+    "1. SUPPORT -- for every factual claim, especially any claim that "
+    "attributes a statement, argument, or position to a specific person or "
+    "message, check whether the retrieved excerpts actually support it. A "
+    "claim is UNSUPPORTED if: the cited person/message never said anything "
+    "like that, the reasoning is invented, or the claim is actually just "
+    "the decision's own before/after text restated as if a retrieved "
+    "message said it.\n\n"
+    "2. CLASSIFICATION -- for every item under 'Alternatives considered', "
+    "check it's actually a genuine proposed alternative (a different "
+    "approach/value the message puts forward as a considered option), not "
+    "something that only LOOKS like one. A message stating what it "
+    "believes the CURRENT value already is -- even a wrong belief that "
+    "gets corrected later in the same thread -- is NOT an alternative; "
+    "that's a mistaken belief / correction, and belongs under 'Other "
+    "relevant discussion' instead. Likewise an open question, a concern "
+    "raised without a concrete competing proposal, or an objection to the "
+    "adopted approach belongs under 'Other relevant discussion', not "
+    "'Alternatives considered'. If you find a misclassified item, MOVE it "
+    "to the correct section and reword it to accurately describe what it "
+    "actually is (e.g. 'X initially believed the value was N; Y corrected "
+    "this to M' instead of 'Alternative: N -- proposed by X') -- don't just "
+    "delete real, supported content because it was filed under the wrong "
+    "heading.\n\n"
+    "Rewrite the draft:\n"
+    "- Keep every claim that IS supported and correctly classified, worded "
+    "the same or very close to the original.\n"
+    "- Move any claim that is supported but MISCLASSIFIED to the section "
+    "it actually belongs in, reworded to fit that section honestly.\n"
+    "- Remove any claim that is NOT supported at all -- do not soften or "
+    "hedge it into vague language, just remove it.\n"
+    "- If, after this, 'Rationale for the adopted approach' would be "
+    "empty, replace its content with exactly: 'The retrieved discussion "
+    "does not clearly explain the rationale for this decision.'\n"
+    "- If 'Alternatives considered' would be empty, replace its content "
+    "with exactly: 'No alternatives were proposed in the retrieved "
+    "discussion.'\n"
+    "- If 'Other relevant discussion' would be empty, replace its content "
+    "with exactly: 'No further relevant discussion beyond the rationale "
+    "above.'\n"
+    "- Keep all three headings verbatim, bold, on their own line, in that "
+    "order.\n"
+    "- Do not add any new claim, reasoning, or content that wasn't "
+    "already in the draft or the excerpts.\n"
+    "- Output ONLY the corrected three-section text -- no preamble, no "
+    "explanation of what you changed.\n\n"
     "Retrieved discussion:\n{{#context#}}"
 )
 
@@ -526,6 +606,7 @@ def _build_dsl(
     ctxprep_id = "ctxprep1"
     hasdisc_id = "hasdisc1"
     llm_id = "llm1"
+    faithcheck_id = "faithcheck1"
     sanitize_id = "sanitize1"
     fmtsrc_id = "fmtsrc1"
     answer_id = "answer1"
@@ -695,17 +776,35 @@ def _build_dsl(
             # twice with a pause instead of surfacing an empty answer.
             "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
         }, 1990),
+        _node(faithcheck_id, {
+            "type": "llm",
+            "title": "Fact-check against excerpts",
+            "desc": "Rewrites the draft, dropping any claim the retrieved excerpts don't actually support.",
+            "model": {
+                "provider": "langgenius/openrouter/openrouter",
+                "name": "google/gemini-2.5-flash",
+                "mode": "chat",
+                "completion_params": {"max_tokens": 1800, "temperature": 0, "top_p": 1},
+            },
+            "prompt_template": [
+                {"role": "system", "text": _FAITHCHECK_SYSTEM_PROMPT},
+                {"role": "user", "text": f"Draft to fact-check:\n{{{{#{llm_id}.text#}}}}"},
+            ],
+            "context": {"enabled": True, "variable_selector": [ctxprep_id, "context_hits"]},
+            "vision": {"enabled": False, "configs": {"variable_selector": []}},
+            "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
+        }, 2140),
         _node(sanitize_id, {
             "type": "code",
             "title": "Sanitize alternatives",
-            "desc": "Drops any 'Alternative:' line that cites the draft itself instead of a retrieved message.",
+            "desc": "Backstop: drops any 'Alternative:' line still citing the draft itself, not a message.",
             "code_language": "python3",
             "code": _SANITIZE_ALTERNATIVES,
             "variables": [
-                {"variable": "text", "value_selector": [llm_id, "text"]},
+                {"variable": "text", "value_selector": [faithcheck_id, "text"]},
             ],
             "outputs": {"text": {"type": "string", "children": None}},
-        }, 2190),
+        }, 2390),
         _node(fmtsrc_id, {
             "type": "code",
             "title": "List sources",
@@ -716,7 +815,7 @@ def _build_dsl(
                 {"variable": "hits", "value_selector": [judgeparse_id, "filtered_hits"]},
             ],
             "outputs": {"sources_text": {"type": "string", "children": None}},
-        }, 2390),
+        }, 2640),
         _node(answer_id, {
             "type": "answer",
             "title": "Answer",
@@ -731,7 +830,7 @@ def _build_dsl(
                 f"{{{{#{fmtsrc_id}.sources_text#}}}}"
                 f"{{{{#{pick_id}.others_text#}}}}"
             ),
-        }, 2590),
+        }, 2890),
         _node(nodisc_answer_id, {
             "type": "answer",
             "title": "Answer (no discussion found)",
@@ -763,7 +862,8 @@ def _build_dsl(
         _edge(ctxprep_id, "code", hasdisc_id, "if-else"),
         _edge_h(hasdisc_id, "if-else", llm_id, "llm", "true"),
         _edge_h(hasdisc_id, "if-else", nodisc_answer_id, "answer", "false"),
-        _edge(llm_id, "llm", sanitize_id, "code"),
+        _edge(llm_id, "llm", faithcheck_id, "llm"),
+        _edge(faithcheck_id, "llm", sanitize_id, "code"),
         _edge(sanitize_id, "code", fmtsrc_id, "code"),
         _edge(fmtsrc_id, "code", answer_id, "answer"),
     ]
