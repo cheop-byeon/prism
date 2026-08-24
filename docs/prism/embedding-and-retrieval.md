@@ -1,0 +1,11 @@
+# Embedding & retrieval infrastructure
+
+A custom embedding model (`RFC-DRAlign-QN`) fine-tuned for aligning RFC/draft text, quantized to GGUF and served via a host-level Ollama install (validated at cosine 0.985–0.9998 against the fp16 reference) — see [Local development](../../README.md#local-development) for how it's registered. Being fine-tuned for RFC/draft-to-draft alignment means it's biased toward matching formal-register text to other formal-register text; this matters for the mailarchive retrieval in [Decision → Discussion](decision-bot.md), which is a cross-register problem (formal spec text → casual email discussion) — one reason that pipeline leans on an LLM judge rather than embedding score alone.
+
+## Per-dataset keyword store
+
+Stock Dify's Economical (keyword-only) indexing mode only had Jieba, a TF-IDF-style overlap ranker. Migration `a1b2c3d4e5f6_add_keyword_store_to_datasets` adds a `datasets.keyword_store` column (default `'bm25'`), and `Keyword._init_keyword()` now prefers that per-dataset value over the old server-wide config. `api/core/rag/datasource/keyword/bm25/bm25.py` is a from-scratch `Bm25Keyword` implementation: it stores the full tokenized corpus in the existing keyword-table storage slot, tokenizes with a minimal regex + ~90-word stopword list (no NLP dependency), ranks with `rank_bm25.BM25Plus` computed per query, and guards concurrent index updates with a Redis lock. It's selectable per dataset via a radio control shown when Economical mode is chosen in the create-dataset wizard.
+
+## Weaviate hardening
+
+Weaviate's hybrid/BM25 full-text search already existed in stock Dify — what this fork changed is correctness under the new [chunking strategies](chunking-strategies.md): chunk UUIDs are now derived from each chunk's own `doc_id` instead of a hash of its text, since identical short chunks (common with paragraph/semantic/framework splitting) were colliding and silently overwriting each other under the old content-hash scheme; metadata keys that would collide with Weaviate's own reserved properties (`id`, `vector`) are now guarded against; differently-named source fields (`message_id`/`messageId`, `source_url`/`link`, etc.) are canonicalized into a fixed set of display properties; and a new `get_by_ids()` method fetches chunks by ID for [chunk metadata inspection](chunk-metadata.md).

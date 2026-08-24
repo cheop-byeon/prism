@@ -1,0 +1,5 @@
+# Chunk metadata inspection
+
+The console's chunk detail view can only show whatever fields stock Dify hardcodes. Two new endpoints — `GET .../segments/<id>` and `GET .../segments/<id>/child_chunks/<id>` — attach a `metadata` object built by `SegmentService.get_chunk_metadata()`: it tries the vector store's `get_by_ids()` first (see [Weaviate hardening](embedding-and-retrieval.md#weaviate-hardening)), falls back to regex-parsing a structured header line embedded in the chunk's own text, and for continuation chunks walks back through up to 20 preceding segments to find the nearest chunk that carries one.
+
+The frontend renders whatever comes back generically — known fields (the draft-evolution lineage fields `from_rev`/`to_rev`/`section_id`/`change_type`/etc., and canonical email fields `url`/`subject`/`id`/`date`) get friendly labels; anything else falls back to an auto-generated, title-cased label. So new metadata the pipeline starts attaching later shows up in the UI without a frontend change — this is what makes draft-evolution lineage and thread provenance actually inspectable per chunk, not just present in the index.
