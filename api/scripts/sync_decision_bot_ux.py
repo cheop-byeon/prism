@@ -54,7 +54,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from sync_decision_bot import (
     _FORMAT_SOURCES,
+    _JUDGE_SYSTEM_PROMPT,
+    _PARSE_JUDGMENT,
+    _PREP_JUDGE_CANDIDATES,
+    _RERANK_BY_TERMS,
+    _SANITIZE_ALTERNATIVES,
     _SYSTEM_PROMPT,
+    _WIDEN_CONTEXT,
     _edge,
     _embedding_of,
     _node,
@@ -88,6 +94,18 @@ def main(query, pending):
 # than imported, since it has to run inside Dify's sandboxed code node as a
 # self-contained string, not as a real Python import.
 _MAX_CANDIDATES = 10
+
+
+def _candidate_reply_hint(n: int) -> str:
+    """Human-readable range for prompts/descriptions, kept in sync with
+    _MAX_CANDIDATES automatically instead of being hand-written and going
+    stale whenever that constant changes."""
+    if n <= 1:
+        return "1"
+    if n == 2:
+        return "1 or 2"
+    return f"1 to {n}"
+
 
 _PICK_TOP_N = '''
 def _parse_marker(line):
@@ -171,7 +189,34 @@ def main(evo):
 # [true] branch -> decode the stored candidate the user picked, in the same
 # shape sync_decision_bot.py's _PICK produces, so the downstream stage-2
 # retrieval / llm / answer nodes are unchanged from the original design.
+#
+# The user already saw and chose from the full top-N list in the picker turn,
+# so re-listing every unpicked candidate here would just repeat what they
+# just read. Instead, only surface candidates that look like they're about
+# the same parameter/identifier as the one picked (e.g. picking "INIT_CWND
+# SHOULD be 4" surfaces other hops that also mention INIT_CWND, not every
+# candidate that happens to share a generic word like "SHOULD"). This can
+# legitimately narrow to 1, a few, or none.
 _RESOLVE_PICK = '''
+_STOPWORDS = {
+    "MUST", "SHOULD", "SHALL", "MAY", "NOT", "REQUIRED", "RECOMMENDED",
+    "OPTIONAL", "THE", "THIS", "THAT", "WITH", "FOR", "AND", "FROM",
+    "INTO", "WHEN", "THEN", "ELSE", "ARE", "WAS", "WERE", "HAS", "HAVE",
+}
+
+
+def _tokens(text):
+    words = set()
+    for raw in text.replace("-", " ").replace("/", " ").split():
+        tok = "".join(ch for ch in raw if ch.isalnum() or ch == "_").strip("_")
+        if len(tok) < 2 or tok.upper() != tok or not any(ch.isalpha() for ch in tok):
+            continue
+        if tok in _STOPWORDS:
+            continue
+        words.add(tok)
+    return words
+
+
 def main(pending, idx, query):
     items = [p for p in (pending or "").split("\\u0002") if p]
     parsed = []
@@ -194,14 +239,25 @@ def main(pending, idx, query):
     decision_header = top["header"]
     decision_full = top["body"][:1500]
     decision_excerpt = decision_full[:600] + ("\\u2026" if len(top["body"]) > 600 else "")
-    mail_query = (top["header"] + " " + decision_full[:600] + " " + (query or "")).strip()
-    others = []
+    # Unlike the linear bot's _PICK, `query` here is the digit the user just
+    # typed to pick a candidate ("4"), not their original search phrase --
+    # appending it would tack a stray digit onto the stage-2 search query.
+    mail_query = (top["header"] + " " + decision_full[:600]).strip()
+    picked_tokens = _tokens(top["header"] + " " + top["body"])
+    scored = []
     for j, c in enumerate(parsed):
         if j == i:
             continue
+        overlap = picked_tokens & _tokens(c["header"] + " " + c["body"])
+        if overlap:
+            scored.append((len(overlap), j, c))
+    scored.sort(key=lambda t: -t[0])
+    related = []
+    for _, j, c in scored[:5]:
         snip = " ".join(c["body"].split())[:220]
-        others.append(str(j + 1) + ". **" + c["header"] + "**\\n   " + snip)
-    others_text = ("\\n\\n---\\n_Other candidates from this search:_\\n\\n" + "\\n\\n".join(others)) if others else ""
+        related.append(str(j + 1) + ". **" + c["header"] + "**\\n   " + snip)
+    related_label = "_Other candidates covering the same parameter(s):_\\n\\n"
+    others_text = ("\\n\\n---\\n" + related_label + "\\n\\n".join(related)) if related else ""
     return {
         "decision_header": decision_header,
         "decision_excerpt": decision_excerpt,
@@ -238,9 +294,17 @@ def _build_dsl(
     resolve_id = "resolve1"
     clear_id = "clear1"
     emailkr_id = "emailkr2"
+    rerank_id = "rerank2"
+    judgeprep_id = "judgeprep2"
+    judge_id = "judge2"
+    judgeparse_id = "judgeparse2"
+    ctxprep_id = "ctxprep2"
+    hasdisc_id = "hasdisc2"
     llm_id = "llm2"
+    sanitize_id = "sanitize2"
     fmtsrc_id = "fmtsrc2"
     answer_final_id = "answerfinal1"
+    nodisc_answer_id = "answernodisc2"
     # [false] branch — fresh query, up to _MAX_CANDIDATES candidates, wait for a pick
     evokr_id = "evokr1"
     toppick_id = "toppick1"
@@ -316,17 +380,112 @@ def _build_dsl(
             "query_variable_selector": [resolve_id, "mail_query"],
             "dataset_ids": [email_dataset_id],
             "retrieval_mode": "multiple",
-            "multiple_retrieval_config": _retrieval_config(email_embedding, 5),
+            "multiple_retrieval_config": _retrieval_config(email_embedding, 50),
         }, 1340, 120),
+        _node(rerank_id, {
+            "type": "code",
+            "title": "Filter by shared terms",
+            "desc": "Drops retrieved threads that share none of the decision's identifier tokens.",
+            "code_language": "python3",
+            "code": _RERANK_BY_TERMS,
+            "variables": [
+                {"variable": "hits", "value_selector": [emailkr_id, "result"]},
+                {"variable": "decision_text", "value_selector": [resolve_id, "decision_full"]},
+                {"variable": "decision_header", "value_selector": [resolve_id, "decision_header"]},
+            ],
+            "outputs": {"filtered_hits": {"type": "array[object]", "children": None}},
+        }, 1490, 120),
+        _node(judgeprep_id, {
+            "type": "code",
+            "title": "Number candidates for judging",
+            "desc": "Builds a numbered excerpt list (capped) for the relevance-judging LLM call.",
+            "code_language": "python3",
+            "code": _PREP_JUDGE_CANDIDATES,
+            "variables": [{"variable": "hits", "value_selector": [rerank_id, "filtered_hits"]}],
+            "outputs": {"candidates_text": {"type": "string", "children": None}},
+        }, 1640, 120),
+        _node(judge_id, {
+            "type": "llm",
+            "title": "Judge relevance",
+            "desc": "Asks which surviving candidates actually discuss this decision, not just a related topic.",
+            "model": {
+                "provider": "langgenius/openrouter/openrouter",
+                "name": "google/gemini-2.5-flash",
+                "mode": "chat",
+                "completion_params": {
+                    "max_tokens": 2000,
+                    "temperature": 0,
+                    "top_p": 1,
+                    "enable_thinking": "manual",
+                    "reasoning_budget": 0,
+                },
+            },
+            "prompt_template": [
+                {"role": "system", "text": _JUDGE_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "text": (
+                        f"Decision:\n{{{{#{resolve_id}.decision_header#}}}}\n{{{{#{resolve_id}.decision_full#}}}}\n\n"
+                        f"Numbered excerpts:\n{{{{#{judgeprep_id}.candidates_text#}}}}"
+                    ),
+                },
+            ],
+            "context": {"enabled": False, "variable_selector": []},
+            "vision": {"enabled": False, "configs": {"variable_selector": []}},
+            "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
+        }, 1790, 120),
+        _node(judgeparse_id, {
+            "type": "code",
+            "title": "Apply relevance judgment",
+            "desc": "Keeps only the candidates the judging LLM marked as directly relevant.",
+            "code_language": "python3",
+            "code": _PARSE_JUDGMENT,
+            "variables": [
+                {"variable": "hits", "value_selector": [rerank_id, "filtered_hits"]},
+                {"variable": "judge_text", "value_selector": [judge_id, "text"]},
+            ],
+            "outputs": {"filtered_hits": {"type": "array[object]", "children": None}},
+        }, 1940, 120),
+        _node(ctxprep_id, {
+            "type": "code",
+            "title": "Check discussion found",
+            "desc": "0 judge picks -> no discussion found (hard stop). Otherwise pass the judge's picks through as-is.",
+            "code_language": "python3",
+            "code": _WIDEN_CONTEXT,
+            "variables": [
+                {"variable": "judge_hits", "value_selector": [judgeparse_id, "filtered_hits"]},
+            ],
+            "outputs": {
+                "context_hits": {"type": "array[object]", "children": None},
+                "has_discussion": {"type": "string", "children": None},
+            },
+        }, 2090, 120),
+        _node(hasdisc_id, {
+            "type": "if-else",
+            "title": "Any discussion found?",
+            "desc": "true: explain grounded in retrieved discussion. false: say so plainly, no LLM call.",
+            "cases": [{
+                "case_id": "true",
+                "id": "true",
+                "logical_operator": "and",
+                "conditions": [{
+                    "id": "has-disc-cond",
+                    "varType": "string",
+                    "variable_selector": [ctxprep_id, "has_discussion"],
+                    "comparison_operator": "is",
+                    "value": "true",
+                }],
+            }],
+        }, 2240, 120),
         _node(llm_id, {
             "type": "llm",
             "title": "Explain the decision",
             "desc": "",
             "model": {
                 "provider": "langgenius/openrouter/openrouter",
-                "name": "llama-3.3-70b-instruct",
+                "name": "google/gemini-2.5-flash",
                 "mode": "chat",
-                "completion_params": {"max_tokens": 1200, "temperature": 0.3, "top_p": 1},
+                "completion_params": {"max_tokens": 1500, "temperature": 0.3, "top_p": 1},
             },
             "prompt_template": [
                 {"role": "system", "text": _SYSTEM_PROMPT},
@@ -338,19 +497,28 @@ def _build_dsl(
                     ),
                 },
             ],
-            "context": {"enabled": True, "variable_selector": [emailkr_id, "result"]},
+            "context": {"enabled": True, "variable_selector": [ctxprep_id, "context_hits"]},
             "vision": {"enabled": False, "configs": {"variable_selector": []}},
             "retry_config": {"retry_enabled": True, "max_retries": 2, "retry_interval": 8000},
-        }, 1640, 120),
+        }, 2390, 120),
+        _node(sanitize_id, {
+            "type": "code",
+            "title": "Sanitize alternatives",
+            "desc": "Drops any 'Alternative:' line that cites the draft itself instead of a retrieved message.",
+            "code_language": "python3",
+            "code": _SANITIZE_ALTERNATIVES,
+            "variables": [{"variable": "text", "value_selector": [llm_id, "text"]}],
+            "outputs": {"text": {"type": "string", "children": None}},
+        }, 2540, 120),
         _node(fmtsrc_id, {
             "type": "code",
             "title": "List sources",
             "desc": "Formats the retrieved threads as a source list.",
             "code_language": "python3",
             "code": _FORMAT_SOURCES,
-            "variables": [{"variable": "hits", "value_selector": [emailkr_id, "result"]}],
+            "variables": [{"variable": "hits", "value_selector": [judgeparse_id, "filtered_hits"]}],
             "outputs": {"sources_text": {"type": "string", "children": None}},
-        }, 1940, 120),
+        }, 2690, 120),
         _node(answer_final_id, {
             "type": "answer",
             "title": "Answer (explanation)",
@@ -360,12 +528,29 @@ def _build_dsl(
                 f"**{{{{#{resolve_id}.decision_header#}}}}**\n\n"
                 f"> {{{{#{resolve_id}.decision_excerpt#}}}}\n\n"
                 f"---\n\n"
-                f"{{{{#{llm_id}.text#}}}}\n\n"
+                f"{{{{#{sanitize_id}.text#}}}}\n\n"
                 f"---\n**Sources (retrieved mailing-list discussion):**\n"
                 f"{{{{#{fmtsrc_id}.sources_text#}}}}"
                 f"{{{{#{resolve_id}.others_text#}}}}"
             ),
-        }, 2240, 120),
+        }, 2840, 120),
+        _node(nodisc_answer_id, {
+            "type": "answer",
+            "title": "Answer (no discussion found)",
+            "desc": "",
+            "answer": (
+                f"## 🔎 Decision under study\n"
+                f"**{{{{#{resolve_id}.decision_header#}}}}**\n\n"
+                f"> {{{{#{resolve_id}.decision_excerpt#}}}}\n\n"
+                f"---\n\n"
+                f"No relevant mailing-list discussion was found for this decision "
+                f"-- the retrieved messages didn't directly address it, so no "
+                f"rationale or alternatives can be grounded in the archive.\n\n"
+                f"---\n**Sources (retrieved mailing-list discussion):**\n"
+                f"_No mailing-list sources retrieved._"
+                f"{{{{#{resolve_id}.others_text#}}}}"
+            ),
+        }, 2390, 560),
         # --- [false] branch: fresh query, show top 3, store them ---
         _node(evokr_id, {
             "type": "knowledge-retrieval",
@@ -411,8 +596,16 @@ def _build_dsl(
         _edge_h(branch_id, "if-else", evokr_id, "knowledge-retrieval", "false"),
         _edge(resolve_id, "code", clear_id, "assigner"),
         _edge(clear_id, "assigner", emailkr_id, "knowledge-retrieval"),
-        _edge(emailkr_id, "knowledge-retrieval", llm_id, "llm"),
-        _edge(llm_id, "llm", fmtsrc_id, "code"),
+        _edge(emailkr_id, "knowledge-retrieval", rerank_id, "code"),
+        _edge(rerank_id, "code", judgeprep_id, "code"),
+        _edge(judgeprep_id, "code", judge_id, "llm"),
+        _edge(judge_id, "llm", judgeparse_id, "code"),
+        _edge(judgeparse_id, "code", ctxprep_id, "code"),
+        _edge(ctxprep_id, "code", hasdisc_id, "if-else"),
+        _edge_h(hasdisc_id, "if-else", llm_id, "llm", "true"),
+        _edge_h(hasdisc_id, "if-else", nodisc_answer_id, "answer", "false"),
+        _edge(llm_id, "llm", sanitize_id, "code"),
+        _edge(sanitize_id, "code", fmtsrc_id, "code"),
         _edge(fmtsrc_id, "code", answer_final_id, "answer"),
         _edge(evokr_id, "knowledge-retrieval", toppick_id, "code"),
         _edge(toppick_id, "code", store_id, "assigner"),
@@ -422,7 +615,10 @@ def _build_dsl(
     dsl = {
         "app": {
             "name": app_name,
-            "description": "Interactive-picker variant: shows the top 3 matching changes and lets you pick one.",
+            "description": (
+                f"Interactive-picker variant: shows the top {_MAX_CANDIDATES} matching "
+                f"changes and lets you pick one."
+            ),
             "icon": "🧭",
             "icon_background": "#FEF3C7",
             "mode": "advanced-chat",
@@ -437,17 +633,21 @@ def _build_dsl(
                 "selector": ["conversation", "pending_candidates"],
                 "value": "",
                 "value_type": "string",
-                "description": "Encoded top-3 candidates awaiting a 1/2/3 pick (header\\u0001body, joined by \\u0002).",
+                "description": (
+                    f"Encoded top-{_MAX_CANDIDATES} candidates awaiting a pick "
+                    f"(header\\u0001body, joined by \\u0002)."
+                ),
             }],
             "environment_variables": [],
             "features": {
                 "opening_statement": (
                     "Type a few keywords or a short phrase describing the specification "
                     "change you want to understand (e.g. \"base delay late comers\"). "
-                    "I'll show the top 3 matching changes — reply with 1, 2, or 3 to "
-                    "get the full explanation (**why it was made**, **what it says**, "
-                    "**what alternatives or objections were raised**), or just rephrase "
-                    "if none of the three are the one you meant."
+                    f"I'll show the top {_MAX_CANDIDATES} matching changes — reply with "
+                    f"{_candidate_reply_hint(_MAX_CANDIDATES)} to get the full explanation "
+                    "(**rationale for the adopted approach** and **alternatives "
+                    "considered**), or just rephrase if none of them are the one you "
+                    "meant — I'll search again from scratch."
                 ),
                 "suggested_questions": [],
                 "suggested_questions_after_answer": {"enabled": False},
