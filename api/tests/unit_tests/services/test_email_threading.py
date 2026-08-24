@@ -83,6 +83,61 @@ class TestGroupIntoThreads:
         assert len(threads) == 1
         assert len(threads[0]) == 2
 
+    def test_reply_with_dangling_reference_falls_back_to_subject(self):
+        # Mailing-list software sometimes rewrites a message's effective
+        # Message-ID when relaying it (e.g. Mailman digest wrapping), so a
+        # reply's References can point to an ID that matches nothing in our
+        # corpus. A References header alone shouldn't block the subject
+        # fallback if it didn't actually connect the message to anything.
+        root = _record("<root@x>", "Congestion control", "Mon, 01 Mar 2021 10:00:00 +0000")
+        reply = _record(
+            "<orphan@x>",
+            "Re: Congestion control",
+            "Mon, 01 Mar 2021 14:00:00 +0000",
+            references="<missing-id@elsewhere>",
+        )
+
+        threads = group_into_threads([root, reply])
+
+        assert len(threads) == 1
+        assert len(threads[0]) == 2
+
+    def test_subject_changed_reply_was_re_joins_original_thread(self):
+        # A reply that pivots the subject ("New topic (WAS Re: Old topic)")
+        # is still a reply to "Old topic" for grouping purposes, even though
+        # its own subject doesn't start with "Re:".
+        root = _record("<root@x>", "New Version Notification", "Mon, 01 Mar 2021 10:00:00 +0000")
+        pivot = _record(
+            "<pivot@x>",
+            "INIT_CWND and MIN_CWND (WAS Re: New Version Notification)",
+            "Wed, 03 Mar 2021 10:00:00 +0000",
+            references="<mailman.rewritten@list>",
+        )
+        reply_to_pivot = _record(
+            "<reply@x>",
+            "Re: INIT_CWND and MIN_CWND (WAS Re: New Version Notification)",
+            "Thu, 04 Mar 2021 10:00:00 +0000",
+            references="<pivot@x>",
+        )
+
+        threads = group_into_threads([root, pivot, reply_to_pivot])
+
+        assert len(threads) == 1
+        assert len(threads[0]) == 3
+
+    def test_was_re_pivot_outside_window_stays_separate(self):
+        root = _record("<root@x>", "Old topic", "Mon, 01 Jan 2021 10:00:00 +0000")
+        pivot = _record(
+            "<pivot@x>",
+            "New topic (WAS Re: Old topic)",
+            "Mon, 01 Jan 2022 10:00:00 +0000",
+            references="<mailman.rewritten@list>",
+        )
+
+        threads = group_into_threads([root, pivot])
+
+        assert len(threads) == 2
+
     def test_messages_sorted_chronologically_within_thread(self):
         a = _record("<a@x>", "Ordering", "Mon, 01 Mar 2021 10:00:00 +0000")
         b = _record("<b@x>", "Re: Ordering", "Tue, 02 Mar 2021 10:00:00 +0000", references="<a@x>")

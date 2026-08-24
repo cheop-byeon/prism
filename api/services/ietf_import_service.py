@@ -1225,6 +1225,9 @@ class IetfImportService:
             if not body or (filter_emails and not IetfImportService._is_natural_text(body)):
                 discarded += 1
                 continue
+            if filter_emails and IetfImportService._is_administrative_notice(subject):
+                discarded += 1
+                continue
 
             accepted.append(
                 {
@@ -1496,6 +1499,32 @@ class IetfImportService:
                 charset = msg.get_content_charset() or "utf-8"
                 return payload.decode(charset, errors="replace")  # type: ignore[union-attr]
         return None
+
+    # IETF Secretariat/datatracker bot notices, plus chair-issued procedural
+    # announcements (Last Call, WG-adoption summaries) that follow an equally
+    # fixed template -- no human writes these unprompted, so matching the
+    # prefix carries no risk of dropping real discussion. Matching only the
+    # prefix (not "Re: ...") means a reply in the same thread -- where actual
+    # technical review comments live -- is never caught by this. Deliberately
+    # NOT included: "New Version Notification" and "minutes" -- both are also
+    # used by humans announcing real content (e.g. an author's own summary of
+    # what changed and why), so a subject match alone can't safely tell those
+    # apart from the bot's auto-notifications.
+    _ADMINISTRATIVE_SUBJECT_RE = re.compile(
+        r"^\s*(?:\[[^\]]{1,60}\]\s*)*(?:"
+        r"WG Action:|Document Action:|I-D Action:|Call for Papers|CFP\b|"
+        r"(?:\d+\s*weeks?\s*)?Last Call\b|"
+        r"Summary:\s*Call for"
+        r")",
+        re.IGNORECASE,
+    )
+
+    @staticmethod
+    def _is_administrative_notice(subject: str) -> bool:
+        """Heuristic: IETF Secretariat/datatracker bot notices and conference
+        CFPs carry no design rationale, but their broad, formal vocabulary
+        makes them prone to false-positive matches in discussion retrieval."""
+        return bool(IetfImportService._ADMINISTRATIVE_SUBJECT_RE.match(subject or ""))
 
     @staticmethod
     def _is_natural_text(text: str) -> bool:

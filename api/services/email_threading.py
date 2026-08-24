@@ -36,6 +36,12 @@ from email.utils import parsedate_to_datetime
 _SUBJECT_PREFIX_RE = re.compile(r"^\s*(?:(?:re|fwd?|aw)\s*(?:\[\d+\])?\s*:\s*|\[[^\]]{1,60}\]\s*)+", re.IGNORECASE)
 _REPLY_SUBJECT_RE = re.compile(r"^\s*(?:\[[^\]]{1,60}\]\s*)*(?:re|fwd?|aw)\s*(?:\[\d+\])?\s*:", re.IGNORECASE)
 _MESSAGE_ID_RE = re.compile(r"<[^<>\s]+>")
+# A subject pivot mid-thread: "New topic (WAS Re: Old topic)". The message is
+# still a reply to "Old topic" for grouping purposes even though its own
+# subject doesn't start with "Re:".
+_WAS_RE_SUBJECT_RE = re.compile(
+    r"\(\s*WAS\s+(?:re|fwd?|aw)\s*(?:\[\d+\])?\s*:\s*(?P<original>.+?)\s*\)\s*$", re.IGNORECASE
+)
 
 # Subject-fallback window: a headerless "Re:" only joins a thread whose
 # earliest message is within this many days.
@@ -56,7 +62,20 @@ def normalize_subject(subject: str) -> str:
 
 
 def _is_reply_subject(subject: str) -> bool:
-    return bool(_REPLY_SUBJECT_RE.match(subject or ""))
+    subject = subject or ""
+    return bool(_REPLY_SUBJECT_RE.match(subject)) or bool(_WAS_RE_SUBJECT_RE.search(normalize_subject(subject)))
+
+
+def _subject_fallback_key(subject: str) -> str:
+    """Normalized subject to join threads on. A "New topic (WAS Re: Old
+    topic)" pivot keys on the *old* topic, so the reply still finds its
+    original thread; normalize_subject (used for display) is untouched, so
+    the merged thread's title isn't affected by this."""
+    normalized = normalize_subject(subject)
+    match = _WAS_RE_SUBJECT_RE.search(normalized)
+    if match:
+        return normalize_subject(match.group("original")).casefold()
+    return normalized.casefold()
 
 
 def _parse_date(value: str) -> datetime | None:
@@ -120,15 +139,26 @@ def group_into_threads(records: list[dict]) -> list[list[dict]]:
     mids = [_record_message_id(record, index) for index, record in enumerate(records)]
     dates = [_parse_date(str(record.get("date") or "")) for record in records]
 
+    # A References header doesn't guarantee it actually joined this message
+    # to another one we have -- mailing-list software sometimes rewrites a
+    # message's effective Message-ID when relaying it (e.g. Mailman digest
+    # wrapping), so a reply's References can point to an ID that matches
+    # nothing in our corpus. Treat "linked" as "my own References named an
+    # ID that's actually one of our messages" rather than "has a References
+    # header at all", so those orphaned references still get a shot at the
+    # subject fallback -- and check this per-message before any unioning, so
+    # a later reply successfully referencing *this* message doesn't count.
+    mids_set = set(mids)
     linked: list[bool] = []
     for mid, record in zip(mids, records):
         references = _MESSAGE_ID_RE.findall(str(record.get("references") or ""))
         for reference in references:
             union_find.union(mid, reference)
-        linked.append(bool(references))
+        linked.append(any(reference in mids_set for reference in references))
 
-    # Subject fallback for headerless replies: join the earliest message that
-    # shares the normalized subject and lies within the time window.
+    # Subject fallback for headerless (or unresolved-reference) replies: join
+    # the earliest message that shares the normalized subject and lies
+    # within the time window.
     earliest_by_subject: dict[str, int] = {}
     for index, record in enumerate(records):
         key = normalize_subject(str(record.get("subject") or "")).casefold()
@@ -141,7 +171,7 @@ def group_into_threads(records: list[dict]) -> list[list[dict]]:
     for index, record in enumerate(records):
         if linked[index] or not _is_reply_subject(str(record.get("subject") or "")):
             continue
-        key = normalize_subject(str(record.get("subject") or "")).casefold()
+        key = _subject_fallback_key(str(record.get("subject") or ""))
         anchor = earliest_by_subject.get(key)
         if anchor is None or anchor == index:
             continue
