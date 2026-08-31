@@ -153,6 +153,26 @@ questions, not just how the discovery mechanism happens to work internally:
   entirely when given. An unresolvable or ambiguous hint fails loudly
   with the list of known drafts rather than silently guessing one.
 
+Every answer now also carries a live, clickable citation -- a link on
+IETF's own hosted diff viewer (author-tools.ietf.org/iddiff) for the
+actual revision pair the answer is about, confirmed to support anchoring
+straight to the exact changed hunk (every hunk on a rendered page gets its
+own <tr id="diffNNNN">, in document order -- verified directly against a
+real page). Every evolution-dataset hit already carries this URL for free
+(cite_iddiff_url exists separately for the pricier, hunk-precise version
+on demand). Getting it to reliably show up in the final answer text needed
+the same lesson as the mailarchive-search and verify_answer safety nets:
+prompt instruction alone wasn't enough -- a real run cited the right
+revision pair inline while a *different* run of the same question cited
+nothing at all. _finalize_answer appends one in Python, deterministically,
+skipping only when the model already included a citation itself (checked
+by URL substring, not an exact phrase, since confirmed the model paraphrases
+the lead-in text around the link) -- and when appending, matches whichever
+seen evolution hit's revision pair is actually mentioned in the answer
+text, not just the top-ranked hit of the last search (confirmed necessary:
+a real run's answer discussed a rev08->rev09 change while the top hit for
+that query was a different, less relevant rev04->rev05 pair).
+
 No Dify core files are touched, and neither the existing sync_decision_bot*.py
 chatflow nor sync_decision_agent.py's Agent app are modified -- this is a new,
 separate script.
@@ -173,6 +193,7 @@ import re
 import sys
 import time
 import uuid
+from pathlib import Path
 
 sys.path.insert(0, "/app/api")
 
@@ -200,111 +221,20 @@ def _invoke_llm_with_retry(model_instance, **kwargs):
             time.sleep(_LLM_RETRY_SECONDS)
 
 
-_INSTRUCTION = (
-    "You are an assistant for IETF standards research. You explain WHY a "
-    "specification decision was made, using these tools:\n\n"
-    "- list_available_ietf_corpora: lists every draft this instance has "
-    "data for, its working group, and the dataset_id of its evolution "
-    "corpus and (when available) its mailarchive corpus. Call this first "
-    "if you don't already know which dataset_id to pass to the two search "
-    "tools below.\n"
-    "- search_ietf_evolution_dataset(dataset_id, query): search an "
-    "evolution/decision dataset -- tagged, section-level diffs of draft "
-    "revisions, each entry one specific change in one specific section "
-    "between two specific revisions.\n"
-    "- search_ietf_mailarchive_dataset(dataset_id, query): search a "
-    "mailarchive dataset -- the working-group mailing-list discussion "
-    "that produced those changes.\n"
-    "- fetch_ietf_draft_text / fetch_ietf_rfc_text: fetch a specific draft "
-    "revision or the final published RFC directly from the primary source "
-    "(ietf.org / rfc-editor.org) and search it for a phrase. Use these when "
-    "the evolution dataset's diff for a change looks incomplete or "
-    "ambiguous, when you want to confirm the EXACT wording of something "
-    "before quoting it, or when you want to check what a later revision or "
-    "the final RFC actually says -- the evolution dataset can have gaps for "
-    "a specific query even when the underlying text exists.\n"
-    "- diff_ietf_draft_revisions: diff two specific revisions directly with "
-    "an independent diff tool, separate from the evolution dataset's own "
-    "precomputed diff logic. Use this as a second opinion when the "
-    "evolution dataset's diff for a change seems incomplete, ambiguous, or "
-    "doesn't surface anything for a query you'd expect it to.\n"
-    "- verify_answer: pass it your full draft answer and it checks every "
-    "claim in it against the evidence you've actually retrieved so far, "
-    "with fresh eyes, in a separate call. Call it before finalizing.\n\n"
-    "For the user's question:\n\n"
-    "0. If you don't already know the right dataset_id for this draft, "
-    "call list_available_ietf_corpora first.\n"
-    "1. Search the evolution dataset to locate the specific change being "
-    "asked about. Use a tight query -- the identifier or phrase being "
-    "asked about -- rather than the full question, since this dataset is "
-    "keyword-indexed.\n"
-    "2. Once you've identified the decision, search the mailarchive "
-    "dataset for discussion of it. The evolution dataset only ever tells "
-    "you WHAT "
-    "changed; it is never itself evidence of WHY, no matter how "
-    "self-explanatory the diff text sounds. Start with the decision's own "
-    "wording as your query. If the results look thin, off-topic, or "
-    "dominated by procedural/administrative traffic (WG Action, Document "
-    "Action, I-D Action, Call for Papers, Last Call notices, "
-    "meeting-announcement cover messages), try at least one differently "
-    "phrased query before giving up -- you are not limited to one search "
-    "per decision.\n"
-    "3. Read what you retrieve critically. A message that merely shares a "
-    "broad topic (the same protocol, a different parameter, generic "
-    "discussion) is NOT the same as a message that directly discusses "
-    "THIS decision.\n\n"
-    "Once you have a draft answer, write it under exactly these three "
-    "headings, in this order (keep them verbatim, bold, on their own "
-    "line):\n\n"
-    "**Rationale for the adopted approach** -- traceable to specific "
-    "retrieved messages. If nothing you found clearly explains the "
-    "motivation, say so explicitly rather than inferring a rationale from "
-    "the decision text itself.\n"
-    "**Alternatives considered** -- only a genuinely different "
-    "approach/value a message actually proposes as a considered option. "
-    "Never the decision's own before/after text repackaged as a proposal. "
-    "If none, say so in one line.\n"
-    "**Other relevant discussion** -- corrections, open questions, or "
-    "objections that are real and worth surfacing but aren't a proposed "
-    "alternative (e.g. someone's mistaken belief about the current value, "
-    "later corrected). If there's nothing beyond the rationale above, say "
-    "so in one line.\n\n"
-    "Before treating that draft as final, call verify_answer with it. If it "
-    "flags anything unsupported or misclassified, fix your draft "
-    "accordingly -- delete an unsupported claim rather than softening it, "
-    "and move a misclassified item to the right heading rather than just "
-    "deleting it. Cite retrieved message indices, e.g. [3], and thread "
-    "subjects where they appear."
-)
+def _load_skill(filename: str) -> str:
+    """Load an agent instruction file from this directory.
 
-_VERIFY_INSTRUCTION = (
-    "You are a fact-checker auditing someone else's draft answer. You did "
-    "not write it and do not know anything beyond what's given to you "
-    "below. You are given EVIDENCE (verbatim excerpts actually retrieved "
-    "from a mailing-list archive, a draft-revision diff dataset, and/or "
-    "primary-source fetches) and a DRAFT ANSWER that claims to be grounded "
-    "in that evidence. Your only job is to check whether it actually is.\n\n"
-    "For every sentence in the draft that names a specific person, date, "
-    "number, or direct quote: find the exact (or near-exact) passage in "
-    "the evidence that supports it. If you cannot find one, say so "
-    "explicitly -- list the claim and state 'no supporting evidence "
-    "found'. A claim that merely sounds plausible or fits the pattern of "
-    "the evidence is not the same as a claim that's actually in it.\n\n"
-    "Separately, check every item listed under 'Alternatives considered': "
-    "a genuine alternative is a message that proposes a different "
-    "approach or value than what was adopted. Someone's mistaken belief "
-    "about what the current value already was, later corrected in the "
-    "same thread, is NOT an alternative -- if you see one miscategorized "
-    "this way, say so and note it belongs under 'Other relevant "
-    "discussion' instead. Likewise, the decision's own before/after text "
-    "repackaged as if a person proposed it is not a real alternative.\n\n"
-    "List every issue you find, quoting the specific draft sentence and "
-    "explaining exactly what's wrong with it. If a section has no issues, "
-    "say so briefly rather than padding your reply. End your reply with "
-    "exactly one of these two lines, verbatim:\n"
-    "VERDICT: no issues found\n"
-    "VERDICT: issues found"
-)
+    Kept as a real file (not a Python string constant) for the same reason
+    Claude Code's own Skills are files, not code: prompt wording is content,
+    not logic -- reading, diffing, and editing it shouldn't require touching
+    Python string-escaping, and a single file can be loaded by both this
+    script and serve_ui.py's UI without a second copy to drift out of sync.
+    """
+    return (Path(__file__).parent / filename).read_text(encoding="utf-8").strip()
+
+
+_INSTRUCTION = _load_skill("agent_skill.md")
+_VERIFY_INSTRUCTION = _load_skill("verify_skill.md")
 
 # Three forced safety-net rounds (discovery, mailarchive, verify_answer) plus
 # room for the model's own self-directed searches/fetches/re-verification.
@@ -523,6 +453,60 @@ def _format_hits(hits: list[str]) -> str:
     return "\n\n".join(f"[{i}] {hit}" for i, hit in enumerate(hits, start=1))
 
 
+_EVOLUTION_HEADER_RE = re.compile(r"^ietf-evolution draft:(\S+) from:(\S+) to:(\S+)")
+_IDDIFF_TOOL_BASE = "https://author-tools.ietf.org/iddiff"
+
+
+def _iddiff_page_url(draft_name: str, from_rev: str, to_rev: str) -> str:
+    """Build a live-diff URL on IETF's own hosted iddiff-as-a-service tool
+    (author-tools.ietf.org) -- a real, clickable citation a human reader can
+    follow to see the canonical diff themselves, rather than trusting our own
+    rendering of it. url1/url2 both being real, adjacent draft revisions
+    (guaranteed by how _diff_version_pair iterates) means this URL is always
+    valid, no network call needed to build it.
+    """
+    from urllib.parse import urlencode
+
+    params = {
+        "url1": f"{draft_name}-{from_rev}",
+        "url2": f"{draft_name}-{to_rev}",
+        "difftype": "--html",
+    }
+    return f"{_IDDIFF_TOOL_BASE}?{urlencode(params)}"
+
+
+def _format_evolution_hits(hits: list[str]) -> tuple[str, list[tuple[str, str, str, str]]]:
+    """Like _format_hits, but appends a cheap, always-available "Live diff"
+    citation URL to each hit -- parsed straight from the hit's own
+    self-describing header (draft:X from:A to:B), zero extra network calls.
+    Give the agent something to cite immediately; cite_iddiff_url (a
+    separate, explicit tool) is for when it wants the pricier, more precise
+    version that jumps to the exact changed hunk on that page.
+
+    Also returns the raw (header, from_rev, to_rev, url) tuples for every
+    hit, in rank order -- ask()'s _finalize_answer uses these to find the
+    citation that actually matches what the final answer discusses, rather
+    than blindly citing rank [1] (confirmed necessary: a real run cited the
+    correct revision pair inline in its own text while the top-ranked
+    evolution hit for that query was a *different*, less relevant pair).
+    """
+    if not hits:
+        return "(no results)", []
+    blocks = []
+    citations: list[tuple[str, str, str, str]] = []
+    for i, hit in enumerate(hits, start=1):
+        match = _EVOLUTION_HEADER_RE.match(hit)
+        if match:
+            draft_name, from_rev, to_rev = match.groups()
+            url = _iddiff_page_url(draft_name, from_rev, to_rev)
+            header = hit.splitlines()[0]
+            citations.append((header, from_rev, to_rev, url))
+            blocks.append(f"[{i}] {hit}\nLive diff: {url}")
+        else:
+            blocks.append(f"[{i}] {hit}")
+    return "\n\n".join(blocks), citations
+
+
 def _http_get_text(url: str) -> str | None:
     import httpx
 
@@ -615,7 +599,71 @@ def _diff_draft_revisions(draft_name: str, from_revision: str, to_revision: str,
     if not diff_text.strip():
         return f"iddiff found no textual differences between {draft_name}-{from_rev} and {draft_name}-{to_rev}."
     label = f"{draft_name} rev {from_rev} -> rev {to_rev}, via the independent iddiff tool (not the evolution dataset)"
-    return _filter_primary_source_text(diff_text, query, source_label=label)
+    citation_url = _iddiff_page_url(draft_name, from_rev, to_rev)
+    return f"{_filter_primary_source_text(diff_text, query, source_label=label)}\n\nLive diff: {citation_url}"
+
+
+def _find_iddiff_anchor(page_url: str, query: str) -> str | None:
+    """Fetch a rendered author-tools.ietf.org iddiff page and find which
+    numbered hunk (<tr id="diffNNNN">, one per contiguous changed block)
+    contains *query* -- confirmed directly against a real page that every
+    hunk gets one of these anchors, in document order. Returns the anchor id
+    (e.g. "diff0023") or None if the page can't be fetched or nothing
+    matches (ambiguous multi-hunk matches are also treated as no match --
+    citing the wrong exact line would be worse than citing the whole page).
+    """
+    html = _http_get_text(page_url)
+    if html is None:
+        return None
+    parts = re.split(r'<tr id="(diff\d+)">', html)
+    needle = query.lower()
+    matches = []
+    for i in range(1, len(parts), 2):
+        hunk_id = parts[i]
+        hunk_text = re.sub(r"<[^>]+>", " ", parts[i + 1] if i + 1 < len(parts) else "")
+        hunk_text = re.sub(r"\s+", " ", hunk_text).lower()
+        if needle in hunk_text:
+            matches.append(hunk_id)
+    return matches[0] if len(matches) == 1 else None
+
+
+def _cite_iddiff_url(draft_name: str, from_revision: str, to_revision: str, query: str | None) -> str:
+    """Build a citable, clickable live-diff URL on IETF's own hosted
+    author-tools.ietf.org/iddiff service, optionally anchored to the exact
+    changed hunk. This is for producing something to put IN the final
+    answer for a human to click through, not evidence for the model to
+    read -- see _format_evolution_hits for the cheap version attached to
+    every evolution search hit automatically, and _diff_draft_revisions for
+    the independent-second-opinion tool this shares its URL-building with.
+    """
+    from_rev = from_revision.strip().zfill(2)
+    to_sentinel = to_revision.strip().lower()
+    if to_sentinel in ("rfc", "final"):
+        rfc_number = _resolve_rfc_number_for_draft(draft_name)
+        if not rfc_number:
+            return (
+                f"{draft_name} doesn't appear to have been published as an RFC yet -- "
+                "give a specific revision instead."
+            )
+        to_target = f"rfc{rfc_number}"
+        to_label = f"RFC {rfc_number}"
+    else:
+        to_rev = to_revision.strip().zfill(2)
+        to_target = f"{draft_name}-{to_rev}"
+        to_label = f"rev {to_rev}"
+
+    from urllib.parse import urlencode
+
+    params = {"url1": f"{draft_name}-{from_rev}", "url2": to_target, "difftype": "--html"}
+    url = f"{_IDDIFF_TOOL_BASE}?{urlencode(params)}"
+
+    if not query:
+        return f"{url}  ({draft_name} rev {from_rev} -> {to_label})"
+
+    anchor = _find_iddiff_anchor(url, query)
+    if anchor:
+        return f"{url}#{anchor}  ({draft_name} rev {from_rev} -> {to_label}, jumps to the matching hunk)"
+    return f"{url}  ({draft_name} rev {from_rev} -> {to_label}, couldn't pinpoint an exact hunk for {query!r})"
 
 
 def _verify_answer(draft_answer: str, evidence_log: list[str], model_instance) -> str:
@@ -659,6 +707,156 @@ def _tool(name: str, description: str, properties: dict, required: list[str]):
     )
 
 
+# Tool names are module-level constants (rather than only local variables
+# inside ask()) so a caller outside the agent loop -- serve_ui.py's tool
+# listing, for one -- can build the exact same tool set without duplicating
+# a second copy of these strings.
+EVOLUTION_TOOL_NAME = "search_ietf_evolution_dataset"
+MAILARCHIVE_TOOL_NAME = "search_ietf_mailarchive_dataset"
+FETCH_DRAFT_TOOL_NAME = "fetch_ietf_draft_text"
+FETCH_RFC_TOOL_NAME = "fetch_ietf_rfc_text"
+DIFF_REVISIONS_TOOL_NAME = "diff_ietf_draft_revisions"
+CITE_DIFF_TOOL_NAME = "cite_iddiff_url"
+DISCOVERY_TOOL_NAME = "list_available_ietf_corpora"
+VERIFY_TOOL_NAME = "verify_answer"
+
+
+def _build_tools() -> list:
+    """Build the actual tool schemas passed to invoke_llm() -- the real
+    descriptions the model uses to decide when to call each tool, not
+    prose written separately for a human. This is the single source of
+    truth for what each tool "does" in the agent's own words: ask() uses
+    it directly, and serve_ui.py's /api/tools endpoint calls it too, so
+    what a human sees in the UI can never drift from what the agent
+    actually operates under -- there was no other description to fall
+    back on to keep in sync, so this makes drift structurally impossible
+    instead of a discipline problem.
+    """
+    dataset_id_param = {"dataset_id": {"type": "string", "description": "dataset id, from list_available_ietf_corpora"}}
+    return [
+        _tool(
+            DISCOVERY_TOOL_NAME,
+            (
+                "List every IETF draft this instance has an evolution/decision "
+                "corpus for, its resolved working group, and the dataset_id of "
+                "its mailarchive corpus when one is available. Call this first "
+                "if you don't already know which dataset_id to search."
+            ),
+            {},
+            [],
+        ),
+        _tool(
+            EVOLUTION_TOOL_NAME,
+            "Search an evolution/decision dataset (tagged, section-level draft-revision diffs) by its dataset_id.",
+            {**dataset_id_param, "query": {"type": "string", "description": "search query"}},
+            ["dataset_id", "query"],
+        ),
+        _tool(
+            MAILARCHIVE_TOOL_NAME,
+            "Search a mailarchive dataset (working-group mailing-list discussion) by its dataset_id.",
+            {**dataset_id_param, "query": {"type": "string", "description": "search query"}},
+            ["dataset_id", "query"],
+        ),
+        _tool(
+            FETCH_DRAFT_TOOL_NAME,
+            "Fetch a specific revision of an IETF draft directly from ietf.org and optionally search it for a phrase.",
+            {
+                "draft_name": {"type": "string", "description": "e.g. draft-ietf-ledbat-congestion"},
+                "revision": {"type": "string", "description": "two-digit revision number, e.g. '09'"},
+                "query": {
+                    "type": "string",
+                    "description": "optional phrase -- only paragraphs containing it are returned",
+                },
+            },
+            ["draft_name", "revision"],
+        ),
+        _tool(
+            FETCH_RFC_TOOL_NAME,
+            "Fetch the final published RFC text directly from rfc-editor.org and optionally search it for a phrase.",
+            {
+                "rfc_number": {"type": "string", "description": "e.g. '6817' or 'RFC6817'"},
+                "query": {
+                    "type": "string",
+                    "description": "optional phrase -- only paragraphs containing it are returned",
+                },
+            },
+            ["rfc_number"],
+        ),
+        _tool(
+            DIFF_REVISIONS_TOOL_NAME,
+            (
+                "Diff two revisions of a draft directly with the independent `iddiff` "
+                "tool (not the evolution dataset's precomputed diff) and optionally "
+                "search the diff for a phrase. Use this as a second opinion when the "
+                "evolution dataset's diff for a change looks incomplete, ambiguous, "
+                "or doesn't turn up anything for a query you'd expect it to."
+            ),
+            {
+                "draft_name": {"type": "string", "description": "e.g. draft-ietf-ledbat-congestion"},
+                "from_revision": {"type": "string", "description": "two-digit revision number, e.g. '08'"},
+                "to_revision": {"type": "string", "description": "two-digit revision number, e.g. '09'"},
+                "query": {
+                    "type": "string",
+                    "description": "optional phrase -- only diff blocks containing it are returned",
+                },
+            },
+            ["draft_name", "from_revision", "to_revision"],
+        ),
+        _tool(
+            CITE_DIFF_TOOL_NAME,
+            (
+                "Build a live, clickable citation URL on IETF's own hosted diff "
+                "viewer (author-tools.ietf.org) for a specific change, so a human "
+                "reader can verify it themselves instead of trusting your summary. "
+                "Every evolution-dataset search result already comes with a "
+                "'Live diff' URL for free -- call this instead only when you want "
+                "a MORE precise link that jumps straight to the exact changed "
+                "hunk (pass the distinctive phrase you're citing as query). Set "
+                "to_revision to 'rfc' to cite against the final published RFC "
+                "instead of another draft revision."
+            ),
+            {
+                "draft_name": {"type": "string", "description": "e.g. draft-ietf-ledbat-congestion"},
+                "from_revision": {"type": "string", "description": "two-digit revision number, e.g. '08'"},
+                "to_revision": {
+                    "type": "string",
+                    "description": "two-digit revision number, e.g. '09' -- or 'rfc' for the final published RFC",
+                },
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "a distinctive phrase from the exact change you're citing, to jump to that hunk "
+                        "precisely -- omit to just link the whole diff page"
+                    ),
+                },
+            },
+            ["draft_name", "from_revision", "to_revision"],
+        ),
+        _tool(
+            VERIFY_TOOL_NAME,
+            "Audit a draft answer against the evidence retrieved so far, with fresh eyes, before finalizing.",
+            {"draft_answer": {"type": "string", "description": "the full draft answer to check"}},
+            ["draft_answer"],
+        ),
+    ]
+
+
+def tool_summaries() -> list[dict]:
+    """Plain-dict {name, description} for every tool, straight from
+    _build_tools() -- for a caller (serve_ui.py) that wants to display what
+    each tool does without duplicating the description text by hand.
+    """
+    return [{"name": t.name, "description": t.description} for t in _build_tools()]
+
+
+def skill_texts() -> dict[str, str]:
+    """The agent's own orchestration instructions, verbatim -- for a caller
+    (serve_ui.py) that wants to show HOW the tools above get combined into an
+    answer, not just what each one does in isolation.
+    """
+    return {"agent": _INSTRUCTION, "verify": _VERIFY_INSTRUCTION}
+
+
 def ask(
     query: str,
     evolution_dataset_id: str | None = None,
@@ -668,7 +866,17 @@ def ask(
     model_name: str = "google/gemini-2.5-flash",
     mail_top_k: int = 50,
     verbose: bool = False,
+    trace: list[dict] | None = None,
 ) -> str:
+    """... (see module docstring for the full design).
+
+    trace: optional list to append structured tool-call events to (tool
+    name, args, iteration, whether it was self-directed or safety-net
+    forced, and a preview of what it returned) -- for a caller that wants
+    to show the tool-call activity itself (e.g. a UI), not just the final
+    answer. None (the default) skips this entirely; every existing
+    caller (CLI, battery scripts) omits it and is unaffected.
+    """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import (
         AssistantPromptMessage,
@@ -724,91 +932,15 @@ def ask(
     else:
         tenant_id = db.session.query(Tenant).first().id
 
-    evolution_tool_name = "search_ietf_evolution_dataset"
-    mailarchive_tool_name = "search_ietf_mailarchive_dataset"
-    fetch_draft_tool_name = "fetch_ietf_draft_text"
-    fetch_rfc_tool_name = "fetch_ietf_rfc_text"
-    diff_revisions_tool_name = "diff_ietf_draft_revisions"
-    discovery_tool_name = "list_available_ietf_corpora"
-    verify_tool_name = "verify_answer"
-
-    dataset_id_param = {"dataset_id": {"type": "string", "description": "dataset id, from list_available_ietf_corpora"}}
-    tools = [
-        _tool(
-            discovery_tool_name,
-            (
-                "List every IETF draft this instance has an evolution/decision "
-                "corpus for, its resolved working group, and the dataset_id of "
-                "its mailarchive corpus when one is available. Call this first "
-                "if you don't already know which dataset_id to search."
-            ),
-            {},
-            [],
-        ),
-        _tool(
-            evolution_tool_name,
-            "Search an evolution/decision dataset (tagged, section-level draft-revision diffs) by its dataset_id.",
-            {**dataset_id_param, "query": {"type": "string", "description": "search query"}},
-            ["dataset_id", "query"],
-        ),
-        _tool(
-            mailarchive_tool_name,
-            "Search a mailarchive dataset (working-group mailing-list discussion) by its dataset_id.",
-            {**dataset_id_param, "query": {"type": "string", "description": "search query"}},
-            ["dataset_id", "query"],
-        ),
-        _tool(
-            fetch_draft_tool_name,
-            "Fetch a specific revision of an IETF draft directly from ietf.org and optionally search it for a phrase.",
-            {
-                "draft_name": {"type": "string", "description": "e.g. draft-ietf-ledbat-congestion"},
-                "revision": {"type": "string", "description": "two-digit revision number, e.g. '09'"},
-                "query": {
-                    "type": "string",
-                    "description": "optional phrase -- only paragraphs containing it are returned",
-                },
-            },
-            ["draft_name", "revision"],
-        ),
-        _tool(
-            fetch_rfc_tool_name,
-            "Fetch the final published RFC text directly from rfc-editor.org and optionally search it for a phrase.",
-            {
-                "rfc_number": {"type": "string", "description": "e.g. '6817' or 'RFC6817'"},
-                "query": {
-                    "type": "string",
-                    "description": "optional phrase -- only paragraphs containing it are returned",
-                },
-            },
-            ["rfc_number"],
-        ),
-        _tool(
-            diff_revisions_tool_name,
-            (
-                "Diff two revisions of a draft directly with the independent `iddiff` "
-                "tool (not the evolution dataset's precomputed diff) and optionally "
-                "search the diff for a phrase. Use this as a second opinion when the "
-                "evolution dataset's diff for a change looks incomplete, ambiguous, "
-                "or doesn't turn up anything for a query you'd expect it to."
-            ),
-            {
-                "draft_name": {"type": "string", "description": "e.g. draft-ietf-ledbat-congestion"},
-                "from_revision": {"type": "string", "description": "two-digit revision number, e.g. '08'"},
-                "to_revision": {"type": "string", "description": "two-digit revision number, e.g. '09'"},
-                "query": {
-                    "type": "string",
-                    "description": "optional phrase -- only diff blocks containing it are returned",
-                },
-            },
-            ["draft_name", "from_revision", "to_revision"],
-        ),
-        _tool(
-            verify_tool_name,
-            "Audit a draft answer against the evidence retrieved so far, with fresh eyes, before finalizing.",
-            {"draft_answer": {"type": "string", "description": "the full draft answer to check"}},
-            ["draft_answer"],
-        ),
-    ]
+    evolution_tool_name = EVOLUTION_TOOL_NAME
+    mailarchive_tool_name = MAILARCHIVE_TOOL_NAME
+    fetch_draft_tool_name = FETCH_DRAFT_TOOL_NAME
+    fetch_rfc_tool_name = FETCH_RFC_TOOL_NAME
+    diff_revisions_tool_name = DIFF_REVISIONS_TOOL_NAME
+    cite_diff_tool_name = CITE_DIFF_TOOL_NAME
+    discovery_tool_name = DISCOVERY_TOOL_NAME
+    verify_tool_name = VERIFY_TOOL_NAME
+    tools = _build_tools()
 
     # When hints are given (as every existing battery test script does), tell
     # the model directly instead of letting it burn a turn on discovery just
@@ -842,8 +974,77 @@ def ask(
     discovery_forced = False
     last_evolution_call = None  # (query, observation) -- used to build a forced mailarchive query if needed
     evidence_log: list[str] = []  # every dataset/fetch observation, fed to verify_answer
+    evolution_citations: list[tuple[str, str, str, str]] = []  # (header, from_rev, to_rev, url), every hit ever seen
 
-    def _run_tool_call(tool_name: str, args: dict, iteration: int) -> str:
+    def _mentions_revision_pair(text: str, from_rev: str, to_rev: str) -> bool:
+        def mentions(rev: str) -> bool:
+            # "rev 08" / "revision 08" / "rev. 8" -- require the word so
+            # bare digits from dates ("2008") or other numbers don't match.
+            pattern = rf"rev(?:ision)?\.?\s*0*{int(rev)}\b"
+            return re.search(pattern, text, re.IGNORECASE) is not None
+
+        return mentions(from_rev) and mentions(to_rev)
+
+    def _finalize_answer(content: str) -> str:
+        """Append a live-diff citation footer for a human to click through --
+        in Python, not left to the model to remember. Testing showed it
+        reliably read the "Live diff" URL that comes free with every
+        evolution hit as evidence, but didn't reliably reproduce it in the
+        final answer text even when explicitly instructed to; the earlier
+        mailarchive-search and verify_answer safety nets exist for the exact
+        same reason -- prompt compliance for something that matters isn't
+        the same as guaranteeing it.
+
+        Skips entirely if the model already cited one itself (confirmed this
+        happens sometimes) -- trust it rather than risk citing a different,
+        wrong pair alongside a correct inline one. Otherwise picks whichever
+        seen evolution hit has its revision pair actually mentioned in the
+        answer text, not just the top-ranked hit of the last search: a real
+        run cited "revision 08"/"revision 09" inline while the top-ranked
+        hit for that query was a different, less relevant rev04->rev05 pair
+        -- rank order in a search isn't the same as relevance to the answer
+        that got written from it. Falls back to the most recent search's
+        top hit only when nothing in the answer text matches anything seen.
+        """
+        if "author-tools.ietf.org/iddiff" in content:
+            return content
+        for header, from_rev, to_rev, url in evolution_citations:
+            if _mentions_revision_pair(content, from_rev, to_rev):
+                return f"{content}\n\n---\nLive diff: {url}\n({header})"
+        # Nothing in the answer text matched a seen hit's revision pair --
+        # fall back to the most recent search's own top (rank [1]) hit.
+        if last_evolution_call:
+            match = re.search(
+                r"^\[1\] (ietf-evolution draft:\S+ from:\S+ to:\S+ section:\S+ change:\S+ \| [^\n]+)"
+                r"\n.*?Live diff: (\S+)",
+                last_evolution_call[1],
+                re.DOTALL,
+            )
+            if match:
+                header, url = match.groups()
+                return f"{content}\n\n---\nLive diff: {url}\n({header})"
+        return content
+
+    def _run_tool_call(tool_name: str, args: dict, iteration: int, forced: bool = False) -> str:
+        """Thin wrapper around _dispatch_tool_call that records a trace
+        entry when the caller asked for one (see ask()'s trace param) --
+        kept separate from dispatch itself so every call path (model-
+        initiated and safety-net forced) is traced uniformly in one place.
+        """
+        observation = _dispatch_tool_call(tool_name, args, iteration)
+        if trace is not None:
+            trace.append(
+                {
+                    "tool": tool_name,
+                    "args": args,
+                    "iteration": iteration,
+                    "forced": forced,
+                    "observation_preview": (observation[:400] + " …") if len(observation) > 400 else observation,
+                }
+            )
+        return observation
+
+    def _dispatch_tool_call(tool_name: str, args: dict, iteration: int) -> str:
         # Split across two statements to stay under the line-length limit;
         # ruff's FURB154 wants these merged, which would violate E501 instead.
         nonlocal mailarchive_called, last_evolution_call, verify_called, discovery_called  # noqa: FURB154
@@ -880,11 +1081,13 @@ def ask(
                     file=sys.stderr,
                 )
             hits = _retrieve(dataset, refined_query, top_k=top_k)
-            observation = _format_hits(hits)
             if is_mailarchive:
+                observation = _format_hits(hits)
                 mailarchive_called = True
                 mailarchive_dataset_id_candidate = dataset_id
             else:
+                observation, citations = _format_evolution_hits(hits)
+                evolution_citations.extend(citations)
                 last_evolution_call = (refined_query, observation)
                 evolution_dataset_id_candidate = dataset_id
             evidence_log.append(observation)
@@ -927,6 +1130,21 @@ def ask(
             evidence_log.append(observation)
             return observation
 
+        if tool_name == cite_diff_tool_name:
+            draft_name = args.get("draft_name", "")
+            from_revision = args.get("from_revision", "")
+            to_revision = args.get("to_revision", "")
+            cite_query = args.get("query")
+            if verbose:
+                print(
+                    f"[iter {iteration}] {tool_name} draft={draft_name!r} "
+                    f"from={from_revision!r} to={to_revision!r} query={cite_query!r}",
+                    file=sys.stderr,
+                )
+            # Not appended to evidence_log: this is a citation URL to embed
+            # in the final answer, not evidence to fact-check claims against.
+            return _cite_iddiff_url(draft_name, from_revision, to_revision, cite_query)
+
         if tool_name == verify_tool_name:
             draft_answer = args.get("draft_answer", "")
             if verbose:
@@ -937,7 +1155,7 @@ def ask(
         return f"there is no tool named {tool_name}"
 
     def _force_tool_call(tool_name: str, args: dict, content: str, iteration: int) -> None:
-        observation = _run_tool_call(tool_name, args, iteration)
+        observation = _run_tool_call(tool_name, args, iteration, forced=True)
         forced_call_id = str(uuid.uuid4())
         prompt_messages.append(
             AssistantPromptMessage(
@@ -974,7 +1192,7 @@ def ask(
 
         if not message.tool_calls:
             if is_last:
-                return content
+                return _finalize_answer(content)
 
             if (
                 not evolution_dataset_id_candidate
@@ -1021,7 +1239,7 @@ def ask(
                 _force_tool_call(verify_tool_name, {"draft_answer": content}, content, iteration)
                 continue
 
-            return content
+            return _finalize_answer(content)
 
         assistant_msg = AssistantPromptMessage(content=content, tool_calls=message.tool_calls)
         prompt_messages.append(assistant_msg)
@@ -1038,7 +1256,7 @@ def ask(
 
     # Ran out of iterations while the model still wanted to call tools; the
     # final iteration above was forced tool-free, so `content` holds its answer.
-    return content
+    return _finalize_answer(content)
 
 
 def main() -> None:

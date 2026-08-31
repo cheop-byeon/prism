@@ -110,6 +110,10 @@ celerybeat.pid
 .env
 .env-local
 *.env.bak
+# Generated compose overrides that embed a full resolved environment
+# (real secrets from docker/.env, itself gitignored above) -- see
+# api/scripts/agentic_rag/serve_ui.py's docker-compose.ietf-ui.yaml.
+docker/docker-compose.ietf-ui.yaml
 .venv
 env/
 venv/
