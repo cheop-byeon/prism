@@ -247,6 +247,15 @@ class IetfDraftEvolutionRequest(BaseModel):
     draft_name: str = Field(..., min_length=1, description="Base draft name, e.g. draft-ietf-quic-transport")
     diff_format: Literal["prose", "patch"] = Field(default="prose")
     skip_minor_edits: bool = Field(default=False)
+    split_modified_paragraphs: bool = Field(
+        default=False,
+        description=(
+            "Emit one chunk per paragraph-level change within a modified section "
+            "instead of one chunk per section, so keyword retrieval for one "
+            "specific change doesn't compete against unrelated changes bundled "
+            "into the same chunk."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -260,6 +269,7 @@ class IetfDraftEvolutionApi(Resource):
             payload.draft_name,
             diff_format=payload.diff_format,
             skip_minor_edits=payload.skip_minor_edits,
+            split_modified_paragraphs=payload.split_modified_paragraphs,
         )
 
 

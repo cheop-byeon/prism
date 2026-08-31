@@ -634,13 +634,13 @@ class IetfImportService:
         return [p.strip() for p in re.split(r'\n{2,}', text) if p.strip()]
 
     @staticmethod
-    def _prose_diff(old_text: str, new_text: str, from_rev: str, to_rev: str) -> str:
-        """Return a human-readable paragraph-level diff as plain prose.
+    def _prose_diff_blocks(old_text: str, new_text: str, from_rev: str, to_rev: str) -> list[str]:
+        """Return each paragraph-level change as its own prose block.
 
-        Uses SequenceMatcher on the paragraph list so the output describes what
-        actually changed in plain English rather than patch-format noise.
-        Returns an empty string when no paragraph-level differences are found
-        (caller should fall back to showing the full before/after texts).
+        Uses SequenceMatcher on the paragraph list so each block describes one
+        actual change in plain English rather than patch-format noise. Returns
+        an empty list when no paragraph-level differences are found (caller
+        should fall back to showing the full before/after texts).
         """
         old_paras = IetfImportService._split_paragraphs(old_text)
         new_paras = IetfImportService._split_paragraphs(new_text)
@@ -665,7 +665,17 @@ class IetfImportService:
             elif tag == 'insert':
                 for p in new_block:
                     blocks.append(f"Added in rev {to_rev}:\n{p}")
-        return '\n\n'.join(blocks)
+        return blocks
+
+    @staticmethod
+    def _prose_diff(old_text: str, new_text: str, from_rev: str, to_rev: str) -> str:
+        """Return a human-readable paragraph-level diff as plain prose.
+
+        Joins all of ``_prose_diff_blocks`` into a single body. Returns an
+        empty string when no paragraph-level differences are found (caller
+        should fall back to showing the full before/after texts).
+        """
+        return '\n\n'.join(IetfImportService._prose_diff_blocks(old_text, new_text, from_rev, to_rev))
 
     @staticmethod
     def _section_line_spans(text: str) -> dict[str, tuple[int, int]]:
@@ -748,8 +758,24 @@ class IetfImportService:
         old_spans: dict[str, tuple[int, int]] | None = None,
         new_spans: dict[str, tuple[int, int]] | None = None,
         skip_minor_edits: bool = False,
+        split_modified_paragraphs: bool = False,
     ) -> list[dict]:
-        """Return change records for every section that differs between two revisions."""
+        """Return change records for every section that differs between two revisions.
+
+        A "modified" section can bundle several unrelated paragraph-level
+        changes (e.g. four different parameters all defined in one "Parameter
+        Values" section) into what would otherwise be a single long, topically
+        mixed chunk — which measurably hurts keyword retrieval for a query
+        about just one of those changes (a real, DB-verified case: a genuine
+        INIT_CWND value change was retrievable in the corpus but never ranked
+        in the top 50 hits for "INIT_CWND" out of 328 segments, because it sat
+        in a chunk that also talked about ALLOWED_INCREASE, GAIN, and
+        CURRENT_FILTER). ``split_modified_paragraphs=True`` emits one record
+        per paragraph-level change instead of one per section, so each
+        retrievable chunk stays about one specific change. Off by default —
+        this is opt-in so any existing evolution dataset built by the default
+        path is unaffected by this change.
+        """
         records: list[dict] = []
         sort_key = IetfImportService._section_sort_key
         for sec_id in sorted(set(old) | set(new), key=sort_key):
@@ -776,6 +802,57 @@ class IetfImportService:
             if IetfImportService._SKIP_SECTION_RE.match(section_title):
                 continue
 
+            # Embed a parseable header as the first line so metadata is
+            # recoverable from the DB content even without the vector store.
+            # Must NOT start with punctuation/symbols — remove_leading_symbols()
+            # in the indexing pipeline strips those characters from the start.
+            header = (
+                f"ietf-evolution draft:{draft_name} "
+                f"from:{from_rev} to:{to_rev} "
+                f"section:{sec_id} change:{change_type} "
+                f"| {section_title}"
+            )
+
+            def _base_record(
+                sec_id: str = sec_id,
+                change_type: str = change_type,
+                similarity: float | None = similarity,
+                section_title: str = section_title,
+            ) -> dict:
+                # Default args bind these to *this* loop iteration's values at
+                # def time, not whatever they are when the closure is later
+                # called (it's always called within the same iteration here,
+                # but binding explicitly avoids relying on that).
+                record: dict = {
+                    "draft_name": draft_name,
+                    "from_rev": from_rev,
+                    "to_rev": to_rev,
+                    "section_id": sec_id,
+                    "section_title": section_title,
+                    "change_type": change_type,
+                }
+                # Line spans anchor the section in each ORIGINAL revision text.
+                # Only stable within a revision (RFC text is reflowed between
+                # revisions); section_id remains the cross-revision key.
+                if old_spans and sec_id in old_spans:
+                    record["from_lines"] = f"{old_spans[sec_id][0]}-{old_spans[sec_id][1]}"
+                if new_spans and sec_id in new_spans:
+                    record["to_lines"] = f"{new_spans[sec_id][0]}-{new_spans[sec_id][1]}"
+                if similarity is not None:
+                    record["similarity"] = f"{similarity:.3f}"
+                return record
+
+            if change_type == "modified" and diff_format == "prose" and split_modified_paragraphs:
+                blocks = IetfImportService._prose_diff_blocks(old_text, new_text, from_rev, to_rev)
+                if blocks:
+                    for block in blocks:
+                        record = _base_record()
+                        record["content"] = f"{header}\n\n{block}"
+                        records.append(record)
+                    continue
+                # No paragraph-level boundaries found — fall through to the
+                # single-record full before/after body below.
+
             # Added/removed sections carry their full text in both formats;
             # only "modified" bodies differ by diff_format.
             if change_type == "added":
@@ -793,37 +870,10 @@ class IetfImportService:
                     # No paragraph-level boundaries found — show full before/after.
                     body = f"Before (rev {from_rev}):\n{old_text}\n\nAfter (rev {to_rev}):\n{new_text}"
 
-            # Embed a parseable header as the first line so metadata is
-            # recoverable from the DB content even without the vector store.
-            # Must NOT start with punctuation/symbols — remove_leading_symbols()
-            # in the indexing pipeline strips those characters from the start.
-            header = (
-                f"ietf-evolution draft:{draft_name} "
-                f"from:{from_rev} to:{to_rev} "
-                f"section:{sec_id} change:{change_type} "
-                f"| {section_title}"
-            )
-            content = f"{header}\n\n{body}"
+            record = _base_record()
             # `content` is promoted to page_content by JsonlExtractor; everything
             # else becomes chunk metadata (draft_name, from_rev, to_rev, …).
-            record = {
-                "content": content,
-                "draft_name": draft_name,
-                "from_rev": from_rev,
-                "to_rev": to_rev,
-                "section_id": sec_id,
-                "section_title": section_title,
-                "change_type": change_type,
-            }
-            # Line spans anchor the section in each ORIGINAL revision text.
-            # Only stable within a revision (RFC text is reflowed between
-            # revisions); section_id remains the cross-revision key.
-            if old_spans and sec_id in old_spans:
-                record["from_lines"] = f"{old_spans[sec_id][0]}-{old_spans[sec_id][1]}"
-            if new_spans and sec_id in new_spans:
-                record["to_lines"] = f"{new_spans[sec_id][0]}-{new_spans[sec_id][1]}"
-            if similarity is not None:
-                record["similarity"] = f"{similarity:.3f}"
+            record["content"] = f"{header}\n\n{body}"
             records.append(record)
         return records
 
@@ -909,6 +959,7 @@ class IetfImportService:
         draft_name: str,
         diff_format: Literal["prose", "patch"] = "prose",
         skip_minor_edits: bool = False,
+        split_modified_paragraphs: bool = False,
     ) -> tuple[dict, int]:
         """Fetch every plain-text revision of a draft, diff them section by
         section, and upload the resulting change-log as a JSONL dataset file.
@@ -923,6 +974,12 @@ class IetfImportService:
 
         Boilerplate sections (ToC, References, Authors, Acknowledgements, …)
         are excluded; only normative content sections are diffed.
+
+        ``split_modified_paragraphs`` (default off, see ``_diff_version_pair``)
+        emits one chunk per paragraph-level change within a modified section
+        instead of one chunk per section, so a query about one specific
+        change doesn't have to compete for keyword rank against unrelated
+        changes bundled into the same chunk.
         """
         sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
         parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
@@ -941,12 +998,14 @@ class IetfImportService:
                     old_spans=spans[from_rev],
                     new_spans=spans[to_rev],
                     skip_minor_edits=skip_minor_edits,
+                    split_modified_paragraphs=split_modified_paragraphs,
                 )
             )
 
         jsonl_bytes = '\n'.join(json.dumps(r) for r in all_changes).encode()
         format_suffix = "-patch" if diff_format == "patch" else ""
-        filename = f"{draft_name}-evolution{format_suffix}.jsonl"
+        granularity_suffix = "-paragraph" if split_modified_paragraphs else ""
+        filename = f"{draft_name}-evolution{format_suffix}{granularity_suffix}.jsonl"
 
         try:
             user, _ = current_account_with_tenant()
