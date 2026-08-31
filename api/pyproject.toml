@@ -30,6 +30,7 @@ dependencies = [
     "googleapis-common-protos>=1.65.0",
     "gunicorn~=25.1.0",
     "httpx[socks]~=0.28.0",
+    "iddiff~=0.5.1",
     "jieba==0.42.1",
     "rank-bm25>=0.2.2",
     "json-repair>=0.55.1",
