@@ -131,9 +131,27 @@ dataset selection something the agent discovers, not something we pre-wire:
   or more than one draft matched with no way to know which one is meant) --
   forcing an arbitrary dataset id would be worse than not forcing at all.
 
-With only one draft actually in the system today, none of this changes
-observed behavior yet -- it's the infrastructure for when a second one is
-added, not a demonstration that spans multiple drafts.
+Verified end-to-end with a second draft (draft-ietf-sidr-bgpsec-protocol /
+RFC 8205, WG sidr) added purely to prove this generalizes -- zero dataset
+hints, correct discovery, correct answer, citations checked against the
+raw retrieval.
+
+Two more additions make this practical for how people actually ask
+questions, not just how the discovery mechanism happens to work internally:
+
+- list_available_ietf_corpora's catalog now also resolves and shows each
+  draft's published RFC number (via the datatracker doc-page redirect --
+  the draft-keyed API record's own rfc/rfc_number fields are always null,
+  confirmed directly, even for long-published drafts). People naturally
+  say "why does RFC 8205 ..." rather than naming the draft file, and
+  without this the agent had no way to connect the two.
+- A --draft CLI flag (name, RFC number, or WG acronym) resolves eagerly
+  against that same catalog before the agent loop starts, converting to
+  the same dataset-id hints --evolution-dataset/--dataset already
+  support -- a human-typeable alternative to raw UUIDs nobody would
+  actually know, with the same efficiency win of skipping discovery
+  entirely when given. An unresolvable or ambiguous hint fails loudly
+  with the list of known drafts rather than silently guessing one.
 
 No Dify core files are touched, and neither the existing sync_decision_bot*.py
 chatflow nor sync_decision_agent.py's Agent app are modified -- this is a new,
@@ -370,14 +388,45 @@ def _resolve_wg_for_draft(draft_name: str) -> str | None:
         return None
 
 
+def _resolve_rfc_number_for_draft(draft_name: str) -> str | None:
+    """Live lookup of the RFC number a draft was published as, if any.
+
+    Datatracker's draft-keyed document record always has rfc/rfc_number set
+    to null (checked directly -- confirmed even for long-published drafts),
+    so the only lookup that actually works is the plain doc page's redirect:
+    https://datatracker.ietf.org/doc/<draft_name>/ 302s to
+    https://datatracker.ietf.org/doc/rfcNNNN/ once a draft is published,
+    and just stays on the draft's own page otherwise. Returns None if
+    unpublished or on any lookup failure.
+    """
+    import httpx
+
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(f"{_DATATRACKER_BASE}/doc/{draft_name}/")
+            if resp.status_code != 200:
+                return None
+            match = re.search(r"/doc/rfc(\d+)/", str(resp.url))
+            return match.group(1) if match else None
+    except httpx.HTTPError:
+        return None
+
+
 def _list_available_corpora() -> tuple[str, list[dict]]:
     """Return (formatted catalog for the tool observation, structured catalog).
 
-    The structured form is `[{draft_name, wg, evolution_dataset_id,
+    The structured form is `[{draft_name, rfc_number, wg, evolution_dataset_id,
     mailarchive_dataset_id}]` -- used by ask() to auto-seed the mailarchive
     safety net's candidate dataset id when there's exactly one unambiguous
     draft (today's reality; deliberately not guessed at when there's more
-    than one).
+    than one), and to resolve a user-given --draft hint (name, RFC number, or
+    WG acronym) to the right entry.
+
+    Includes each draft's published RFC number (when it has one) specifically
+    so a question phrased as "why does RFC 8205 ..." resolves correctly --
+    people reasonably refer to a published spec by its RFC number, not its
+    draft name, and the draft name alone (the only thing the content-signature
+    discovery in _discover_evolution_corpora can see) doesn't carry that.
     """
     corpora = _discover_evolution_corpora()
     by_draft: dict[str, list[dict]] = {}
@@ -393,16 +442,21 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
         entries = sorted(by_draft[draft_name], key=operator.itemgetter("created_at"), reverse=True)
         newest = entries[0]
         wg = _resolve_wg_for_draft(draft_name)
+        rfc_number = _resolve_rfc_number_for_draft(draft_name)
         mailarchive_dataset_id = _MAILARCHIVE_REGISTRY.get(wg) if wg else None
         catalog.append(
             {
                 "draft_name": draft_name,
+                "rfc_number": rfc_number,
                 "wg": wg,
                 "evolution_dataset_id": newest["dataset_id"],
                 "mailarchive_dataset_id": mailarchive_dataset_id,
             }
         )
-        lines.append(f"Draft: {draft_name}" + (f" (WG: {wg})" if wg else " (WG: could not be resolved)"))
+        rfc_suffix = f", published as RFC {rfc_number}" if rfc_number else " (not yet published as an RFC)"
+        lines.append(
+            f"Draft: {draft_name}{rfc_suffix}" + (f" (WG: {wg})" if wg else " (WG: could not be resolved)")
+        )
         for entry in entries:
             marker = " <- most recent, recommended" if entry is newest else ""
             lines.append(f"  evolution dataset_id={entry['dataset_id']} name={entry['dataset_name']!r}{marker}")
@@ -411,6 +465,25 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
         else:
             lines.append("  mailarchive dataset: none registered for this WG -- discussion search unavailable")
     return "\n".join(lines), catalog
+
+
+def _resolve_draft_hint(hint: str, catalog: list[dict]) -> dict | None:
+    """Match a human-given --draft hint (draft name, RFC number, or WG
+    acronym, in any casing) against a corpora catalog entry. Returns None if
+    it matches nothing or more than one entry -- callers should treat both as
+    "couldn't resolve" rather than guessing.
+    """
+    needle = hint.strip().lower()
+    needle_rfc = re.sub(r"^rfc\s*", "", needle)
+
+    matches = [
+        entry
+        for entry in catalog
+        if needle == entry["draft_name"].lower()
+        or (entry.get("wg") and needle == entry["wg"].lower())
+        or (entry.get("rfc_number") and needle_rfc == entry["rfc_number"])
+    ]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _retrieve(dataset, query: str, top_k: int) -> list[str]:
@@ -590,6 +663,7 @@ def ask(
     query: str,
     evolution_dataset_id: str | None = None,
     mailarchive_dataset_id: str | None = None,
+    draft: str | None = None,
     model_provider: str = "langgenius/openrouter/openrouter",
     model_name: str = "google/gemini-2.5-flash",
     mail_top_k: int = 50,
@@ -625,10 +699,28 @@ def ask(
     evolution_dataset_id_candidate = evolution_dataset_id
     mailarchive_dataset_id_candidate = mailarchive_dataset_id
 
-    if evolution_dataset_id:
-        tenant_id = _get_dataset(evolution_dataset_id).tenant_id
-    elif mailarchive_dataset_id:
-        tenant_id = _get_dataset(mailarchive_dataset_id).tenant_id
+    # A human-friendly --draft hint (name, RFC number, or WG acronym) is a
+    # deterministic fast path, same spirit as the raw dataset-id hints but
+    # something an actual person could plausibly type -- resolved eagerly so
+    # the agent skips discovery entirely, same efficiency win raw ids give.
+    # Doesn't override raw ids if both are somehow given.
+    if draft and not (evolution_dataset_id_candidate and mailarchive_dataset_id_candidate):
+        _, draft_catalog = _list_available_corpora()
+        resolved = _resolve_draft_hint(draft, draft_catalog)
+        if not resolved:
+            known = ", ".join(entry["draft_name"] for entry in draft_catalog) or "(none found)"
+            sys.exit(f"--draft {draft!r} did not match exactly one known draft. Known drafts: {known}")
+        if verbose:
+            print(f"[draft hint] {draft!r} resolved to {resolved['draft_name']}", file=sys.stderr)
+        if not evolution_dataset_id_candidate:
+            evolution_dataset_id_candidate = resolved["evolution_dataset_id"]
+        if not mailarchive_dataset_id_candidate and resolved.get("mailarchive_dataset_id"):
+            mailarchive_dataset_id_candidate = resolved["mailarchive_dataset_id"]
+
+    if evolution_dataset_id_candidate:
+        tenant_id = _get_dataset(evolution_dataset_id_candidate).tenant_id
+    elif mailarchive_dataset_id_candidate:
+        tenant_id = _get_dataset(mailarchive_dataset_id_candidate).tenant_id
     else:
         tenant_id = db.session.query(Tenant).first().id
 
@@ -956,6 +1048,15 @@ def main() -> None:
     parser.add_argument(
         "--evolution-dataset", default=None, help="evolution/decision dataset id (omit to let the agent discover it)"
     )
+    parser.add_argument(
+        "--draft",
+        default=None,
+        help=(
+            "which draft this question is about -- draft name, RFC number (e.g. '8205' or 'RFC 8205'), "
+            "or WG acronym. A human-friendly alternative to --dataset/--evolution-dataset; ignored if both "
+            "of those are given. Omit to let the agent discover it from the question itself."
+        ),
+    )
     parser.add_argument("--model", default="google/gemini-2.5-flash")
     parser.add_argument("--model-provider", default="langgenius/openrouter/openrouter")
     parser.add_argument("--mail-top-k", type=int, default=50)
@@ -970,6 +1071,7 @@ def main() -> None:
             query=args.query,
             evolution_dataset_id=args.evolution_dataset,
             mailarchive_dataset_id=args.dataset,
+            draft=args.draft,
             model_provider=args.model_provider,
             model_name=args.model,
             mail_top_k=args.mail_top_k,
