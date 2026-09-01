@@ -253,7 +253,11 @@ _DATATRACKER_BASE = "https://datatracker.ietf.org"
 # whenever a new WG's mailarchive dataset is built.
 _MAILARCHIVE_REGISTRY: dict[str, str] = {
     "ledbat": "bbcde280-4130-4dee-bbcb-73664cc43b58",
-    "sidr": "369c22a1-c5c5-41be-8be7-97daa311f8a2",
+    # Semantic/parent-child rebuild (hierarchical_model, matching LEDBAT's own
+    # convention), replacing the earlier BM25/economy build. The old BM25
+    # dataset (369c22a1-c5c5-41be-8be7-97daa311f8a2) is kept around, unused,
+    # as a fallback/comparison point rather than deleted outright.
+    "sidr": "929b0b5f-262f-46fd-88c7-940a96374373",
 }
 
 
