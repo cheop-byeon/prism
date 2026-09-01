@@ -252,12 +252,20 @@ _DATATRACKER_BASE = "https://datatracker.ietf.org"
 # a small, hand-maintained bridge until/unless that changes -- add an entry
 # whenever a new WG's mailarchive dataset is built.
 _MAILARCHIVE_REGISTRY: dict[str, str] = {
-    "ledbat": "bbcde280-4130-4dee-bbcb-73664cc43b58",
-    # Semantic/parent-child rebuild (hierarchical_model, matching LEDBAT's own
-    # convention), replacing the earlier BM25/economy build. The old BM25
-    # dataset (369c22a1-c5c5-41be-8be7-97daa311f8a2) is kept around, unused,
-    # as a fallback/comparison point rather than deleted outright.
-    "sidr": "929b0b5f-262f-46fd-88c7-940a96374373",
+    # Both entries point at BM25/economy datasets. A rigorous comparison
+    # (raw retrieval rank at top_k=50, plus full end-to-end answer quality)
+    # showed the semantic/parent-child convention -- originally thought to
+    # be the better choice, per LEDBAT's own earlier build -- actually
+    # measurably underperforms BM25 for this content on BOTH drafts: the
+    # lc_semantic sub-chunker over-fragments heavily-quoted, threaded mail
+    # text into tiny decontextualized pieces (some a single word), and those
+    # fragments crowd out substantive hits in semantic search results. The
+    # semantic datasets are kept, unused, as records rather than deleted:
+    # ledbat-new-new (bbcde280-4130-4dee-bbcb-73664cc43b58) and
+    # draft-ietf-sidr-bgpsec-protocol-mailarchive-semantic
+    # (929b0b5f-262f-46fd-88c7-940a96374373).
+    "ledbat": "cd7ef874-417e-45a6-a917-461e4cdf20c3",
+    "sidr": "369c22a1-c5c5-41be-8be7-97daa311f8a2",
 }
 
 
