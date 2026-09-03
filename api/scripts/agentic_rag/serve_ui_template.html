@@ -25,52 +25,50 @@
     display: flex; align-items: center; gap: 12px; flex-shrink: 0;
   }
   header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-  header .sub { color: var(--text-dim); font-size: 12px; }
-  .layout { flex: 1; display: flex; min-height: 0; }
-  .sidebar {
-    width: 300px; flex-shrink: 0; border-right: 1px solid var(--border);
-    padding: 16px; overflow-y: auto;
+
+  .draft-bar {
+    padding: 10px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
+    display: flex; align-items: center; gap: 10px;
   }
-  .sidebar h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 0 0 6px; }
-  .tools-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 12px; line-height: 1.4; }
-  .tool-card {
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
-    padding: 10px 12px; margin-bottom: 8px;
+  .draft-bar label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+
+  .tabs {
+    display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0; background: var(--panel);
   }
-  .tool-card .name { font-family: var(--mono); font-size: 12px; color: var(--accent); }
-  .tool-card .kind {
-    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
-    margin-left: 6px; font-weight: 600; color: #0a0e1a; background: var(--kind-color, var(--kind-other));
+  .tab-btn {
+    background: transparent; color: var(--text-dim); border: none; border-bottom: 2px solid transparent;
+    border-radius: 0; padding: 12px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
   }
-  .tool-card .desc { font-size: 11px; color: var(--text-dim); margin-top: 5px; line-height: 1.4; }
-  .skills { margin-top: 18px; }
-  .skills summary {
-    cursor: pointer; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
-    color: var(--text-dim); user-select: none;
-  }
-  .skill-block { margin-top: 10px; }
-  .skill-block h3 { font-size: 11px; color: var(--text); margin: 0 0 4px; }
-  .skill-block pre {
-    font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: pre-wrap;
-    word-break: break-word; background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 6px; padding: 10px; margin: 0; line-height: 1.45; max-height: 340px; overflow-y: auto;
-  }
-  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-  .controls {
-    padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; flex-shrink: 0;
-  }
+  .tab-btn:hover { color: var(--text); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  .tab-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .tab-pane { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .tab-pane.active { display: flex; }
+  #pane-howto.active { display: block; overflow-y: auto; padding: 20px; }
+
   select, input[type=text] {
     background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
     border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: var(--sans);
   }
-  select { flex-shrink: 0; min-width: 180px; }
+  select { flex-shrink: 0; min-width: 220px; }
   input[type=text] { flex: 1; }
   button {
     background: var(--accent); color: #0a0e1a; border: none; border-radius: 6px;
     padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
   }
   button:disabled { background: var(--accent-dim); color: var(--text-dim); cursor: default; }
-  .conversation { flex: 1; overflow-y: auto; padding: 20px; }
+
+  .controls, .thread-controls {
+    padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px;
+    flex-shrink: 0; align-items: center;
+  }
+  .thread-controls .hint { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+
+  .conversation, .thread-body-wrap { flex: 1; overflow-y: auto; padding: 20px; }
+  .empty-state { color: var(--text-dim); font-size: 13px; }
+
   .turn { max-width: 780px; margin: 0 auto 28px; }
   .turn .q { font-size: 14px; color: var(--text-dim); margin-bottom: 10px; }
   .turn .q strong { color: var(--text); }
@@ -98,23 +96,8 @@
     border-radius: 8px; padding: 12px 14px; font-size: 13px; font-family: var(--mono); white-space: pre-wrap;
   }
 
-  .thread-controls {
-    padding: 10px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px; flex-shrink: 0;
-    align-items: center;
-  }
-  .thread-controls input[type=text] { flex: 1; }
-  .thread-controls .hint { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
-  .thread-panel {
-    border-bottom: 1px solid var(--border); padding: 16px 20px; flex-shrink: 0;
-    max-height: 52vh; overflow-y: auto; background: var(--panel);
-  }
-  .thread-panel[hidden] { display: none; }
-  .thread-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
-  .thread-head h2 { font-size: 12px; margin: 0; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.06em; }
-  .thread-head button {
-    background: transparent; color: var(--text-dim); border: 1px solid var(--border);
-    padding: 3px 10px; font-size: 12px; font-weight: 500;
-  }
+  .thread-status { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
+  .thread-status b { color: var(--text); font-weight: 600; }
 
   .lane { margin-bottom: 26px; }
   .lane:last-child { margin-bottom: 0; }
@@ -194,43 +177,123 @@
     display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); margin-top: 14px;
   }
   .tail-note b { color: var(--text); font-family: var(--mono); font-weight: 600; }
+
+  .howto-content h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 0 0 6px; }
+  .tools-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 12px; line-height: 1.4; }
+  .tools-layout { display: flex; gap: 20px; align-items: flex-start; }
+  .tools-list { flex: 1; min-width: 0; max-width: 460px; }
+
+  .tool-row {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    margin-bottom: 6px; overflow: hidden;
+  }
+  .tool-row-head {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    background: transparent; border: none; border-radius: 0; padding: 9px 12px;
+    cursor: pointer; text-align: left; font-family: var(--sans);
+  }
+  .tool-row-head .name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .tool-row-head .kind {
+    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    margin-left: 6px; font-weight: 600; color: #0a0e1a; background: var(--kind-color, var(--kind-other));
+  }
+  .tool-row-head .chevron {
+    color: var(--text-dim); font-size: 10px; flex-shrink: 0; transition: transform 0.15s;
+  }
+  .tool-row.expanded > .tool-row-head .chevron { transform: rotate(90deg); }
+  .tool-row-body { padding: 0 12px 12px; display: none; }
+  .tool-row.expanded > .tool-row-body { display: block; }
+  .tool-row-body .internal-name { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-bottom: 6px; }
+  .tool-row-body .desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; margin-bottom: 10px; }
+  .detail-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--accent);
+    padding: 4px 10px; font-size: 11px; font-weight: 600;
+  }
+  .detail-btn:hover { border-color: var(--accent); }
+  .detail-btn.active { background: var(--accent); color: #0a0e1a; }
+
+  .tool-detail-panel {
+    flex: 1; min-width: 260px; max-width: 360px; position: sticky; top: 0;
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
+  }
+  .tool-detail-panel h3 { font-size: 13px; margin: 0 0 12px; color: var(--text); }
+  .detail-section { margin-bottom: 14px; }
+  .detail-section:last-child { margin-bottom: 0; }
+  .detail-label {
+    display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--accent); font-weight: 600; margin-bottom: 4px;
+  }
+  .detail-section p { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin: 0; }
+  .detail-section pre {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text); white-space: pre-wrap;
+    word-break: break-word; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 10px; margin: 0; line-height: 1.45;
+  }
+  .skills { margin-top: 22px; max-width: 640px; }
+  .skills .tool-row-body pre {
+    font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: pre-wrap;
+    word-break: break-word; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 10px; margin: 0; line-height: 1.45; max-height: 340px; overflow-y: auto;
+  }
+  .skills .count-badge {
+    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    margin-left: 6px; font-weight: 600; color: var(--text-dim); background: var(--bg); border: 1px solid var(--border);
+  }
+  .guardrail-list { margin-top: 10px; }
+  .guardrail-list .tool-row { background: var(--bg); }
+  .guardrail-row .desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; margin: 8px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>Decision Rationale Agent</h1>
-  <span class="sub">standalone local UI for ask_decision_agent.py -- not Dify Studio</span>
 </header>
-<div class="layout">
-  <div class="sidebar">
-    <h2>Tools (all hand-made -- none are in Dify's native tool picker)</h2>
-    <p class="tools-hint">Descriptions below are the model's actual tool instructions, not a separate summary.</p>
-    <div id="tools"></div>
-    <details class="skills">
-      <summary>Skill (how the tools get combined)</summary>
-      <div id="skills"></div>
-    </details>
-  </div>
-  <div class="main">
+<div class="draft-bar">
+  <label for="draft">Draft</label>
+  <select id="draft"><option value="">(let the agent discover)</option></select>
+</div>
+<div class="tabs">
+  <button class="tab-btn active" data-tab="ask">Ask</button>
+  <button class="tab-btn" data-tab="track">Track a Decision</button>
+  <button class="tab-btn" data-tab="howto">How it Works</button>
+</div>
+<div class="tab-content">
+  <section class="tab-pane active" id="pane-ask">
     <div class="controls">
-      <select id="draft"><option value="">(let the agent discover)</option></select>
       <input id="query" type="text" placeholder="Why was INIT_CWND set to 4?" />
       <button id="ask">Ask</button>
     </div>
+    <div class="conversation" id="conversation"></div>
+  </section>
+
+  <section class="tab-pane" id="pane-track">
     <div class="thread-controls">
       <input id="threadQuery" type="text" placeholder="Track a decision, e.g. &quot;An INIT_CWND of&quot;" />
       <button id="trackThread">Track</button>
       <span class="hint">tighter phrases work better than bare identifiers</span>
     </div>
-    <div class="thread-panel" id="threadPanel" hidden>
-      <div class="thread-head">
-        <h2 id="threadTitle">Decision thread</h2>
-        <button id="closeThread">Close</button>
-      </div>
+    <div class="thread-body-wrap">
+      <div class="thread-status" id="threadTitle"></div>
       <div id="threadBody"></div>
     </div>
-    <div class="conversation" id="conversation"></div>
-  </div>
+  </section>
+
+  <section class="tab-pane" id="pane-howto">
+    <div class="howto-content">
+      <h2>Tools</h2>
+      <p class="tools-hint">Click a tool for its actual instructions, then "Detail" for what it touches outside this script and an example call.</p>
+      <div class="tools-layout">
+        <div class="tools-list" id="tools"></div>
+        <div class="tool-detail-panel" id="toolDetailPanel">
+          <p class="empty-state">Click "Detail" on a tool to see it here.</p>
+        </div>
+      </div>
+      <div class="skills">
+        <h2>Skill (how the tools get combined)</h2>
+        <div id="skills"></div>
+      </div>
+    </div>
+  </section>
 </div>
 <div class="modal-overlay" id="discussionModal" hidden>
   <div class="modal-box">
@@ -243,11 +306,11 @@
   </div>
 </div>
 <script>
-const toolsEl = document.getElementById('tools');
 const draftEl = document.getElementById('draft');
 const queryEl = document.getElementById('query');
 const askBtn = document.getElementById('ask');
 const convEl = document.getElementById('conversation');
+const toolsEl = document.getElementById('tools');
 
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -257,35 +320,114 @@ function linkify(text) {
   return escapeHtml(text).replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
 
+document.querySelectorAll('.tab-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+    document.querySelectorAll('.tab-pane').forEach((p) => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`pane-${btn.dataset.tab}`).classList.add('active');
+  });
+});
+
+let toolDisplayNames = {};
+let toolsData = [];
+
 async function loadTools() {
   const res = await fetch('/api/tools');
   const tools = await res.json();
+  toolsData = tools;
+  toolDisplayNames = Object.fromEntries(tools.map(t => [t.name, t.display_name]));
   toolsEl.innerHTML = tools.map(t => `
-    <div class="tool-card">
-      <div>
-        <span class="name">${escapeHtml(t.name)}</span>
-        <span class="kind" style="--kind-color: var(--kind-${escapeHtml(t.kind)})">${escapeHtml(t.kind)}</span>
+    <div class="tool-row" data-tool="${escapeHtml(t.name)}">
+      <button class="tool-row-head">
+        <span>
+          <span class="name">${escapeHtml(t.display_name)}</span>
+          <span class="kind" style="--kind-color: var(--kind-${escapeHtml(t.kind)})">${escapeHtml(t.kind)}</span>
+        </span>
+        <span class="chevron">&#9656;</span>
+      </button>
+      <div class="tool-row-body">
+        <div class="internal-name">${escapeHtml(t.name)}</div>
+        <p class="desc">${escapeHtml(t.description)}</p>
+        <button class="detail-btn" data-tool="${escapeHtml(t.name)}">Detail &rarr;</button>
       </div>
-      <div class="desc">${escapeHtml(t.description)}</div>
     </div>
   `).join('');
 }
+
+function showToolDetail(name) {
+  const t = toolsData.find(x => x.name === name);
+  if (!t) return;
+  document.querySelectorAll('.detail-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === name));
+  document.getElementById('toolDetailPanel').innerHTML = `
+    <h3>${escapeHtml(t.display_name)}</h3>
+    <div class="detail-section">
+      <span class="detail-label">Uses</span>
+      <p>${escapeHtml(t.resource || 'Nothing outside this script.')}</p>
+    </div>
+    <div class="detail-section">
+      <span class="detail-label">Example</span>
+      <pre>${escapeHtml(t.example || '(no example)')}</pre>
+    </div>
+  `;
+}
+
+toolsEl.addEventListener('click', (e) => {
+  const detailBtn = e.target.closest('.detail-btn');
+  if (detailBtn) {
+    showToolDetail(detailBtn.dataset.tool);
+    return;
+  }
+  const head = e.target.closest('.tool-row-head');
+  if (head) {
+    head.closest('.tool-row').classList.toggle('expanded');
+  }
+});
 
 async function loadSkills() {
   const res = await fetch('/api/skills');
   const skills = await res.json();
   const skillsEl = document.getElementById('skills');
+  const n = skills.guardrails.length;
   skillsEl.innerHTML = `
-    <div class="skill-block">
-      <h3>Main agent</h3>
-      <pre>${escapeHtml(skills.agent)}</pre>
+    <div class="tool-row">
+      <button class="tool-row-head">
+        <span class="name">Main agent</span>
+        <span class="chevron">&#9656;</span>
+      </button>
+      <div class="tool-row-body">
+        <pre>${escapeHtml(skills.agent)}</pre>
+      </div>
     </div>
-    <div class="skill-block">
-      <h3>verify_answer fact-checker</h3>
-      <pre>${escapeHtml(skills.verify)}</pre>
+    <div class="tool-row">
+      <button class="tool-row-head">
+        <span><span class="name">Guardrails</span><span class="count-badge">${n}</span></span>
+        <span class="chevron">&#9656;</span>
+      </button>
+      <div class="tool-row-body">
+        <div class="guardrail-list">
+          ${skills.guardrails.map(g => `
+            <div class="tool-row guardrail-row">
+              <button class="tool-row-head">
+                <span class="name">${escapeHtml(g.name)}</span>
+                <span class="chevron">&#9656;</span>
+              </button>
+              <div class="tool-row-body">
+                <p class="desc">${escapeHtml(g.purpose)}</p>
+                <pre>${escapeHtml(g.instruction)}</pre>
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
     </div>
   `;
 }
+
+document.getElementById('skills').addEventListener('click', (e) => {
+  const head = e.target.closest('.tool-row-head');
+  if (head) head.closest('.tool-row').classList.toggle('expanded');
+});
 
 async function loadDrafts() {
   const res = await fetch('/api/corpora');
@@ -298,12 +440,14 @@ async function loadDrafts() {
   }
 }
 
+function toolLabel(name) { return toolDisplayNames[name] || name; }
+
 function renderTrace(trace) {
   if (!trace || !trace.length) return '';
   const items = trace.map(t => `
     <div class="trace-item">
       <div class="tool-line">
-        <span class="tool-name">${escapeHtml(t.tool)}</span>
+        <span class="tool-name">${escapeHtml(toolLabel(t.tool))}</span>
         ${t.forced ? '<span class="forced">[safety-net forced]</span>' : ''}
       </div>
       <div class="args">${escapeHtml(JSON.stringify(t.args))}</div>
@@ -313,7 +457,15 @@ function renderTrace(trace) {
   return `<details class="trace"><summary>${trace.length} tool call(s) -- click to inspect</summary>${items}</details>`;
 }
 
-async function ask() {
+function statusLineForEvent(event) {
+  if (event.stage === 'tool_call') {
+    return `${event.forced ? 'Auto-checking' : 'Using'}: ${toolLabel(event.tool)}…`;
+  }
+  if (event.stage === 'thinking') return event.message || 'Thinking…';
+  return event.message || 'Working…';
+}
+
+function ask() {
   const query = queryEl.value.trim();
   if (!query) return;
   askBtn.disabled = true;
@@ -321,31 +473,42 @@ async function ask() {
   const turn = document.createElement('div');
   turn.className = 'turn';
   const draftLabel = draftEl.value ? ` <em>(draft: ${escapeHtml(draftEl.value)})</em>` : '';
-  turn.innerHTML = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div><div class="loading">Thinking…</div>`;
+  const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
+  turn.innerHTML = qHtml + '<div class="loading">Starting…</div>';
   convEl.appendChild(turn);
   turn.scrollIntoView({behavior: 'smooth'});
+  const statusEl = turn.querySelector('.loading');
 
-  try {
-    const res = await fetch('/api/ask', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({query, draft: draftEl.value || null}),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      turn.innerHTML = turn.querySelector('.q').outerHTML + `<div class="error-box">${escapeHtml(data.error || 'Unknown error')}</div>`;
-    } else {
-      turn.innerHTML = turn.querySelector('.q').outerHTML
-        + `<div class="answer">${linkify(data.answer)}</div>`
-        + renderTrace(data.trace);
-    }
-  } catch (e) {
-    turn.innerHTML = turn.querySelector('.q').outerHTML + `<div class="error-box">${escapeHtml(String(e))}</div>`;
-  } finally {
+  const params = new URLSearchParams({query});
+  if (draftEl.value) params.set('draft', draftEl.value);
+  const source = new EventSource(`/api/ask?${params}`);
+  let finished = false;
+
+  const stop = () => {
+    finished = true;
+    source.close();
     askBtn.disabled = false;
     queryEl.value = '';
     turn.scrollIntoView({behavior: 'smooth'});
-  }
+  };
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      statusEl.textContent = statusLineForEvent(msg);
+    } else if (msg.type === 'result') {
+      turn.innerHTML = qHtml + `<div class="answer">${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace);
+      stop();
+    } else if (msg.type === 'error') {
+      turn.innerHTML = qHtml + `<div class="error-box">${escapeHtml(msg.message)}</div>`;
+      stop();
+    }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    turn.innerHTML = qHtml + '<div class="error-box">Connection lost.</div>';
+    stop();
+  };
 }
 
 askBtn.addEventListener('click', ask);
@@ -353,8 +516,6 @@ queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
 
 const threadQueryEl = document.getElementById('threadQuery');
 const trackThreadBtn = document.getElementById('trackThread');
-const closeThreadBtn = document.getElementById('closeThread');
-const threadPanel = document.getElementById('threadPanel');
 const threadTitle = document.getElementById('threadTitle');
 const threadBody = document.getElementById('threadBody');
 
@@ -384,31 +545,42 @@ function chatIconSvg() {
 
 let currentThreadData = null;
 
-async function trackDecision() {
+function trackDecision() {
   const draft = draftEl.value;
   const query = threadQueryEl.value.trim();
-  if (!draft) {
-    alert('Pick a draft from the dropdown first -- a decision thread needs one specific draft.');
-    return;
-  }
   if (!query) return;
 
-  threadPanel.hidden = false;
-  threadTitle.textContent = `Decision thread -- "${query}" in ${draft}`;
-  threadBody.innerHTML = '<div class="loading">Searching…</div>';
+  const draftLabel = draft ? ` in <b>${escapeHtml(draft)}</b>` : '';
+  threadTitle.innerHTML = `Decision thread &mdash; <b>"${escapeHtml(query)}"</b>${draftLabel}`;
+  threadBody.innerHTML = '<div class="loading">Starting…</div>';
+  const statusEl = threadBody.querySelector('.loading');
 
-  try {
-    const res = await fetch(`/api/decision-thread?draft=${encodeURIComponent(draft)}&query=${encodeURIComponent(query)}`);
-    const data = await res.json();
-    if (!res.ok) {
-      threadBody.innerHTML = `<div class="error-box">${escapeHtml(data.error || 'Unknown error')}</div>`;
-      return;
+  const params = new URLSearchParams({query});
+  if (draft) params.set('draft', draft);
+  const source = new EventSource(`/api/decision-thread?${params}`);
+  let finished = false;
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      statusEl.textContent = msg.message || 'Working…';
+    } else if (msg.type === 'result') {
+      finished = true;
+      source.close();
+      currentThreadData = msg.data;
+      renderThread(msg.data);
+    } else if (msg.type === 'error') {
+      finished = true;
+      source.close();
+      threadBody.innerHTML = `<div class="error-box">${escapeHtml(msg.message)}</div>`;
     }
-    currentThreadData = data;
-    renderThread(data);
-  } catch (e) {
-    threadBody.innerHTML = `<div class="error-box">${escapeHtml(String(e))}</div>`;
-  }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    finished = true;
+    source.close();
+    threadBody.innerHTML = '<div class="error-box">Connection lost.</div>';
+  };
 }
 
 function renderLaneChain(lane, laneIdx, query) {
@@ -438,7 +610,7 @@ function renderLaneChain(lane, laneIdx, query) {
 
 function renderThread(data) {
   if (!data.lanes.length) {
-    threadBody.innerHTML = '<p class="evolution-hint">No revision mentions that phrase. Try a more distinctive quote from the decision text.</p>';
+    threadBody.innerHTML = '<p class="empty-state">No revision mentions that phrase. Try a more distinctive quote from the decision text.</p>';
     return;
   }
 
@@ -487,7 +659,6 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !discuss
 
 trackThreadBtn.addEventListener('click', trackDecision);
 threadQueryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') trackDecision(); });
-closeThreadBtn.addEventListener('click', () => { threadPanel.hidden = true; });
 
 loadTools();
 loadSkills();

@@ -497,7 +497,11 @@ _LANE_DISCUSSION_INSTRUCTION = (
 
 
 def _judge_lane_discussion(
-    lane: dict, tenant_id: str, model_provider: str, model_name: str
+    lane: dict,
+    tenant_id: str,
+    model_provider: str,
+    model_name: str,
+    on_event=None,
 ) -> None:
     """Mutate lane['edges'] in place, setting has_discussion/discussion per
     edge via a SINGLE LLM call over the whole lane's transitions together --
@@ -536,6 +540,9 @@ def _judge_lane_discussion(
     model_instance = ModelManager().get_model_instance(
         tenant_id=tenant_id, provider=model_provider, model_type=ModelType.LLM, model=model_name
     )
+    if on_event:
+        title_suffix = f" ({lane['title']})" if lane["title"] else ""
+        on_event({"stage": "thinking", "message": f"Thinking about §{lane['section']}{title_suffix}…"})
     try:
         result = _invoke_llm_with_retry(
             model_instance,
@@ -585,11 +592,31 @@ def _parse_evolution_body(body: str) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _drafts_with_matches(query: str, catalog: list[dict]) -> list[str]:
+    """Which draft names have at least one evolution-dataset segment whose
+    header+body contains *query* (case-insensitive) -- used to auto-resolve
+    "no specific draft given" deterministically, via the same content
+    search decision_thread() itself uses, rather than guessing or requiring
+    an LLM call just to pick a draft.
+    """
+    from extensions.ext_database import db
+    from models.dataset import DocumentSegment
+
+    needle = query.strip().lower()
+    matches = []
+    for entry in catalog:
+        segments = db.session.query(DocumentSegment).filter_by(dataset_id=entry["evolution_dataset_id"]).all()
+        if any(s.content and needle in s.content.lower() for s in segments):
+            matches.append(entry["draft_name"])
+    return matches
+
+
 def decision_thread(
-    draft_hint: str,
+    draft_hint: str | None,
     query: str,
     model_provider: str = "langgenius/openrouter/openrouter",
     model_name: str = "google/gemini-2.5-flash",
+    on_event=None,
 ) -> dict:
     """Trace one specific decision's actual text across every revision where
     it changed, compressing over every revision where it didn't -- unlike
@@ -605,19 +632,51 @@ def decision_thread(
     ietf_import_service.py) are collapsed to the first match, same spirit as
     evolution_timeline()'s per-edge dedup.
 
-    Raises ValueError if the hint doesn't resolve to exactly one known draft
-    -- same contract as ask()'s --draft flag.
+    draft_hint may be empty/None -- unlike ask(), which can lean on the
+    model's own reasoning to disambiguate an unspecified draft from the
+    question's wording, decision_thread() has no LLM step for draft
+    selection, so "which draft" is resolved deterministically instead: every
+    known draft is content-searched for the query, and the hint auto-
+    resolves only when exactly one draft has any match. Raises ValueError
+    if a given hint doesn't resolve to exactly one known draft, if no draft
+    matches when none was given, or if more than one does (silently picking
+    one would risk showing the wrong draft's history, which is worse than
+    asking to be specific).
+
+    on_event: optional callback invoked with {"stage": ..., "message": ...}
+    at each major step -- for a caller (serve_ui.py's SSE route) that wants
+    to stream live progress rather than block silently until the whole,
+    potentially multi-lane, multi-LLM-call result is ready. None (the
+    default) skips this entirely.
     """
     from extensions.ext_database import db
     from models.dataset import Dataset, DocumentSegment
 
+    def _emit(stage: str, message: str) -> None:
+        if on_event:
+            on_event({"stage": stage, "message": message})
+
     _, catalog = _list_available_corpora()
-    resolved = _resolve_draft_hint(draft_hint, catalog)
-    if not resolved:
-        known = ", ".join(entry["draft_name"] for entry in catalog) or "(none found)"
-        raise ValueError(f"{draft_hint!r} did not match exactly one known draft. Known drafts: {known}")
+    if draft_hint and draft_hint.strip():
+        _emit("resolving", f"Resolving draft {draft_hint!r}…")
+        resolved = _resolve_draft_hint(draft_hint, catalog)
+        if not resolved:
+            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none found)"
+            raise ValueError(f"{draft_hint!r} did not match exactly one known draft. Known drafts: {known}")
+    else:
+        _emit("resolving", f"No draft given -- searching every known draft for {query!r}…")
+        matching_drafts = _drafts_with_matches(query, catalog)
+        if not matching_drafts:
+            raise ValueError(f"No known draft has any revision mentioning {query!r}.")
+        if len(matching_drafts) > 1:
+            raise ValueError(
+                f"{query!r} matches more than one draft ({', '.join(matching_drafts)}) -- pick one specific draft."
+            )
+        resolved = next(entry for entry in catalog if entry["draft_name"] == matching_drafts[0])
+        _emit("resolving", f"Auto-resolved to {resolved['draft_name']} (only draft mentioning {query!r})")
 
     draft_name = resolved["draft_name"]
+    _emit("searching", f"Searching evolution dataset for {query!r}…")
     segments = (
         db.session.query(DocumentSegment)
         .filter_by(dataset_id=resolved["evolution_dataset_id"])
@@ -724,11 +783,21 @@ def decision_thread(
     by_section: dict[str, list[dict]] = {}
     for m in raw_matches:
         by_section.setdefault(m["section"], []).append(m)
-    lanes = [_build_lane(by_section[section]) for section in sorted(by_section, key=_section_sort_key)]
+    sorted_sections = sorted(by_section, key=_section_sort_key)
+    _emit(
+        "matched",
+        f"Found {len(raw_matches)} matching change(s) across {len(sorted_sections)} section(s)",
+    )
+    lanes = []
+    for section in sorted_sections:
+        _emit("building", f"Building §{section} timeline…")
+        lanes.append(_build_lane(by_section[section]))
 
     if mailarchive_dataset:
         for lane in lanes:
-            _judge_lane_discussion(lane, mailarchive_dataset.tenant_id, model_provider, model_name)
+            _judge_lane_discussion(
+                lane, mailarchive_dataset.tenant_id, model_provider, model_name, on_event=on_event
+            )
     for lane in lanes:
         for edge in lane["edges"]:
             edge.pop("_candidates", None)
@@ -1047,6 +1116,25 @@ CITE_DIFF_TOOL_NAME = "cite_iddiff_url"
 DISCOVERY_TOOL_NAME = "list_available_ietf_corpora"
 VERIFY_TOOL_NAME = "verify_answer"
 
+# Short, human-facing labels for live progress/UI display -- kept separate
+# from the tool names themselves (those are the function-calling contract;
+# renaming them would be pure churn) and separate from tool_summaries()'s
+# descriptions (those are the model's real instructions, not a UI label).
+_TOOL_DISPLAY_NAMES = {
+    DISCOVERY_TOOL_NAME: "Discover drafts",
+    EVOLUTION_TOOL_NAME: "Search decisions",
+    MAILARCHIVE_TOOL_NAME: "Search discussions",
+    FETCH_DRAFT_TOOL_NAME: "Fetch draft text",
+    FETCH_RFC_TOOL_NAME: "Fetch RFC text",
+    DIFF_REVISIONS_TOOL_NAME: "Diff revisions",
+    CITE_DIFF_TOOL_NAME: "Cite a diff",
+    VERIFY_TOOL_NAME: "Verify answer",
+}
+
+
+def tool_display_name(tool_name: str) -> str:
+    return _TOOL_DISPLAY_NAMES.get(tool_name, tool_name)
+
 
 def _build_tools() -> list:
     """Build the actual tool schemas passed to invoke_llm() -- the real
@@ -1176,12 +1264,33 @@ def tool_summaries() -> list[dict]:
     return [{"name": t.name, "description": t.description} for t in _build_tools()]
 
 
-def skill_texts() -> dict[str, str]:
+def skill_texts() -> dict:
     """The agent's own orchestration instructions, verbatim -- for a caller
     (serve_ui.py) that wants to show HOW the tools above get combined into an
     answer, not just what each one does in isolation.
+
+    "guardrails" is a list, not a single fixed field, on purpose: verify_answer
+    is the only automatic check today (the model can't finalize an answer
+    without it running at least once), but it's not conceptually the only
+    kind of guardrail this agent could ever have -- a future one (e.g. a
+    citation-completeness check) would just be another entry here, not a
+    reshape of the response.
     """
-    return {"agent": _INSTRUCTION, "verify": _VERIFY_INSTRUCTION}
+    return {
+        "agent": _INSTRUCTION,
+        "guardrails": [
+            {
+                "name": "Fact-check before finalizing",
+                "purpose": (
+                    "A second, independent LLM call audits every claim in the draft answer against the "
+                    "evidence actually retrieved so far, before it's shown -- catches unsupported claims and "
+                    "misclassified alternatives. The model can voluntarily call this itself, but a safety net "
+                    "forces exactly one call before any final answer is accepted either way."
+                ),
+                "instruction": _VERIFY_INSTRUCTION,
+            },
+        ],
+    }
 
 
 def ask(
@@ -1194,6 +1303,7 @@ def ask(
     mail_top_k: int = 50,
     verbose: bool = False,
     trace: list[dict] | None = None,
+    on_event=None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -1203,6 +1313,13 @@ def ask(
     to show the tool-call activity itself (e.g. a UI), not just the final
     answer. None (the default) skips this entirely; every existing
     caller (CLI, battery scripts) omits it and is unaffected.
+
+    on_event: optional callback invoked with {"stage": ..., "message": ...}
+    live, as each tool call starts and before each LLM call -- for a caller
+    (serve_ui.py's SSE route) that wants to stream progress rather than
+    block silently until the whole answer is ready. trace still records
+    the same tool calls after the fact for the collapsible inspector;
+    on_event is for showing it as it happens.
     """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import (
@@ -1358,6 +1475,8 @@ def ask(
         kept separate from dispatch itself so every call path (model-
         initiated and safety-net forced) is traced uniformly in one place.
         """
+        if on_event:
+            on_event({"stage": "tool_call", "tool": tool_name, "forced": forced})
         observation = _dispatch_tool_call(tool_name, args, iteration)
         if trace is not None:
             trace.append(
@@ -1505,6 +1624,8 @@ def ask(
         # all floors are satisfied, or once the model does everything on its
         # own, tool-free rounds are forced to guarantee termination.
         is_last = iteration == _MAX_ITERATIONS
+        if on_event:
+            on_event({"stage": "thinking"})
         result = _invoke_llm_with_retry(
             model_instance,
             prompt_messages=prompt_messages,

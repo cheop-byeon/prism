@@ -58,14 +58,153 @@ _TOOL_KIND = {
     "verify_answer": "verify",
 }
 
+# What each tool actually touches outside this script, and a real (not
+# fabricated) example call -- shown in the UI's second-level "Detail" panel,
+# once someone's already expanded a tool and wants to know how it connects
+# to the real world, not just what it does. Unlike _TOOL_KIND/description,
+# there's no single-source-of-truth function for this (it's about the
+# implementation's own HTTP calls/subprocess use, not the model-facing
+# contract), so it's hand-maintained here -- update it if a tool's actual
+# resource changes.
+_TOOL_DETAILS = {
+    "list_available_ietf_corpora": {
+        "resource": (
+            "IETF Datatracker API (datatracker.ietf.org) -- live lookup of each "
+            "discovered draft's owning working group."
+        ),
+        "example": (
+            "list_available_ietf_corpora()\n"
+            "# -> catalog of every draft this instance has data for, with dataset ids"
+        ),
+    },
+    "search_ietf_evolution_dataset": {
+        "resource": (
+            "Internal Dify dataset only -- this project's own precomputed "
+            "section-level draft diffs, no external call at query time."
+        ),
+        "example": (
+            'search_ietf_evolution_dataset(\n  dataset_id="cf4328a3-f10e-47f2-b7d6-ef4ad555bce7",\n'
+            '  query="Safety of LEDBAT"\n)'
+        ),
+    },
+    "search_ietf_mailarchive_dataset": {
+        "resource": (
+            "Internal Dify dataset only -- built from the WG's real mailing-list "
+            "archive ahead of time, no external call at query time."
+        ),
+        "example": (
+            'search_ietf_mailarchive_dataset(\n  dataset_id="cd7ef874-417e-45a6-a917-461e4cdf20c3",\n'
+            '  query="An INIT_CWND of"\n)'
+        ),
+    },
+    "fetch_ietf_draft_text": {
+        "resource": "ietf.org draft archive (www.ietf.org/archive/id/) -- live fetch of the actual draft text.",
+        "example": 'fetch_ietf_draft_text(\n  draft_name="draft-ietf-ledbat-congestion",\n  revision="09"\n)',
+    },
+    "fetch_ietf_rfc_text": {
+        "resource": "RFC Editor (www.rfc-editor.org) -- live fetch of the final published spec.",
+        "example": 'fetch_ietf_rfc_text(rfc_number="6817")',
+    },
+    "diff_ietf_draft_revisions": {
+        "resource": (
+            "iddiff (ietf-tools/iddiff on PyPI) -- the same independent diff tool "
+            "IETF's own author-tools site runs, executed locally."
+        ),
+        "example": (
+            'diff_ietf_draft_revisions(\n  draft_name="draft-ietf-ledbat-congestion",\n'
+            '  from_revision="08",\n  to_revision="09"\n)'
+        ),
+    },
+    "cite_iddiff_url": {
+        "resource": (
+            "author-tools.ietf.org/iddiff -- IETF's own hosted diff viewer; "
+            "builds a real clickable URL, no local computation."
+        ),
+        "example": (
+            'cite_iddiff_url(\n  draft_name="draft-ietf-ledbat-congestion",\n'
+            '  from_revision="08",\n  to_revision="09"\n)\n'
+            "# -> https://author-tools.ietf.org/iddiff?url1=draft-ietf-ledbat-congestion-08"
+            "&url2=draft-ietf-ledbat-congestion-09&difftype=--html"
+        ),
+    },
+    "verify_answer": {
+        "resource": (
+            "No external resource -- a second, fresh call to the same LLM, "
+            "auditing the draft answer against evidence already retrieved."
+        ),
+        "example": "Runs automatically before every final answer; not something a user calls directly.",
+    },
+}
+
 
 def _tool_info() -> list[dict]:
-    from scripts.agentic_rag.ask_decision_agent import tool_summaries
+    from scripts.agentic_rag.ask_decision_agent import tool_display_name, tool_summaries
 
-    return [{**t, "kind": _TOOL_KIND.get(t["name"], "other")} for t in tool_summaries()]
+    return [
+        {
+            **t,
+            "kind": _TOOL_KIND.get(t["name"], "other"),
+            "display_name": tool_display_name(t["name"]),
+            **_TOOL_DETAILS.get(t["name"], {"resource": "", "example": ""}),
+        }
+        for t in tool_summaries()
+    ]
 
 
 _PAGE_HTML = (Path(__file__).parent / "serve_ui_template.html").read_text(encoding="utf-8")
+
+
+def _sse_stream(app, work_fn):
+    """Run work_fn(on_event) -> JSON-serializable result in a background
+    thread, streaming every on_event(...) call plus the final result (or an
+    error) to the browser as Server-Sent Events -- lets a synchronous,
+    potentially slow function (an agent loop, a multi-lane LLM judgment
+    pass) report live progress without becoming a generator itself.
+
+    Runs in its own thread because Flask's dev server handles one request
+    at a time by default; blocking synchronously here would make the whole
+    UI unresponsive until work_fn finished, defeating the point of
+    streaming. The thread needs its own app-context push since Flask's
+    context is thread-local and doesn't cross into a manually spawned one.
+    """
+    import json
+    import queue
+    import threading
+
+    from flask import Response
+
+    events: queue.Queue = queue.Queue()
+    done = object()
+
+    def on_event(event: dict) -> None:
+        events.put(("event", event))
+
+    def runner() -> None:
+        try:
+            with app.app_context():
+                result = work_fn(on_event)
+            events.put(("result", result))
+        except (SystemExit, Exception) as exc:
+            traceback.print_exc()
+            events.put(("error", f"{type(exc).__name__}: {exc}"))
+        finally:
+            events.put((done, None))
+
+    threading.Thread(target=runner, daemon=True).start()
+
+    def generate():
+        while True:
+            kind, payload = events.get()
+            if kind is done:
+                break
+            if kind == "event":
+                yield f"data: {json.dumps({'type': 'progress', **payload})}\n\n"
+            elif kind == "result":
+                yield f"data: {json.dumps({'type': 'result', 'data': payload})}\n\n"
+            elif kind == "error":
+                yield f"data: {json.dumps({'type': 'error', 'message': payload})}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
 def main() -> None:
@@ -98,46 +237,42 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/ask", methods=["POST"])
+    @app.route("/api/ask", methods=["GET"])
     def api_ask():
         from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
 
-        payload = request.get_json(force=True, silent=True) or {}
-        query = (payload.get("query") or "").strip()
-        draft = payload.get("draft") or None
+        query = (request.args.get("query") or "").strip()
+        draft = request.args.get("draft") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        trace: list[dict] = []
-        try:
-            answer = ask_decision_agent(query=query, draft=draft, trace=trace)
-            return jsonify({"answer": answer, "trace": trace})
-        except SystemExit as exc:
-            return jsonify({"error": str(exc), "trace": trace}), 400
-        except Exception as exc:
-            traceback.print_exc()
-            return jsonify({"error": f"{type(exc).__name__}: {exc}", "trace": trace}), 500
+        def work(on_event):
+            trace: list[dict] = []
+            answer = ask_decision_agent(query=query, draft=draft, trace=trace, on_event=on_event)
+            return {"answer": answer, "trace": trace}
+
+        return _sse_stream(app, work)
 
     @app.route("/api/decision-thread", methods=["GET"])
     def api_decision_thread():
         from scripts.agentic_rag.ask_decision_agent import decision_thread
 
-        draft = (request.args.get("draft") or "").strip()
+        draft = (request.args.get("draft") or "").strip() or None
         query = (request.args.get("query") or "").strip()
-        if not draft:
-            return jsonify({"error": "draft is required"}), 400
         if not query:
             return jsonify({"error": "query is required"}), 400
-        try:
-            return jsonify(decision_thread(draft, query))
-        except ValueError as exc:
-            return jsonify({"error": str(exc)}), 404
-        except Exception as exc:
-            traceback.print_exc()
-            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+        def work(on_event):
+            return decision_thread(draft, query, on_event=on_event)
+
+        return _sse_stream(app, work)
 
     print("Decision Rationale Agent UI running -- open http://0.0.0.0:8765/ in your browser")
-    app.run(host="0.0.0.0", port=8765, debug=False)
+    # threaded=True: an open SSE stream (ask/decision-thread) holds its
+    # connection for as long as the background work takes -- without this,
+    # Werkzeug's dev server would block every other request (even loading
+    # the sidebar's /api/tools) until that one stream finished.
+    app.run(host="0.0.0.0", port=8765, debug=False, threaded=True)
 
 
 if __name__ == "__main__":
