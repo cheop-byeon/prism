@@ -91,6 +91,48 @@
   .trace-item .args { color: var(--text-dim); margin-top: 4px; word-break: break-all; }
   .trace-item .preview { color: var(--text-dim); margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
   .loading { color: var(--text-dim); font-size: 13px; padding: 4px 0; }
+
+  .step-diagram { display: flex; align-items: center; gap: 0; margin-bottom: 10px; flex-wrap: wrap; }
+  .step-node {
+    padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border);
+    font-size: 11px; color: var(--text-dim); background: var(--panel-2); white-space: nowrap;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
+  }
+  .step-node.done { border-color: var(--accent-dim); color: var(--text); background: var(--accent-dim); }
+  .step-node.active {
+    border-color: var(--accent); color: #0a0e1a; background: var(--accent); font-weight: 600;
+    animation: step-pop 0.35s ease, step-glow 1.6s ease-in-out 0.35s infinite;
+  }
+  .step-node.errored { border-color: var(--error); color: var(--error); background: transparent; }
+  .step-node .badge {
+    font-size: 9px; font-weight: 700; background: rgba(0, 0, 0, 0.28); border-radius: 8px; padding: 0 5px;
+  }
+  @keyframes step-pop { 0% { transform: scale(0.82); } 65% { transform: scale(1.08); } 100% { transform: scale(1); } }
+  @keyframes step-glow {
+    0%, 100% { box-shadow: 0 0 0 3px rgba(124, 158, 255, 0.22); }
+    50% { box-shadow: 0 0 0 7px rgba(124, 158, 255, 0.04); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .step-node.active { animation: none; box-shadow: 0 0 0 3px rgba(124, 158, 255, 0.22); }
+  }
+
+  .step-connector {
+    width: 26px; height: 2px; margin: 0 3px; flex-shrink: 0; position: relative;
+    background: var(--border); border-radius: 1px; overflow: hidden;
+  }
+  .step-connector.done { background: var(--accent-dim); }
+  .step-connector.flowing::after {
+    content: ''; position: absolute; top: 0; left: -50%; width: 50%; height: 100%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: step-flow 0.85s linear infinite;
+  }
+  @keyframes step-flow { from { left: -50%; } to { left: 100%; } }
+  @media (prefers-reduced-motion: reduce) {
+    .step-connector.flowing::after { animation: none; left: 0; width: 100%; opacity: 0.5; }
+  }
+
+  .step-extra { font-size: 11px; color: var(--text-dim); font-style: italic; margin: -4px 0 10px; }
   .error-box {
     background: #2a1616; border: 1px solid var(--error); color: #ffb3ac;
     border-radius: 8px; padding: 12px 14px; font-size: 13px; font-family: var(--mono); white-space: pre-wrap;
@@ -216,6 +258,7 @@
     flex: 1; min-width: 260px; max-width: 360px; position: sticky; top: 0;
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   }
+  .tool-detail-panel:empty { display: none; }
   .tool-detail-panel h3 { font-size: 13px; margin: 0 0 12px; color: var(--text); }
   .detail-section { margin-bottom: 14px; }
   .detail-section:last-child { margin-bottom: 0; }
@@ -274,6 +317,7 @@
     </div>
     <div class="thread-body-wrap">
       <div class="thread-status" id="threadTitle"></div>
+      <div id="threadStepDiagram"></div>
       <div id="threadBody"></div>
     </div>
   </section>
@@ -284,9 +328,7 @@
       <p class="tools-hint">Click a tool for its actual instructions, then "Detail" for what it touches outside this script and an example call.</p>
       <div class="tools-layout">
         <div class="tools-list" id="tools"></div>
-        <div class="tool-detail-panel" id="toolDetailPanel">
-          <p class="empty-state">Click "Detail" on a tool to see it here.</p>
-        </div>
+        <div class="tool-detail-panel" id="toolDetailPanel"></div>
       </div>
       <div class="skills">
         <h2>Skill (how the tools get combined)</h2>
@@ -465,6 +507,45 @@ function statusLineForEvent(event) {
   return event.message || 'Working…';
 }
 
+const ASK_STEPS = [
+  { key: 'list_available_ietf_corpora', label: 'Discover drafts' },
+  { key: 'search_ietf_evolution_dataset', label: 'Search decisions' },
+  { key: 'search_ietf_mailarchive_dataset', label: 'Search discussions' },
+  { key: 'verify_answer', label: 'Verify answer' },
+  { key: 'answer', label: 'Answer' },
+];
+
+// Approximates the model's typical path through _INSTRUCTION's own numbered
+// steps -- not a literal execution graph like a Dify workflow has, since the
+// underlying loop is a dynamic, unbounded tool-calling sequence (it can
+// repeat, skip, or call tools that aren't in this fixed list, e.g. a
+// mid-loop draft/RFC fetch). Those extra calls surface as a note below the
+// diagram instead of a new node, so the diagram stays a stable illustration
+// of the usual shape rather than a moving target. visitCounts (key -> times
+// fired) makes a real retry visible as a "x2" badge instead of silently
+// re-highlighting the same node as if it only ran once.
+function stepDiagramHtml(steps, activeKey, visitCounts, errored, extraNote) {
+  let html = '<div class="step-diagram">';
+  steps.forEach((s, i) => {
+    const count = visitCounts.get(s.key) || 0;
+    let cls = 'step-node';
+    if (errored && s.key === activeKey) cls += ' errored';
+    else if (s.key === activeKey) cls += ' active';
+    else if (count > 0) cls += ' done';
+    const badge = count > 1 ? `<span class="badge">&times;${count}</span>` : '';
+    html += `<span class="${cls}">${escapeHtml(s.label)}${badge}</span>`;
+    if (i < steps.length - 1) {
+      const nextKey = steps[i + 1].key;
+      let connCls = 'step-connector';
+      if (nextKey === activeKey) connCls += ' flowing';
+      else if ((visitCounts.get(nextKey) || 0) > 0) connCls += ' done';
+      html += `<span class="${connCls}"></span>`;
+    }
+  });
+  html += '</div>';
+  return html + (extraNote ? `<div class="step-extra">${escapeHtml(extraNote)}</div>` : '');
+}
+
 function ask() {
   const query = queryEl.value.trim();
   if (!query) return;
@@ -474,10 +555,20 @@ function ask() {
   turn.className = 'turn';
   const draftLabel = draftEl.value ? ` <em>(draft: ${escapeHtml(draftEl.value)})</em>` : '';
   const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
-  turn.innerHTML = qHtml + '<div class="loading">Starting…</div>';
+
+  const visitCounts = new Map();
+  const markVisited = (key) => visitCounts.set(key, (visitCounts.get(key) || 0) + 1);
+  let activeKey = null;
+  let extraNote = '';
+  let errored = false;
+
+  const render = (bodyHtml) => {
+    turn.innerHTML = qHtml + stepDiagramHtml(ASK_STEPS, activeKey, visitCounts, errored, extraNote) + bodyHtml;
+  };
+
+  render('<div class="loading">Starting…</div>');
   convEl.appendChild(turn);
   turn.scrollIntoView({behavior: 'smooth'});
-  const statusEl = turn.querySelector('.loading');
 
   const params = new URLSearchParams({query});
   if (draftEl.value) params.set('draft', draftEl.value);
@@ -495,18 +586,32 @@ function ask() {
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
-      statusEl.textContent = statusLineForEvent(msg);
+      if (msg.stage === 'tool_call') {
+        const known = ASK_STEPS.find(s => s.key === msg.tool);
+        if (known) {
+          activeKey = msg.tool;
+          markVisited(msg.tool);
+          extraNote = '';
+        } else {
+          extraNote = `Also using: ${toolLabel(msg.tool)}`;
+        }
+      }
+      render(`<div class="loading">${escapeHtml(statusLineForEvent(msg))}</div>`);
     } else if (msg.type === 'result') {
-      turn.innerHTML = qHtml + `<div class="answer">${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace);
+      markVisited('answer');
+      activeKey = null;
+      render(`<div class="answer">${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace));
       stop();
     } else if (msg.type === 'error') {
-      turn.innerHTML = qHtml + `<div class="error-box">${escapeHtml(msg.message)}</div>`;
+      errored = true;
+      render(`<div class="error-box">${escapeHtml(msg.message)}</div>`);
       stop();
     }
   };
   source.onerror = () => {
     if (finished) return;
-    turn.innerHTML = qHtml + '<div class="error-box">Connection lost.</div>';
+    errored = true;
+    render('<div class="error-box">Connection lost.</div>');
     stop();
   };
 }
@@ -545,6 +650,15 @@ function chatIconSvg() {
 
 let currentThreadData = null;
 
+const TRACK_STEPS = [
+  { key: 'resolving', label: 'Resolve draft' },
+  { key: 'searching', label: 'Search evolution' },
+  { key: 'building', label: 'Build timeline' },
+  { key: 'thinking', label: 'Check discussion' },
+  { key: 'done', label: 'Done' },
+];
+const trackStepEl = document.getElementById('threadStepDiagram');
+
 function trackDecision() {
   const draft = draftEl.value;
   const query = threadQueryEl.value.trim();
@@ -552,6 +666,16 @@ function trackDecision() {
 
   const draftLabel = draft ? ` in <b>${escapeHtml(draft)}</b>` : '';
   threadTitle.innerHTML = `Decision thread &mdash; <b>"${escapeHtml(query)}"</b>${draftLabel}`;
+
+  const visitCounts = new Map();
+  const markVisited = (key) => visitCounts.set(key, (visitCounts.get(key) || 0) + 1);
+  let activeKey = null;
+  let errored = false;
+  const renderStep = () => {
+    trackStepEl.innerHTML = stepDiagramHtml(TRACK_STEPS, activeKey, visitCounts, errored, '');
+  };
+
+  renderStep();
   threadBody.innerHTML = '<div class="loading">Starting…</div>';
   const statusEl = threadBody.querySelector('.loading');
 
@@ -564,14 +688,26 @@ function trackDecision() {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
       statusEl.textContent = msg.message || 'Working…';
+      const stage = msg.stage === 'matched' ? 'searching' : msg.stage;
+      const known = TRACK_STEPS.find(s => s.key === stage);
+      if (known) {
+        activeKey = stage;
+        markVisited(stage);
+        renderStep();
+      }
     } else if (msg.type === 'result') {
       finished = true;
       source.close();
+      activeKey = null;
+      markVisited('done');
+      renderStep();
       currentThreadData = msg.data;
       renderThread(msg.data);
     } else if (msg.type === 'error') {
       finished = true;
       source.close();
+      errored = true;
+      renderStep();
       threadBody.innerHTML = `<div class="error-box">${escapeHtml(msg.message)}</div>`;
     }
   };
@@ -579,6 +715,8 @@ function trackDecision() {
     if (finished) return;
     finished = true;
     source.close();
+    errored = true;
+    renderStep();
     threadBody.innerHTML = '<div class="error-box">Connection lost.</div>';
   };
 }
