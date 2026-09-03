@@ -118,6 +118,24 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": f"{type(exc).__name__}: {exc}", "trace": trace}), 500
 
+    @app.route("/api/decision-thread", methods=["GET"])
+    def api_decision_thread():
+        from scripts.agentic_rag.ask_decision_agent import decision_thread
+
+        draft = (request.args.get("draft") or "").strip()
+        query = (request.args.get("query") or "").strip()
+        if not draft:
+            return jsonify({"error": "draft is required"}), 400
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+        try:
+            return jsonify(decision_thread(draft, query))
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
     print("Decision Rationale Agent UI running -- open http://0.0.0.0:8765/ in your browser")
     app.run(host="0.0.0.0", port=8765, debug=False)
 

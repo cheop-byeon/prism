@@ -428,6 +428,321 @@ def _resolve_draft_hint(hint: str, catalog: list[dict]) -> dict | None:
     return matches[0] if len(matches) == 1 else None
 
 
+_EVOLUTION_ENTRY_RE = re.compile(
+    r"^ietf-evolution draft:(\S+) from:(\S+) to:(\S+) section:(\S+) change:(added|removed|modified)(?: \| (.*))?"
+)
+# generate_draft_evolution (ietf_import_service.py) emits exactly one of
+# these three fixed phrasings depending on change type -- a closed set, not
+# a heuristic, so matching them directly is reliable rather than guessing at
+# arbitrary before/after prose.
+_BODY_MODIFIED_RE = re.compile(r"Before \(rev \S+\):\n(.*?)\n\nAfter \(rev \S+\):\n(.*)", re.DOTALL)
+_BODY_ADDED_RE = re.compile(r"New section added in rev \S+:\n(.*)", re.DOTALL)
+_BODY_REMOVED_RE = re.compile(r"Section removed after rev \S+:\n(.*)", re.DOTALL)
+_THREAD_SUBJECT_RE = re.compile(r"^Thread: (.+?) \(")
+
+
+def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int = 5) -> list[str]:
+    """Gather candidate mailarchive messages for one specific change's own
+    wording -- NOT a relevance verdict. Tried treating "any non-administrative
+    BM25 hit" as the verdict directly (dropping Secretariat/datatracker bot
+    noise via the same _is_administrative_notice heuristic
+    services/ietf_import_service.py uses at ingestion time); on a real
+    89-edge thread that flagged 100% of edges as "having discussion" --
+    zero signal, because a WG mailing list is topically homogeneous enough
+    that "shares vocabulary with the change" and "actually explains this
+    specific change" aren't separable by keyword retrieval alone. The
+    administrative filter still earns its keep here as a cheap pre-filter
+    to shrink what the judgment call in _judge_lane_discussion has to read,
+    just not as the accept/reject decision itself.
+    """
+    from services.ietf_import_service import IetfImportService
+
+    if not mailarchive_dataset or not query_text.strip():
+        return []
+    # Lesson from this project's own retrieval testing: a short, distinctive
+    # snippet beats a whole paragraph as a BM25 query.
+    query = " ".join(query_text.split()[:30])
+    hits = _retrieve(mailarchive_dataset, query, top_k=top_k)
+    kept = []
+    for hit in hits:
+        subject_match = _THREAD_SUBJECT_RE.match(hit)
+        subject = subject_match.group(1) if subject_match else ""
+        if subject and IetfImportService._is_administrative_notice(subject):
+            continue
+        kept.append(hit)
+        if len(kept) >= 3:
+            break
+    return kept
+
+
+_LANE_DISCUSSION_INSTRUCTION = (
+    "You are auditing whether specific email discussions genuinely explain specific "
+    "design-decision changes in an IETF draft. You are given one section's decision "
+    "text across several consecutive revisions, and for each transition between two "
+    "revisions, a numbered list of candidate mailing-list messages found via keyword "
+    "search -- not yet verified as actually relevant.\n\n"
+    "For each transition, decide whether ANY candidate specifically explains why the "
+    "text changed the way it did for THAT transition -- not just a message about the "
+    "same general topic or protocol. Multiple unrelated decisions get discussed in "
+    "the same time period on a WG mailing list; a candidate only counts if it "
+    "specifically connects to this exact change. It is common and expected for a "
+    "transition to have no genuinely relevant candidate -- say so plainly rather "
+    "than picking the closest topical match out of reluctance to say none.\n\n"
+    "Respond with exactly one line per transition, in the same order given, in this "
+    "exact format and nothing else:\n"
+    "TRANSITION <n>: RELEVANT <candidate number>\n"
+    "or\n"
+    "TRANSITION <n>: NONE"
+)
+
+
+def _judge_lane_discussion(
+    lane: dict, tenant_id: str, model_provider: str, model_name: str
+) -> None:
+    """Mutate lane['edges'] in place, setting has_discussion/discussion per
+    edge via a SINGLE LLM call over the whole lane's transitions together --
+    not one call per edge. Giving the model every transition's before/after
+    text and candidates at once (rather than one edge in isolation) lets it
+    correctly attribute which candidate belongs to which transition, and
+    keeps the cost to one call per lane regardless of how many edges it has
+    (a 13-lane thread costs ~13 calls, not one per edge).
+
+    No-ops (leaves has_discussion=False, discussion=None) if no edge has any
+    candidates, or if the model's response doesn't parse -- conservative by
+    design, matching this project's existing rule that an unsupported claim
+    should be dropped, not guessed into looking supported.
+    """
+    from core.model_manager import ModelManager
+    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from dify_graph.model_runtime.entities.model_entities import ModelType
+
+    for edge in lane["edges"]:
+        edge["has_discussion"] = False
+        edge["discussion"] = None
+
+    if not any(edge.get("_candidates") for edge in lane["edges"]):
+        return
+
+    prompt_lines = [f"Section {lane['section']} ({lane['title'] or 'untitled'})", ""]
+    for i, edge in enumerate(lane["edges"], start=1):
+        prompt_lines.append(f"=== TRANSITION {i}: rev {edge['from_rev']} -> rev {edge['to_rev']} ===")
+        candidates = edge.get("_candidates") or []
+        if not candidates:
+            prompt_lines.append("(no candidate messages found)")
+        for j, cand in enumerate(candidates, start=1):
+            prompt_lines.append(f"--- candidate {j} ---\n{cand[:600]}")
+        prompt_lines.append("")
+
+    model_instance = ModelManager().get_model_instance(
+        tenant_id=tenant_id, provider=model_provider, model_type=ModelType.LLM, model=model_name
+    )
+    try:
+        result = _invoke_llm_with_retry(
+            model_instance,
+            prompt_messages=[
+                SystemPromptMessage(content=_LANE_DISCUSSION_INSTRUCTION),
+                UserPromptMessage(content="\n".join(prompt_lines)),
+            ],
+            model_parameters={"temperature": 0.1, "top_p": 1},
+            tools=[],
+            stop=[],
+            stream=False,
+            user="ask_decision_agent_lane_discussion",
+        )
+    except Exception:
+        return
+
+    content = result.message.content
+    content = content if isinstance(content, str) else str(content)
+
+    verdict_re = re.compile(r"TRANSITION\s+(\d+):\s*(RELEVANT\s+(\d+)|NONE)", re.IGNORECASE)
+    for match in verdict_re.finditer(content):
+        idx = int(match.group(1)) - 1
+        if not (0 <= idx < len(lane["edges"])):
+            continue
+        if match.group(3):
+            candidates = lane["edges"][idx].get("_candidates") or []
+            cand_idx = int(match.group(3)) - 1
+            if 0 <= cand_idx < len(candidates):
+                lane["edges"][idx]["has_discussion"] = True
+                lane["edges"][idx]["discussion"] = candidates[cand_idx]
+
+
+def _parse_evolution_body(body: str) -> tuple[str | None, str | None]:
+    """Extract (before_text, after_text) from an evolution segment's body --
+    the part after its self-describing header line. Either side can be None
+    (an "added" entry has no before-state; a "removed" one has no after).
+    """
+    match = _BODY_MODIFIED_RE.search(body)
+    if match:
+        return match.group(1).strip(), match.group(2).strip()
+    match = _BODY_ADDED_RE.search(body)
+    if match:
+        return None, match.group(1).strip()
+    match = _BODY_REMOVED_RE.search(body)
+    if match:
+        return match.group(1).strip(), None
+    return None, None
+
+
+def decision_thread(
+    draft_hint: str,
+    query: str,
+    model_provider: str = "langgenius/openrouter/openrouter",
+    model_name: str = "google/gemini-2.5-flash",
+) -> dict:
+    """Trace one specific decision's actual text across every revision where
+    it changed, compressing over every revision where it didn't -- unlike
+    a full-corpus change graph, this is a per-version, paragraph-level view
+    of a single parameter/decision's history (e.g. "how did INIT_CWND's
+    value change over time", not "what changed in every section").
+
+    Matches every evolution-dataset segment whose header+body contains
+    *query* (case-insensitive substring), across the WHOLE draft history --
+    not just one from/to hop -- then chains each match's before/after text
+    into per-revision nodes. Paragraph-split duplicates of the same logical
+    change (same from_rev/to_rev pair -- see _split_modified_paragraphs in
+    ietf_import_service.py) are collapsed to the first match, same spirit as
+    evolution_timeline()'s per-edge dedup.
+
+    Raises ValueError if the hint doesn't resolve to exactly one known draft
+    -- same contract as ask()'s --draft flag.
+    """
+    from extensions.ext_database import db
+    from models.dataset import Dataset, DocumentSegment
+
+    _, catalog = _list_available_corpora()
+    resolved = _resolve_draft_hint(draft_hint, catalog)
+    if not resolved:
+        known = ", ".join(entry["draft_name"] for entry in catalog) or "(none found)"
+        raise ValueError(f"{draft_hint!r} did not match exactly one known draft. Known drafts: {known}")
+
+    draft_name = resolved["draft_name"]
+    segments = (
+        db.session.query(DocumentSegment)
+        .filter_by(dataset_id=resolved["evolution_dataset_id"])
+        .order_by(DocumentSegment.position)
+        .all()
+    )
+    mailarchive_dataset = None
+    if resolved.get("mailarchive_dataset_id"):
+        mailarchive_dataset = db.session.query(Dataset).filter_by(id=resolved["mailarchive_dataset_id"]).first()
+
+    needle = query.strip().lower()
+
+    def _rev_key(rev: str) -> int:
+        return int(rev) if rev.isdigit() else 10**9
+
+    raw_matches = []
+    for segment in segments:
+        if not segment.content or needle not in segment.content.lower():
+            continue
+        match = _EVOLUTION_ENTRY_RE.match(segment.content)
+        if not match:
+            continue
+        _draft, from_rev, to_rev, section, change_type, title = match.groups()
+        before_text, after_text = _parse_evolution_body(segment.content[match.end() :])
+        raw_matches.append(
+            {
+                "from_rev": from_rev,
+                "to_rev": to_rev,
+                "section": section,
+                "type": change_type,
+                "title": (title or "").strip(),
+                "before": before_text,
+                "after": after_text,
+            }
+        )
+    raw_matches.sort(key=lambda m: _rev_key(m["from_rev"]))
+
+    def _section_sort_key(section: str) -> tuple:
+        # (0, int) for numeric parts, (1, str) for non-numeric ones ("M1"-
+        # style appendix sections) -- keeps every tuple position the same
+        # shape so mixed numeric/non-numeric sections never raise comparing
+        # an int to a str.
+        return tuple((0, int(p)) if p.isdigit() else (1, p) for p in re.findall(r"\d+|\D+", section))
+
+    def _build_lane(section_matches: list[dict]) -> dict:
+        nodes: dict[str, str] = {}
+        edges: list[dict] = []
+        seen_hops: set[tuple[str, str]] = set()
+        title = ""
+        for m in section_matches:
+            hop = (m["from_rev"], m["to_rev"])
+            if hop in seen_hops:
+                continue
+            seen_hops.add(hop)
+            title = title or m["title"]
+            if m["before"] and m["from_rev"] not in nodes:
+                nodes[m["from_rev"]] = m["before"]
+            if m["after"]:
+                nodes[m["to_rev"]] = m["after"]
+            edges.append(
+                {
+                    "from_rev": m["from_rev"],
+                    "to_rev": m["to_rev"],
+                    "type": m["type"],
+                    "diff_url": _iddiff_page_url(draft_name, m["from_rev"], m["to_rev"]),
+                }
+            )
+
+        ordered_revs = sorted(nodes.keys(), key=_rev_key)
+        node_list = [{"rev": rev, "text": nodes[rev]} for rev in ordered_revs]
+
+        # Rebuild edges aligned 1:1 with consecutive node pairs -- a matched
+        # hop can skip revisions the query didn't match at all (e.g.
+        # rephrased away and back), leaving no recorded edge directly
+        # between two adjacent nodes. Falling back to a freshly built diff
+        # URL for that exact pair means the caller never has to
+        # special-case a missing connector.
+        edge_by_hop = {(e["from_rev"], e["to_rev"]): e for e in edges}
+        display_edges = []
+        for from_rev, to_rev in zip(ordered_revs, ordered_revs[1:], strict=False):
+            edge = edge_by_hop.get((from_rev, to_rev)) or {
+                "from_rev": from_rev,
+                "to_rev": to_rev,
+                "type": "modified",
+                "diff_url": _iddiff_page_url(draft_name, from_rev, to_rev),
+            }
+            display_edges.append(edge)
+
+        for i, edge in enumerate(display_edges):
+            edge["_candidates"] = _find_discussion_candidates(mailarchive_dataset, node_list[i + 1]["text"])
+
+        return {"section": section_matches[0]["section"], "title": title, "nodes": node_list, "edges": display_edges}
+
+    # A bare keyword can genuinely span unrelated places -- a value-setting
+    # sentence, a pseudocode listing, a requirements discussion -- each in a
+    # different section. Merging all of it into one flat sequence would jump
+    # between unrelated stories, so each section becomes its own
+    # independently-tracked lane instead. Not renumbering-aware (a section
+    # that changes number mid-history splits into two lanes) -- this
+    # codebase has no tool to resolve true cross-revision section identity
+    # either (_compute_section_lineage in ietf_import_service.py only
+    # aggregates by exact section-id string too), so this isn't introducing
+    # a new inconsistency.
+    by_section: dict[str, list[dict]] = {}
+    for m in raw_matches:
+        by_section.setdefault(m["section"], []).append(m)
+    lanes = [_build_lane(by_section[section]) for section in sorted(by_section, key=_section_sort_key)]
+
+    if mailarchive_dataset:
+        for lane in lanes:
+            _judge_lane_discussion(lane, mailarchive_dataset.tenant_id, model_provider, model_name)
+    for lane in lanes:
+        for edge in lane["edges"]:
+            edge.pop("_candidates", None)
+            edge.setdefault("has_discussion", False)
+            edge.setdefault("discussion", None)
+
+    return {
+        "draft_name": draft_name,
+        "rfc_number": resolved.get("rfc_number"),
+        "query": query,
+        "lanes": lanes,
+    }
+
+
 def _retrieve(dataset, query: str, top_k: int) -> list[str]:
     from core.rag.datasource.retrieval_service import RetrievalService
     from core.rag.index_processor.constant.index_type import IndexTechniqueType
