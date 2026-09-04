@@ -1130,6 +1130,33 @@ def _get_rfc_relations(rfc_number: str) -> str:
     return "\n".join(lines)
 
 
+def _find_related_rfc_family(rfc_number: str) -> str:
+    """Format IetfImportService.find_related_rfc_family() for the model --
+    the topically-related RFCs found via citation + keyword overlap, for
+    topics (DNSSEC is the motivating example) that are explained across a
+    cluster of RFCs with no obsoletes/updates relation tying them together
+    at all. A heuristic, not a guarantee -- an empty family means the
+    heuristic didn't find one, not that no related RFCs exist.
+    """
+    from services.ietf_import_service import IetfImportService
+
+    data = IetfImportService.find_related_rfc_family(rfc_number)
+    if data.get("error"):
+        return f"Could not look up the RFC family for {rfc_number}: {data['error']}"
+
+    if not data["family"]:
+        keyword_note = f" (topic keyword tried: {data['topic_keyword']!r})" if data.get("topic_keyword") else ""
+        return (
+            f"No related-RFC family found for {data['rfc']}{keyword_note} -- "
+            "this heuristic found nothing, not proof nothing exists."
+        )
+
+    lines = [f"RFCs related to {data['rfc']} (topic keyword: {data['topic_keyword']!r}):"]
+    for entry in data["family"]:
+        lines.append(f"  {entry['rfc']} ({entry['std_level'].upper()}): {entry['title']}")
+    return "\n".join(lines)
+
+
 def _diff_draft_revisions(draft_name: str, from_revision: str, to_revision: str, query: str | None) -> str:
     """Diff two draft revisions with the real `iddiff` tool (ietf-tools/iddiff on
     PyPI) -- a genuinely independent second opinion on what changed, using its
@@ -1291,6 +1318,7 @@ DISCOVERY_TOOL_NAME = "list_available_ietf_corpora"
 VERIFY_TOOL_NAME = "verify_answer"
 MINUTES_TOOL_NAME = "search_wg_minutes"
 RFC_RELATIONS_TOOL_NAME = "get_rfc_relations"
+RFC_FAMILY_TOOL_NAME = "find_related_rfc_family"
 
 # Short, human-facing labels for live progress/UI display -- kept separate
 # from the tool names themselves (those are the function-calling contract;
@@ -1307,6 +1335,7 @@ _TOOL_DISPLAY_NAMES = {
     VERIFY_TOOL_NAME: "Verify answer",
     MINUTES_TOOL_NAME: "Search minutes",
     RFC_RELATIONS_TOOL_NAME: "Check RFC relations",
+    RFC_FAMILY_TOOL_NAME: "Find RFC family",
 }
 
 
@@ -1457,6 +1486,21 @@ def _build_tools() -> list:
             {"rfc_number": {"type": "string", "description": "e.g. '4035' or 'RFC4035'"}},
             ["rfc_number"],
         ),
+        _tool(
+            RFC_FAMILY_TOOL_NAME,
+            (
+                "Find the topically-related family of RFCs around one RFC, beyond structural "
+                "obsoletes/updates relations -- some topics (DNSSEC is the motivating example) are "
+                "actually explained across a cluster of RFCs tied together only by citation and shared "
+                "topic, with one or more BCP/Informational documents acting as an overview or roadmap "
+                "(e.g. RFC 9364 for DNSSEC). Use this when get_rfc_relations comes back empty or "
+                "insufficient and the decision still looks like it might be explained elsewhere in the "
+                "same topic family. Heuristic, not exhaustive -- an empty result means nothing found, "
+                "not that nothing exists."
+            ),
+            {"rfc_number": {"type": "string", "description": "e.g. '4035' or 'RFC4035'"}},
+            ["rfc_number"],
+        ),
     ]
 
 
@@ -1599,6 +1643,7 @@ def ask(
     verify_tool_name = VERIFY_TOOL_NAME
     minutes_tool_name = MINUTES_TOOL_NAME
     rfc_relations_tool_name = RFC_RELATIONS_TOOL_NAME
+    rfc_family_tool_name = RFC_FAMILY_TOOL_NAME
     tools = _build_tools()
 
     # When hints are given (as every existing battery test script does), tell
@@ -1828,6 +1873,14 @@ def ask(
             if verbose:
                 print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r}", file=sys.stderr)
             observation = _get_rfc_relations(rfc_number)
+            evidence_log.append(observation)
+            return observation
+
+        if tool_name == rfc_family_tool_name:
+            rfc_number = args.get("rfc_number", "")
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r}", file=sys.stderr)
+            observation = _find_related_rfc_family(rfc_number)
             evidence_log.append(observation)
             return observation
 

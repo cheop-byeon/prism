@@ -17,6 +17,7 @@ declares Python 3.13+.
 
 from __future__ import annotations
 
+import ast
 import base64
 import difflib
 import email as email_lib
@@ -706,6 +707,130 @@ class IetfImportService:
             "updates": updates,
             "updated_by": updated_by,
         }
+
+    _RFC_NAME_RE = re.compile(r"^rfc\d+$")
+
+    @staticmethod
+    def find_related_rfc_family(rfc_number: str) -> dict:
+        """Find the topically-related "family" of RFCs around one RFC --
+        beyond structural obsoletes/updates relations, some topics (DNSSEC
+        is the motivating example: RFC 9364 is a roadmap tying together a
+        couple dozen RFCs that neither obsolete nor update each other) are
+        actually explained across a cluster of RFCs connected only by
+        citation. Datatracker has no "topic cluster" or "roadmap" concept
+        to query directly, so this is a heuristic pipeline, validated
+        empirically against RFC 4035 -> DNSSEC before being written:
+
+          1. Fetch every document that cites this RFC (informatively or
+             normatively). This is the noisy, complete set -- 513 for
+             RFC 4035, nearly all of them ordinary specs that just build on
+             it as one piece of a larger, unrelated design.
+          2. Keep only the citing documents that are themselves published
+             RFCs (120 of the 513) -- a draft citing it is essentially
+             never the kind of curated overview being looked for here.
+          3. Keep only BCP/Informational-track ones (49 of 120) -- an
+             overview/roadmap document is a description of practice or a
+             survey, not a Standards-track protocol spec that merely cites
+             this one as a building block.
+          4. Keep only the ones whose title contains this RFC's own most
+             specific keyword -- Datatracker tags each RFC with a handful
+             of free-text keywords (e.g. RFC 4035 has "dnssec" alongside
+             generic ones like "domain name system"); the SHORTEST tag is
+             used as a cheap proxy for "the specific acronym/term" rather
+             than a broad descriptive phrase, since a generic phrase would
+             let unrelated BCP/Informational RFCs back in.
+
+        513 citing documents collapse to 9 highly specific ones this way,
+        correctly including RFC 9364 itself and excluding unrelated
+        BCP/Informational noise (IPv6 node requirements, NAT64 deployment,
+        etc.) that happened to cite RFC 4035 in passing. Not exhaustive or
+        guaranteed for every topic -- it's a heuristic over real citation
+        and keyword data, not a curated taxonomy.
+        """
+        number = re.sub(r"[^0-9]", "", rfc_number)
+        if not number:
+            return {"error": f"{rfc_number!r} doesn't look like an RFC number"}
+        name = f"rfc{number}"
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                origin_resp = client.get(
+                    f"https://datatracker.ietf.org/api/v1/doc/document/{name}/", params={"format": "json"}
+                )
+                origin_resp.raise_for_status()
+                origin = origin_resp.json()
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch {name}: {exc}"}
+
+        # Datatracker serializes this list field as the str() of a Python
+        # list (confirmed live: "['DNSSEC', 'DNS Security Extensions', 'DNS']"
+        # as an actual JSON string value, not a JSON array) -- literal_eval
+        # is the correct, safe parse for that, not a string-replace hack.
+        try:
+            keywords = ast.literal_eval(origin.get("keywords") or "[]")
+        except (ValueError, SyntaxError):
+            keywords = []
+        topic_keyword = min((k for k in keywords if k), key=len, default=None)
+
+        def _fetch_citing_names(client: httpx.Client, relationship_slug: str) -> list[str]:
+            names: list[str] = []
+            url = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
+            params: dict | None = {
+                "target__name": name,
+                "relationship__slug": relationship_slug,
+                "format": "json",
+                "limit": 100,
+            }
+            while url:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                for obj in data.get("objects", []):
+                    uri: str = obj.get("source", "") or ""
+                    doc_name = uri.rstrip("/").split("/")[-1]
+                    if doc_name:
+                        names.append(doc_name)
+                next_page = data.get("meta", {}).get("next")
+                url = f"https://datatracker.ietf.org{next_page}" if next_page else None
+                params = None
+            return names
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                citing = set(_fetch_citing_names(client, "refinfo"))
+                citing |= set(_fetch_citing_names(client, "refnorm"))
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch citing documents for {name}: {exc}"}
+
+        rfc_candidates = sorted(n for n in citing if IetfImportService._RFC_NAME_RE.fullmatch(n))
+        if not rfc_candidates:
+            return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": []}
+
+        metas: list[dict] = []
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                for i in range(0, len(rfc_candidates), 50):
+                    chunk = rfc_candidates[i : i + 50]
+                    resp = client.get(
+                        "https://datatracker.ietf.org/api/v1/doc/document/",
+                        params={"name__in": ",".join(chunk), "format": "json", "limit": len(chunk)},
+                    )
+                    resp.raise_for_status()
+                    metas.extend(resp.json().get("objects", []))
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch candidate metadata: {exc}"}
+
+        family = []
+        for meta in metas:
+            level = (meta.get("std_level") or "").rstrip("/").split("/")[-1]
+            if level not in ("bcp", "inf"):
+                continue
+            title = meta.get("title") or ""
+            if topic_keyword and topic_keyword.lower() not in title.lower():
+                continue
+            family.append({"rfc": meta["name"].upper(), "title": title, "std_level": level})
+
+        return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": family}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:

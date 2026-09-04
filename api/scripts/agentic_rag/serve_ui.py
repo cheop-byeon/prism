@@ -58,6 +58,7 @@ _TOOL_KIND = {
     "verify_answer": "verify",
     "search_wg_minutes": "retrieval",
     "get_rfc_relations": "discovery",
+    "find_related_rfc_family": "discovery",
 }
 
 # What each tool actually touches outside this script, and a real (not
@@ -150,6 +151,16 @@ _TOOL_DETAILS = {
         ),
         "example": (
             'get_rfc_relations(rfc_number="4035")\n# -> obsoletes 9 earlier DNSSEC RFCs, updated by 7 later ones'
+        ),
+    },
+    "find_related_rfc_family": {
+        "resource": (
+            "IETF Datatracker API (datatracker.ietf.org) -- citation graph + keyword lookup, "
+            "several calls per invocation (all citing documents, then batched metadata)."
+        ),
+        "example": (
+            'find_related_rfc_family(rfc_number="4035")\n'
+            "# -> 11 DNSSEC-specific RFCs including RFC 9364 (the DNSSEC roadmap), out of 513 total citing docs"
         ),
     },
 }
