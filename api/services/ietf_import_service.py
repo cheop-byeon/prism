@@ -180,6 +180,156 @@ class IetfImportService:
         )
 
     @staticmethod
+    def download_drafts_to_local(payload: IetfDraftImportPayload) -> tuple[dict, int]:
+        """Download draft revision text into local mounted storage and return
+        local file metadata -- mirrors download_mailarchive_as_mbox_to_local:
+        no FileService/account dependency, so callers outside a logged-in
+        Studio session (the standalone decision-agent UI's Corpora tab) can
+        pull fresh raw text without also needing to attach/index it.
+        """
+
+        sidecar_payload = IetfImportService._request_sidecar("/api/v1/import/drafts", dict(payload))
+        try:
+            content = base64.b64decode(sidecar_payload.content_base64)
+        except ValueError as exc:
+            raise RemoteFileUploadError("IETF data service returned invalid file content") from exc
+
+        local_dir = Path("/app/api/storage/ietf-downloads")
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = sidecar_payload.filename
+        destination = local_dir / filename
+        destination.write_bytes(content)
+
+        relative_hint = destination.as_posix().replace("/app/api/storage/", "docker/volumes/app/storage/")
+        return (
+            {
+                "saved_path": destination.as_posix(),
+                "host_path_hint": relative_hint,
+                "filename": destination.name,
+                "size": destination.stat().st_size,
+            },
+            201,
+        )
+
+    # Meeting-numbered material's own name embeds which meeting it's from
+    # (e.g. "minutes-65-sidr", "slides-66-sidr-4") -- extracted here instead
+    # of a second lookup, since it's also how download_wg_resource_to_local
+    # builds the actual ietf.org/proceedings/<meeting>/... URL.
+    _MEETING_MATERIAL_NAME_RE = re.compile(r"^[a-z]+-(\d+)-")
+
+    @staticmethod
+    def list_wg_resources(wg_acronym: str, doc_type: str) -> dict:
+        """List a WG's documents of one Datatracker doctype (agenda, minutes,
+        slides, charter, recording, etc.) via Datatracker's own document
+        listing API, parameterized by type -- the same read-only call covers
+        every non-draft/RFC/mailarchive resource a WG has, since Datatracker
+        already exposes them all through one endpoint.
+        """
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                response = client.get(
+                    "https://datatracker.ietf.org/api/v1/doc/document/",
+                    params={"group__acronym": wg_acronym, "type": doc_type, "format": "json", "limit": 250},
+                )
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("Datatracker document list failed for %s/%s: %s", wg_acronym, doc_type, exc)
+            return {"count": 0, "documents": [], "error": str(exc)}
+
+        data = response.json()
+        documents = [
+            {
+                "name": obj.get("name", ""),
+                "rev": obj.get("rev", ""),
+                "title": obj.get("title", ""),
+                "time": obj.get("time", ""),
+                "uploaded_filename": obj.get("uploaded_filename", ""),
+                "external_url": obj.get("external_url", ""),
+            }
+            for obj in data.get("objects", [])
+        ]
+        return {"count": data.get("meta", {}).get("total_count", len(documents)), "documents": documents}
+
+    @staticmethod
+    def download_wg_resource_to_local(doc_type: str, document: dict) -> dict:
+        """Download one WG resource document (agenda/minutes/slides/charter/
+        etc.) to local storage -- download only, same scope as every other
+        Corpora-tab action: no FileService/account dependency, no dataset
+        attach/index.
+
+        URL construction genuinely differs per doctype family -- confirmed
+        by spot-checking real documents rather than assumed:
+          - charter: ietf.org/charter/<name>-<rev>.txt
+          - conflrev: ietf.org/cr/<name>-<rev>.txt
+          - recording: external_url is already a direct link (YouTube or an
+            .mp3 on ietf.org) -- returned as a link, not downloaded, since a
+            YouTube URL isn't a fetchable file and treating it as one would
+            be misleading.
+          - everything else (agenda, minutes, slides, bluesheets, chatlog,
+            narrativeminutes, polls, procmaterials): meeting-numbered
+            material served from
+            ietf.org/proceedings/<meeting>/<type>/<uploaded_filename>.
+
+        Raises RemoteFileUploadError with a specific reason when a document
+        doesn't fit any of the above -- a real, current limitation for a
+        handful of doctypes (e.g. BOF Request, Status Change) whose content
+        lives in Datatracker's own database rather than a static file, not
+        a bug to silently paper over with a guessed URL.
+        """
+        name = document.get("name", "")
+        rev = document.get("rev", "")
+        uploaded_filename = document.get("uploaded_filename", "")
+        external_url = document.get("external_url", "")
+
+        if doc_type == "recording":
+            if not external_url:
+                raise RemoteFileUploadError(f"{name}: no recording URL on file")
+            return {"name": name, "kind": "link", "url": external_url}
+
+        if doc_type == "charter":
+            url = f"https://www.ietf.org/charter/{name}-{rev}.txt"
+        elif doc_type == "conflrev":
+            url = f"https://www.ietf.org/cr/{name}-{rev}.txt"
+        else:
+            if not uploaded_filename:
+                raise RemoteFileUploadError(f"{name}: no known download location for this document type yet")
+            match = IetfImportService._MEETING_MATERIAL_NAME_RE.match(name)
+            if not match:
+                raise RemoteFileUploadError(f"{name}: could not determine its meeting number")
+            url = f"https://www.ietf.org/proceedings/{match.group(1)}/{doc_type}/{uploaded_filename}"
+
+        try:
+            with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                response = client.get(url)
+                response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RemoteFileUploadError(f"{name}: failed to download from {url} ({exc})") from exc
+
+        local_dir = Path("/app/api/storage/ietf-downloads/resources")
+        local_dir.mkdir(parents=True, exist_ok=True)
+        # uploaded_filename is only unique within one meeting -- many older
+        # minutes/bluesheets across DIFFERENT meetings were all literally
+        # uploaded as "sidr.txt", confirmed live (multiple downloads silently
+        # overwrote each other before this fix). The document's own `name`
+        # (e.g. "minutes-83-sidr") is unique across the whole WG, so it's
+        # used for the local filename; the extension still comes from
+        # uploaded_filename since format varies (.txt/.html/.pdf).
+        extension = Path(uploaded_filename).suffix if uploaded_filename else ".txt"
+        filename = f"{name}{extension}"
+        destination = local_dir / filename
+        destination.write_bytes(response.content)
+
+        return {
+            "name": name,
+            "kind": "file",
+            "saved_path": destination.as_posix(),
+            "filename": destination.name,
+            "size": destination.stat().st_size,
+            "source_url": url,
+        }
+
+    @staticmethod
     def import_rfcs(payload: IetfRfcImportPayload) -> tuple[dict, int]:
         """Import selected RFC documents as a markdown dataset file."""
 
@@ -384,6 +534,10 @@ class IetfImportService:
         replaced_by:    drafts/RFCs that supersede this one (target=this, relationship=replaces)
         first_rev_date: ISO datetime of the earliest new_revision event (first submission)
         last_rev_date:  ISO datetime of the latest new_revision event (last published version)
+        latest_rev:     current revision number (e.g. "10"), straight from the document
+                        record's own "rev" field -- lets a caller build the exact
+                        "<draft_name>-<rev>" identifier a fresh download needs without
+                        a second lookup.
 
         All three queries run in parallel.
         """
@@ -394,6 +548,7 @@ class IetfImportService:
         replaced_by: list[str] = []
         first_rev_date: str | None = None
         last_rev_date: str | None = None
+        latest_rev: str | None = None
 
         def _fetch_related(client: httpx.Client, params: dict, uri_field: str) -> list[str]:
             try:
@@ -410,17 +565,20 @@ class IetfImportService:
                 logger.warning("Datatracker relations sub-request failed: %s", exc)
                 return []
 
-        def _fetch_dates(client: httpx.Client) -> tuple[str | None, str | None]:
+        def _fetch_dates(client: httpx.Client) -> tuple[str | None, str | None, str | None]:
             first_date: str | None = None
             last_date: str | None = None
+            rev: str | None = None
             try:
-                # Last-modified date from the document record itself
+                # Last-modified date and current revision from the document record itself
                 doc_resp = client.get(
                     f"https://datatracker.ietf.org/api/v1/doc/document/{draft_name}/",
                     params={"format": "json"},
                 )
                 doc_resp.raise_for_status()
-                last_date = doc_resp.json().get("time")
+                doc_json = doc_resp.json()
+                last_date = doc_json.get("time")
+                rev = doc_json.get("rev")
             except Exception as exc:
                 logger.warning("Datatracker document fetch failed for '%s': %s", draft_name, exc)
             try:
@@ -441,7 +599,7 @@ class IetfImportService:
                     first_date = objects[0].get("time")
             except Exception as exc:
                 logger.warning("Datatracker docevent fetch failed for '%s': %s", draft_name, exc)
-            return first_date, last_date
+            return first_date, last_date, rev
 
         try:
             with httpx.Client(timeout=10.0) as client:
@@ -456,7 +614,7 @@ class IetfImportService:
                     f_dates = pool.submit(_fetch_dates, client)
                     replaces = f_replaces.result()
                     replaced_by = f_replaced_by.result()
-                    first_rev_date, last_rev_date = f_dates.result()
+                    first_rev_date, last_rev_date, latest_rev = f_dates.result()
         except Exception as exc:
             logger.warning("Datatracker relations request failed for '%s': %s", draft_name, exc)
 
@@ -465,6 +623,88 @@ class IetfImportService:
             "replaced_by": replaced_by,
             "first_rev_date": first_rev_date,
             "last_rev_date": last_rev_date,
+            "latest_rev": latest_rev,
+        }
+
+    @staticmethod
+    def get_rfc_relations(rfc_number: str) -> dict:
+        """Return obsoletes/obsoleted_by/updates/updated_by for an RFC via
+        Datatracker's relateddocument API -- the same relationship graph
+        get_draft_relations already queries for drafts (replaces/replaced_by),
+        but the two edge types relevant to "is this actually explained
+        somewhere else in the RFC's own family" (a later RFC obsoleting or
+        updating it, or it obsoleting/updating an earlier one) rather than
+        draft-to-draft supersession before publication.
+
+        All four queries (two relationships x two directions) run in parallel.
+        """
+        number = re.sub(r"[^0-9]", "", rfc_number)
+        if not number:
+            return {"error": f"{rfc_number!r} doesn't look like an RFC number"}
+        name = f"rfc{number}"
+
+        def _fetch_related(client: httpx.Client, params: dict, uri_field: str) -> list[str]:
+            try:
+                resp = client.get("https://datatracker.ietf.org/api/v1/doc/relateddocument/", params=params)
+                resp.raise_for_status()
+                names: list[str] = []
+                for obj in resp.json().get("objects", []):
+                    uri: str = obj.get(uri_field, "") or ""
+                    doc_name = uri.rstrip("/").split("/")[-1]
+                    if not doc_name:
+                        continue
+                    names.append(doc_name.upper() if re.fullmatch(r"rfc\d+", doc_name) else doc_name)
+                return names
+            except Exception as exc:
+                logger.warning("Datatracker relation fetch failed for '%s': %s", name, exc)
+                return []
+
+        obsoletes: list[str] = []
+        obsoleted_by: list[str] = []
+        updates: list[str] = []
+        updated_by: list[str] = []
+        try:
+            with httpx.Client(timeout=10.0) as client:
+                base_params = {"format": "json", "limit": 50}
+                with ThreadPoolExecutor(max_workers=4) as pool:
+                    f_obsoletes = pool.submit(
+                        _fetch_related,
+                        client,
+                        {**base_params, "source__name": name, "relationship__slug": "obs"},
+                        "target",
+                    )
+                    f_obsoleted_by = pool.submit(
+                        _fetch_related,
+                        client,
+                        {**base_params, "target__name": name, "relationship__slug": "obs"},
+                        "source",
+                    )
+                    f_updates = pool.submit(
+                        _fetch_related,
+                        client,
+                        {**base_params, "source__name": name, "relationship__slug": "updates"},
+                        "target",
+                    )
+                    f_updated_by = pool.submit(
+                        _fetch_related,
+                        client,
+                        {**base_params, "target__name": name, "relationship__slug": "updates"},
+                        "source",
+                    )
+                    obsoletes = f_obsoletes.result()
+                    obsoleted_by = f_obsoleted_by.result()
+                    updates = f_updates.result()
+                    updated_by = f_updated_by.result()
+        except Exception as exc:
+            logger.warning("Datatracker relations request failed for '%s': %s", name, exc)
+            return {"error": str(exc)}
+
+        return {
+            "rfc": name.upper(),
+            "obsoletes": obsoletes,
+            "obsoleted_by": obsoleted_by,
+            "updates": updates,
+            "updated_by": updated_by,
         }
 
     @staticmethod

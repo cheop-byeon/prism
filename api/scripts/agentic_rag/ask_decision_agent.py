@@ -240,6 +240,22 @@ _VERIFY_INSTRUCTION = _load_skill("verify_skill.md")
 # room for the model's own self-directed searches/fetches/re-verification.
 _MAX_ITERATIONS = 10
 
+# Deep Dive tab: a genuinely more thorough pass, not just a different render
+# of the same events -- ask() takes both as optional overrides (see its
+# docstring), so the Ask/Investigate tabs' behavior is completely unaffected.
+_DEEP_DIVE_MAX_ITERATIONS = 20
+_DEEP_DIVE_ADDENDUM = (
+    "Go deeper than usual on this question: don't settle for the first search "
+    "result. If evidence looks thin, ambiguous, or contradictory, try at "
+    "least one differently-phrased search before concluding there's nothing "
+    "more. When it would materially strengthen the answer, fetch the actual "
+    "draft or RFC text to confirm exact wording rather than trusting the "
+    "evolution dataset's diff alone, and use diff_ietf_draft_revisions as an "
+    "independent second opinion on a change that matters. Prioritize "
+    "thoroughness over speed -- more tool calls are fine if they add real "
+    "evidence, not just repetition."
+)
+
 _ARCHIVE_BASE = "https://www.ietf.org/archive/id/"
 _RFC_EDITOR_BASE = "https://www.rfc-editor.org/rfc/"
 _DATATRACKER_BASE = "https://datatracker.ietf.org"
@@ -1041,6 +1057,79 @@ def _fetch_rfc_text(rfc_number: str, query: str | None) -> str:
     return _filter_primary_source_text(text, query, source_label=f"RFC{number}")
 
 
+# Where the Sources tab's "Add sources" downloads land (services/ietf_import_service.py
+# download_wg_resource_to_local) -- searched here as plain local files, not a Dify
+# dataset, since these are occasional cross-checks, not a corpus worth indexing.
+_RESOURCES_DIR = Path("/app/api/storage/ietf-downloads/resources")
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+
+
+def _search_wg_minutes(wg: str, query: str, max_results: int = 5) -> str:
+    """Search this WG's already-downloaded meeting minutes for a phrase --
+    local file search only, never a live fetch or a new download. Downloads
+    are strictly user-triggered (the Sources tab's own "Download" button,
+    never this agent -- see that tab's design), so a WG with nothing
+    downloaded yet is told so plainly rather than the tool fetching
+    anything itself.
+    """
+    files = sorted(_RESOURCES_DIR.glob(f"minutes-*-{wg}.*")) if _RESOURCES_DIR.exists() else []
+    if not files:
+        return (
+            f"No minutes downloaded locally for WG '{wg}' yet -- the mail archive alone may not have this "
+            "discussion. Suggest the user download minutes from the Sources tab if they want it checked."
+        )
+
+    terms = [t.lower() for t in query.split() if t]
+    matches: list[str] = []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if path.suffix == ".html":
+            text = _HTML_TAG_RE.sub(" ", text)
+        lowered = text.lower()
+        if terms and not all(term in lowered for term in terms):
+            continue
+        idx = lowered.find(terms[0]) if terms else 0
+        start, end = max(0, idx - 200), min(len(text), idx + 400)
+        snippet = " ".join(text[start:end].split())
+        matches.append(f"{path.stem}: ...{snippet}...")
+        if len(matches) >= max_results:
+            break
+
+    if not matches:
+        return f"Searched {len(files)} downloaded minutes for WG '{wg}' -- no match for {query!r}."
+    return "\n\n".join(matches)
+
+
+def _get_rfc_relations(rfc_number: str) -> str:
+    """Format IetfImportService.get_rfc_relations() for the model -- which
+    RFCs this one obsoletes/is obsoleted by and updates/is updated by, so a
+    decision that looks unexplained in this RFC's own history can be
+    checked against the family it actually belongs to (e.g. a later RFC
+    fixing or superseding a specific part of an earlier one).
+    """
+    from services.ietf_import_service import IetfImportService
+
+    data = IetfImportService.get_rfc_relations(rfc_number)
+    if data.get("error"):
+        return f"Could not look up relations for {rfc_number}: {data['error']}"
+
+    lines = [f"Relations for {data['rfc']}:"]
+    if data["obsoletes"]:
+        lines.append(f"  Obsoletes: {', '.join(data['obsoletes'])}")
+    if data["obsoleted_by"]:
+        lines.append(f"  Obsoleted by: {', '.join(data['obsoleted_by'])}")
+    if data["updates"]:
+        lines.append(f"  Updates: {', '.join(data['updates'])}")
+    if data["updated_by"]:
+        lines.append(f"  Updated by: {', '.join(data['updated_by'])}")
+    if len(lines) == 1:
+        lines.append("  No obsoletes/updates relations found -- this RFC stands alone in that graph.")
+    return "\n".join(lines)
+
+
 def _diff_draft_revisions(draft_name: str, from_revision: str, to_revision: str, query: str | None) -> str:
     """Diff two draft revisions with the real `iddiff` tool (ietf-tools/iddiff on
     PyPI) -- a genuinely independent second opinion on what changed, using its
@@ -1200,6 +1289,8 @@ DIFF_REVISIONS_TOOL_NAME = "diff_ietf_draft_revisions"
 CITE_DIFF_TOOL_NAME = "cite_iddiff_url"
 DISCOVERY_TOOL_NAME = "list_available_ietf_corpora"
 VERIFY_TOOL_NAME = "verify_answer"
+MINUTES_TOOL_NAME = "search_wg_minutes"
+RFC_RELATIONS_TOOL_NAME = "get_rfc_relations"
 
 # Short, human-facing labels for live progress/UI display -- kept separate
 # from the tool names themselves (those are the function-calling contract;
@@ -1214,6 +1305,8 @@ _TOOL_DISPLAY_NAMES = {
     DIFF_REVISIONS_TOOL_NAME: "Diff revisions",
     CITE_DIFF_TOOL_NAME: "Cite a diff",
     VERIFY_TOOL_NAME: "Verify answer",
+    MINUTES_TOOL_NAME: "Search minutes",
+    RFC_RELATIONS_TOOL_NAME: "Check RFC relations",
 }
 
 
@@ -1338,6 +1431,32 @@ def _build_tools() -> list:
             {"draft_answer": {"type": "string", "description": "the full draft answer to check"}},
             ["draft_answer"],
         ),
+        _tool(
+            MINUTES_TOOL_NAME,
+            (
+                "Search a working group's already-downloaded meeting minutes for a phrase -- a discussion "
+                "that never happened on the mailing list can still show up here, since some decisions get "
+                "made or explained live in a meeting. Only covers minutes already pulled via the Sources "
+                "tab; if none are downloaded for this WG, it says so rather than fetching anything itself."
+            ),
+            {
+                "wg": {"type": "string", "description": "WG acronym, e.g. 'sidr'"},
+                "query": {"type": "string", "description": "search phrase"},
+            },
+            ["wg", "query"],
+        ),
+        _tool(
+            RFC_RELATIONS_TOOL_NAME,
+            (
+                "Look up which RFCs a given RFC obsoletes/is obsoleted by, and updates/is updated by, via "
+                "IETF Datatracker. Use this when a decision looks unexplained in this RFC's own history -- "
+                "it may actually be explained by an earlier RFC this one obsoletes, or fixed/clarified by a "
+                "later RFC that updates it (common in families like DNSSEC, where several RFCs define "
+                "different pieces and later ones amend earlier ones)."
+            ),
+            {"rfc_number": {"type": "string", "description": "e.g. '4035' or 'RFC4035'"}},
+            ["rfc_number"],
+        ),
     ]
 
 
@@ -1389,8 +1508,17 @@ def ask(
     verbose: bool = False,
     trace: list[dict] | None = None,
     on_event=None,
+    max_iterations: int | None = None,
+    extra_instruction: str | None = None,
 ) -> str:
     """... (see module docstring for the full design).
+
+    max_iterations: overrides _MAX_ITERATIONS for this call (None keeps the
+    default). extra_instruction: appended to the system prompt for this call
+    only (None leaves _INSTRUCTION unchanged) -- both let a caller (the
+    Deep Dive tab) run a genuinely more thorough pass without a second copy
+    of this whole function; every existing caller omits both and is
+    unaffected.
 
     trace: optional list to append structured tool-call events to (tool
     name, args, iteration, whether it was self-directed or safety-net
@@ -1469,6 +1597,8 @@ def ask(
     cite_diff_tool_name = CITE_DIFF_TOOL_NAME
     discovery_tool_name = DISCOVERY_TOOL_NAME
     verify_tool_name = VERIFY_TOOL_NAME
+    minutes_tool_name = MINUTES_TOOL_NAME
+    rfc_relations_tool_name = RFC_RELATIONS_TOOL_NAME
     tools = _build_tools()
 
     # When hints are given (as every existing battery test script does), tell
@@ -1482,8 +1612,9 @@ def ask(
         known_ids.append(f"mailarchive dataset_id={mailarchive_dataset_id_candidate}")
     hint_suffix = f"\n\n(Already known: {'; '.join(known_ids)}.)" if known_ids else ""
 
+    system_instruction = f"{_INSTRUCTION}\n\n{extra_instruction}" if extra_instruction else _INSTRUCTION
     prompt_messages: list = [
-        SystemPromptMessage(content=_INSTRUCTION),
+        SystemPromptMessage(content=system_instruction),
         UserPromptMessage(content=f"{query}{hint_suffix}"),
     ]
 
@@ -1683,6 +1814,23 @@ def ask(
             verify_called = True
             return _verify_answer(draft_answer, evidence_log, model_instance)
 
+        if tool_name == minutes_tool_name:
+            wg = args.get("wg", "")
+            minutes_query = args.get("query", "")
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} wg={wg!r} query={minutes_query!r}", file=sys.stderr)
+            observation = _search_wg_minutes(wg, minutes_query)
+            evidence_log.append(observation)
+            return observation
+
+        if tool_name == rfc_relations_tool_name:
+            rfc_number = args.get("rfc_number", "")
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r}", file=sys.stderr)
+            observation = _get_rfc_relations(rfc_number)
+            evidence_log.append(observation)
+            return observation
+
         return f"there is no tool named {tool_name}"
 
     def _force_tool_call(tool_name: str, args: dict, content: str, iteration: int) -> None:
@@ -1704,11 +1852,12 @@ def ask(
         )
         prompt_messages.append(ToolPromptMessage(content=observation, tool_call_id=forced_call_id, name=tool_name))
 
-    for iteration in range(1, _MAX_ITERATIONS + 1):
+    effective_max_iterations = max_iterations or _MAX_ITERATIONS
+    for iteration in range(1, effective_max_iterations + 1):
         # Three forced safety-net rounds are budgeted in _MAX_ITERATIONS; after
         # all floors are satisfied, or once the model does everything on its
         # own, tool-free rounds are forced to guarantee termination.
-        is_last = iteration == _MAX_ITERATIONS
+        is_last = iteration == effective_max_iterations
         if on_event:
             on_event({"stage": "thinking"})
         result = _invoke_llm_with_retry(
@@ -1773,6 +1922,13 @@ def ask(
                 continue
 
             return _finalize_answer(content)
+
+        # agent_skill.md asks the model for a one-sentence rationale alongside
+        # each tool call -- surface it live rather than only the fixed
+        # "Using: <tool>" status label, so the stream shows actual reasoning
+        # instead of a canned progress indicator.
+        if content.strip() and on_event:
+            on_event({"stage": "reasoning", "message": content.strip()})
 
         assistant_msg = AssistantPromptMessage(content=content, tool_calls=message.tool_calls)
         prompt_messages.append(assistant_msg)

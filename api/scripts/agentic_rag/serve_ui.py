@@ -56,6 +56,8 @@ _TOOL_KIND = {
     "diff_ietf_draft_revisions": "diff",
     "cite_iddiff_url": "diff",
     "verify_answer": "verify",
+    "search_wg_minutes": "retrieval",
+    "get_rfc_relations": "discovery",
 }
 
 # What each tool actually touches outside this script, and a real (not
@@ -133,6 +135,22 @@ _TOOL_DETAILS = {
             "auditing the draft answer against evidence already retrieved."
         ),
         "example": "Runs automatically before every final answer; not something a user calls directly.",
+    },
+    "search_wg_minutes": {
+        "resource": (
+            "Local files only -- meeting minutes already pulled via the Sources tab's "
+            "\"Add sources\" section, no external call at query time."
+        ),
+        "example": 'search_wg_minutes(\n  wg="sidr",\n  query="Expire Time"\n)',
+    },
+    "get_rfc_relations": {
+        "resource": (
+            "IETF Datatracker API (datatracker.ietf.org) -- live lookup of an RFC's "
+            "obsoletes/obsoleted-by and updates/updated-by relationships."
+        ),
+        "example": (
+            'get_rfc_relations(rfc_number="4035")\n# -> obsoletes 9 earlier DNSSEC RFCs, updated by 7 later ones'
+        ),
     },
 }
 
@@ -237,6 +255,154 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    @app.route("/api/corpora/freshness", methods=["GET"])
+    def api_corpora_freshness():
+        """Per-corpus live state for the Corpora tab -- what the sidecar/
+        Datatracker currently report, side by side with what's registered.
+        Read-only: no download, no writing. Each per-corpus lookup is
+        wrapped individually so one WG's sidecar hiccup doesn't blank the
+        whole table.
+        """
+        from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
+        from services.ietf_import_service import IetfImportService
+
+        try:
+            _text, catalog = _list_available_corpora()
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+        corpora = []
+        for entry in catalog:
+            row = dict(entry)
+            wg = entry.get("wg")
+            if wg:
+                try:
+                    row["mail_status"] = IetfImportService.get_mailarchive_sync_status(wg)
+                except Exception as exc:
+                    row["mail_status"] = {"error": str(exc)}
+            draft_name = entry.get("draft_name")
+            if draft_name:
+                try:
+                    row["draft_relations"] = IetfImportService.get_draft_relations(draft_name)
+                except Exception as exc:
+                    row["draft_relations"] = {"error": str(exc)}
+            corpora.append(row)
+        return jsonify({"corpora": corpora})
+
+    @app.route("/api/corpora/mail-sync", methods=["POST"])
+    def api_corpora_mail_sync():
+        """Trigger the sidecar's incremental IMAP sync for one mailing list --
+        download only, per the standalone UI's scope: this pulls fresh raw
+        mail into the sidecar's own store. Turning that into an updated Dify
+        dataset is still the existing manual Studio step.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        data = request.get_json(silent=True) or {}
+        list_name = (data.get("list_name") or "").strip()
+        if not list_name:
+            return jsonify({"error": "list_name is required"}), 400
+        try:
+            IetfImportService.trigger_mailarchive_sync(list_name)
+            status = IetfImportService.get_mailarchive_sync_status(list_name)
+            return jsonify(status)
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/corpora/draft-download", methods=["POST"])
+    def api_corpora_draft_download():
+        """Download one draft revision's raw text to local storage -- download
+        only, same scope as mail-sync above: attaching/indexing it as a
+        dataset document is still the existing manual Studio step.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        data = request.get_json(silent=True) or {}
+        draft_name = (data.get("draft_name") or "").strip()
+        revision = (data.get("revision") or "").strip()
+        if not draft_name or not revision:
+            return jsonify({"error": "draft_name and revision are required"}), 400
+        full_name = f"{draft_name}-{revision.zfill(2)}"
+        try:
+            result, status_code = IetfImportService.download_drafts_to_local(
+                {"draft_names": [full_name], "format": "txt"}
+            )
+            return jsonify(result), status_code
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    # Every non-draft/RFC/mailarchive Datatracker doctype -- shown in the
+    # Sources tab's "Add sources" section per WG. Listed here (not derived
+    # from IetfImportService) purely for display order/labels; the actual
+    # listing and download both go through Datatracker's own type-parameterized
+    # API, so adding a row here is the only step needed to surface a new type.
+    _WG_RESOURCE_TYPES = [
+        ("agenda", "Agenda"),
+        ("minutes", "Minutes"),
+        ("narrativeminutes", "Narrative Minutes"),
+        ("bluesheets", "Bluesheets"),
+        ("slides", "Slides"),
+        ("chatlog", "Chat Log"),
+        ("polls", "Polls"),
+        ("procmaterials", "Proceedings Materials"),
+        ("recording", "Recording"),
+        ("charter", "Charter"),
+        ("conflrev", "Conflict Review"),
+        ("bofreq", "BOF Request"),
+        ("statchg", "Status Change"),
+        ("review", "Review"),
+        ("statement", "Statement"),
+    ]
+    # Downloading every document of a type in one click could mean hundreds
+    # of sequential requests to ietf.org (337 slide decks for one old WG,
+    # seen while designing this) -- capped per click rather than uncapped,
+    # with the listing still reporting the true total so the UI can show
+    # "downloaded 30 of 337" instead of silently truncating.
+    _WG_RESOURCE_DOWNLOAD_CAP = 30
+
+    @app.route("/api/sources/types", methods=["GET"])
+    def api_sources_types():
+        return jsonify({"types": [{"key": key, "label": label} for key, label in _WG_RESOURCE_TYPES]})
+
+    @app.route("/api/sources/<wg>/<doc_type>", methods=["GET"])
+    def api_sources_list(wg, doc_type):
+        from services.ietf_import_service import IetfImportService
+
+        try:
+            return jsonify(IetfImportService.list_wg_resources(wg, doc_type))
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/sources/<wg>/<doc_type>/download", methods=["GET"])
+    def api_sources_download(wg, doc_type):
+        """Download every (capped) document of one type for a WG -- download
+        only, same scope as the rest of this tab: files land under
+        storage/ietf-downloads/resources/, recordings come back as a link
+        instead of a downloaded file, and attaching/indexing anything into a
+        Dify dataset is still a separate, manual Studio step.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        def work(on_event):
+            listing = IetfImportService.list_wg_resources(wg, doc_type)
+            documents = listing.get("documents", [])[:_WG_RESOURCE_DOWNLOAD_CAP]
+            results = []
+            for i, doc in enumerate(documents, start=1):
+                name = doc.get("name", "")
+                on_event({"stage": "downloading", "message": f"{name} ({i}/{len(documents)})"})
+                try:
+                    outcome = IetfImportService.download_wg_resource_to_local(doc_type, doc)
+                    results.append({**outcome, "ok": True})
+                except Exception as exc:
+                    results.append({"name": name, "ok": False, "error": str(exc)})
+            return {"results": results, "total_available": listing.get("count", len(results))}
+
+        return _sse_stream(app, work)
+
     @app.route("/api/ask", methods=["GET"])
     def api_ask():
         from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
@@ -249,6 +415,36 @@ def main() -> None:
         def work(on_event):
             trace: list[dict] = []
             answer = ask_decision_agent(query=query, draft=draft, trace=trace, on_event=on_event)
+            return {"answer": answer, "trace": trace}
+
+        return _sse_stream(app, work)
+
+    @app.route("/api/deep-dive", methods=["GET"])
+    def api_deep_dive():
+        """Same agent/tools/endpoint shape as /api/ask, but a genuinely more
+        thorough pass -- more iterations budgeted, and an addendum telling
+        the model to verify against primary sources and try a second query
+        rather than settle for the first result. Not just a different
+        render of the same events (that's what Investigate already is).
+        """
+        from scripts.agentic_rag.ask_decision_agent import _DEEP_DIVE_ADDENDUM, _DEEP_DIVE_MAX_ITERATIONS
+        from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
+
+        query = (request.args.get("query") or "").strip()
+        draft = request.args.get("draft") or None
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+
+        def work(on_event):
+            trace: list[dict] = []
+            answer = ask_decision_agent(
+                query=query,
+                draft=draft,
+                trace=trace,
+                on_event=on_event,
+                max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
+                extra_instruction=_DEEP_DIVE_ADDENDUM,
+            )
             return {"answer": answer, "trace": trace}
 
         return _sse_stream(app, work)

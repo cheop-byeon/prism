@@ -133,6 +133,16 @@
   }
 
   .step-extra { font-size: 11px; color: var(--text-dim); font-style: italic; margin: -4px 0 10px; }
+
+  .reasoning-log {
+    margin: 2px 0 12px; padding-left: 12px; border-left: 2px solid var(--border);
+    display: flex; flex-direction: column; gap: 5px;
+  }
+  .reasoning-line { font-size: 12px; color: var(--text-dim); font-style: italic; line-height: 1.5; }
+  .reasoning-line.latest { color: var(--text); font-style: normal; font-weight: 500; }
+  @media (prefers-reduced-motion: no-preference) {
+    .reasoning-line.latest { animation: step-pop 0.25s ease; }
+  }
   .error-box {
     background: #2a1616; border: 1px solid var(--error); color: #ffb3ac;
     border-radius: 8px; padding: 12px 14px; font-size: 13px; font-family: var(--mono); white-space: pre-wrap;
@@ -304,6 +314,62 @@
   .guardrail-list { margin-top: 10px; }
   .guardrail-list .tool-row { background: var(--bg); }
   .guardrail-row .desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; margin: 8px 0; }
+
+  .corpora-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 14px; line-height: 1.4; max-width: 640px; }
+  .corpus-row {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .corpus-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+  .corpus-head .name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .corpus-head .rfc { font-size: 11px; color: var(--text-dim); }
+  .corpus-facet {
+    display: flex; align-items: center; gap: 10px; padding: 6px 0;
+    border-top: 1px solid var(--border);
+  }
+  .corpus-facet .facet-label { font-size: 11px; color: var(--text-dim); width: 110px; flex-shrink: 0; }
+  .corpus-facet .facet-value { font-size: 12px; color: var(--text); flex: 1; }
+  .corpus-facet .facet-value.error { color: var(--error); }
+  .corpus-facet button {
+    background: transparent; border: 1px solid var(--border); color: var(--accent);
+    padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    font-family: var(--sans); flex-shrink: 0;
+  }
+  .corpus-facet button:hover { border-color: var(--accent); }
+  .corpus-facet button:disabled { opacity: 0.5; cursor: default; }
+  .sources-toggle {
+    background: transparent; border: none; color: var(--accent); font-size: 11.5px; font-weight: 600;
+    cursor: pointer; padding: 8px 0 0; font-family: var(--sans);
+  }
+  .sources-toggle:hover { text-decoration: underline; }
+  .sources-panel { margin-top: 4px; }
+  .source-facet .facet-label { width: 140px; }
+  .facet-note { font-size: 11px; color: var(--text-dim); padding: 0 0 6px 140px; }
+  .facet-note a { color: var(--accent); text-decoration: none; }
+  .facet-note a:hover { text-decoration: underline; }
+
+  .agent-plan { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
+  .plan-step { display: flex; gap: 10px; align-items: flex-start; }
+  .plan-marker {
+    width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: #0a0e1a; background: var(--accent-dim);
+    transition: background 0.3s ease; line-height: 1;
+  }
+  .plan-step.active .plan-marker {
+    background: var(--accent); animation: step-pop 0.35s ease, step-glow 1.6s ease-in-out 0.35s infinite;
+  }
+  .plan-step.errored .plan-marker { background: var(--error); color: #fff; }
+  @media (prefers-reduced-motion: reduce) {
+    .plan-step.active .plan-marker { animation: none; box-shadow: 0 0 0 3px rgba(124, 158, 255, 0.22); }
+  }
+  .plan-body { flex: 1; min-width: 0; padding-top: 1px; }
+  .plan-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .plan-title .forced-tag {
+    font-size: 9.5px; font-weight: 600; color: var(--text-dim); background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; margin-left: 6px;
+  }
+  .plan-reason { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -316,8 +382,11 @@
 </div>
 <div class="tabs">
   <button class="tab-btn active" data-tab="ask">Ask</button>
+  <button class="tab-btn" data-tab="investigate">Investigate</button>
+  <button class="tab-btn" data-tab="deepdive">Deep Dive</button>
   <button class="tab-btn" data-tab="track">Track a Decision</button>
   <button class="tab-btn" data-tab="howto">How it Works</button>
+  <button class="tab-btn" data-tab="corpora">Sources</button>
 </div>
 <div class="tab-content">
   <section class="tab-pane active" id="pane-ask">
@@ -326,6 +395,27 @@
       <button id="ask">Ask</button>
     </div>
     <div class="conversation" id="conversation"></div>
+  </section>
+
+  <section class="tab-pane" id="pane-investigate">
+    <div class="controls">
+      <input id="investigateQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
+      <button id="investigateBtn">Ask</button>
+    </div>
+    <div class="conversation" id="investigateConversation"></div>
+  </section>
+
+  <section class="tab-pane" id="pane-deepdive">
+    <p class="corpora-hint">
+      Same tools as Ask/Investigate, but a genuinely more thorough pass -- more iterations
+      budgeted, and told to verify against primary sources and try a second query rather than
+      settle for the first result. Slower and more expensive; use it when a quick answer isn't enough.
+    </p>
+    <div class="controls">
+      <input id="deepDiveQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
+      <button id="deepDiveBtn">Ask</button>
+    </div>
+    <div class="conversation" id="deepDiveConversation"></div>
   </section>
 
   <section class="tab-pane" id="pane-track">
@@ -354,6 +444,16 @@
         <div id="skills"></div>
       </div>
     </div>
+  </section>
+
+  <section class="tab-pane" id="pane-corpora">
+    <p class="corpora-hint">
+      Pulls fresh raw material down to local storage only -- mail, draft text, and (under "Add
+      sources" per WG) meeting minutes, slides, charters, recordings, and more from Datatracker.
+      Nothing here attaches or indexes into a dataset -- that's still done by hand in Dify Studio,
+      same as every corpus here was originally built.
+    </p>
+    <div id="corporaList"><div class="loading">Loading…</div></div>
   </section>
 </div>
 <div class="modal-overlay" id="discussionModal" hidden>
@@ -502,6 +602,212 @@ async function loadDrafts() {
   }
 }
 
+let corporaData = [];
+
+function renderCorpora(corpora) {
+  if (!corpora.length) return '<p class="empty-state">No corpora found.</p>';
+  return corpora.map((c, idx) => {
+    const rfc = c.rfc_number ? `<span class="rfc">RFC ${escapeHtml(String(c.rfc_number))}</span>` : '';
+
+    let mailFacet = '';
+    if (c.wg) {
+      const ms = c.mail_status || {};
+      const value = ms.error
+        ? escapeHtml(ms.error)
+        : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages &middot; ${escapeHtml(ms.status || 'unknown')}`;
+      mailFacet = `
+        <div class="corpus-facet">
+          <span class="facet-label">Mail (${escapeHtml(c.wg)})</span>
+          <span class="facet-value${ms.error ? ' error' : ''}">${value}</span>
+          <button class="sync-mail-btn" data-list="${escapeHtml(c.wg)}" data-idx="${idx}">Sync now</button>
+        </div>`;
+    }
+
+    let draftFacet = '';
+    if (c.draft_name) {
+      const dr = c.draft_relations || {};
+      const value = dr.error
+        ? escapeHtml(dr.error)
+        : dr.latest_rev
+          ? `latest: rev ${escapeHtml(dr.latest_rev)}${dr.last_rev_date ? ' (' + escapeHtml(dr.last_rev_date.slice(0, 10)) + ')' : ''}`
+          : 'unknown';
+      draftFacet = `
+        <div class="corpus-facet">
+          <span class="facet-label">Draft text</span>
+          <span class="facet-value${dr.error ? ' error' : ''}">${value}</span>
+          <button class="download-draft-btn" data-draft="${escapeHtml(c.draft_name)}"
+                  data-rev="${escapeHtml(dr.latest_rev || '')}" ${dr.latest_rev ? '' : 'disabled'}>
+            Download latest revision
+          </button>
+        </div>`;
+    }
+
+    return `
+      <div class="corpus-row">
+        <div class="corpus-head">
+          <span class="name">${escapeHtml(c.draft_name)}</span>
+          ${rfc}
+        </div>
+        ${mailFacet}
+        ${draftFacet}
+        ${renderSourcesSection(c, idx)}
+      </div>`;
+  }).join('');
+}
+
+let resourceTypes = [];
+
+async function loadResourceTypes() {
+  const res = await fetch('/api/sources/types');
+  const data = await res.json();
+  resourceTypes = data.types || [];
+}
+
+// Every non-draft/RFC/mailarchive Datatracker doctype (agenda, minutes,
+// slides, charter, recording, ...) for this WG -- download-only, same as
+// the mail/draft facets above. Counts are fetched lazily on first expand,
+// not eagerly for every corpus on page load, since that would mean
+// 15 x N requests before the tab is even opened.
+function renderSourcesSection(corpus, idx) {
+  if (!corpus.wg) return '';
+  if (!corpus.sourcesExpanded) {
+    return `<button class="sources-toggle" data-idx="${idx}">+ Add sources</button>`;
+  }
+  const rows = resourceTypes.map((t) => {
+    const state = (corpus.resources || {})[t.key] || {};
+    let valueHtml = '';
+    if (state.loading) valueHtml = 'Checking…';
+    else if (state.error) valueHtml = escapeHtml(state.error);
+    else if (state.count != null) valueHtml = `${state.count} available`;
+
+    const note = state.downloadSummary ? `<div class="facet-note">${escapeHtml(state.downloadSummary)}</div>` : '';
+    const links = (state.links && state.links.length)
+      ? `<div class="facet-note">${state.links.map((l) =>
+          `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.name)}</a>`).join(', ')}</div>`
+      : '';
+    const disabled = state.count ? '' : 'disabled';
+    return `
+      <div class="corpus-facet source-facet">
+        <span class="facet-label">${escapeHtml(t.label)}</span>
+        <span class="facet-value${state.error ? ' error' : ''}">${valueHtml}</span>
+        <button class="source-download-btn" data-idx="${idx}" data-type="${t.key}" ${disabled}>Download</button>
+      </div>
+      ${note}${links}`;
+  }).join('');
+  return `<button class="sources-toggle" data-idx="${idx}">&minus; Add sources</button><div class="sources-panel">${rows}</div>`;
+}
+
+async function loadCorpora() {
+  const container = document.getElementById('corporaList');
+  try {
+    const res = await fetch('/api/corpora/freshness');
+    const data = await res.json();
+    corporaData = data.corpora || [];
+    container.innerHTML = renderCorpora(corporaData);
+  } catch (err) {
+    container.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
+  }
+}
+
+document.getElementById('corporaList').addEventListener('click', async (e) => {
+  const syncBtn = e.target.closest('.sync-mail-btn');
+  if (syncBtn) {
+    const idx = parseInt(syncBtn.dataset.idx, 10);
+    syncBtn.disabled = true;
+    syncBtn.textContent = 'Syncing…';
+    try {
+      const res = await fetch('/api/corpora/mail-sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ list_name: syncBtn.dataset.list }),
+      });
+      const result = await res.json();
+      corporaData[idx].mail_status = res.ok ? result : { error: result.error || 'Sync failed' };
+    } catch (err) {
+      corporaData[idx].mail_status = { error: String(err) };
+    }
+    document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
+    return;
+  }
+
+  const downloadBtn = e.target.closest('.download-draft-btn');
+  if (downloadBtn) {
+    downloadBtn.disabled = true;
+    const original = downloadBtn.textContent;
+    downloadBtn.textContent = 'Downloading…';
+    try {
+      const res = await fetch('/api/corpora/draft-download', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft_name: downloadBtn.dataset.draft, revision: downloadBtn.dataset.rev }),
+      });
+      const result = await res.json();
+      downloadBtn.textContent = res.ok ? `Saved: ${result.filename}` : (result.error || 'Failed');
+    } catch (err) {
+      downloadBtn.textContent = 'Failed';
+    }
+    setTimeout(() => { downloadBtn.disabled = false; downloadBtn.textContent = original; }, 3000);
+    return;
+  }
+
+  const sourcesToggle = e.target.closest('.sources-toggle');
+  if (sourcesToggle) {
+    const idx = parseInt(sourcesToggle.dataset.idx, 10);
+    const corpus = corporaData[idx];
+    corpus.sourcesExpanded = !corpus.sourcesExpanded;
+    const firstExpand = corpus.sourcesExpanded && !corpus.resources;
+    if (firstExpand) {
+      corpus.resources = {};
+      resourceTypes.forEach((t) => { corpus.resources[t.key] = { loading: true }; });
+    }
+    document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
+    if (!firstExpand) return;
+    resourceTypes.forEach(async (t) => {
+      try {
+        const res = await fetch(`/api/sources/${encodeURIComponent(corpus.wg)}/${t.key}`);
+        const data = await res.json();
+        corpus.resources[t.key] = data.error ? { error: data.error } : { count: data.count };
+      } catch (err) {
+        corpus.resources[t.key] = { error: String(err) };
+      }
+      document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
+    });
+    return;
+  }
+
+  const sourceDownloadBtn = e.target.closest('.source-download-btn');
+  if (sourceDownloadBtn) {
+    const idx = parseInt(sourceDownloadBtn.dataset.idx, 10);
+    const type = sourceDownloadBtn.dataset.type;
+    const corpus = corporaData[idx];
+    sourceDownloadBtn.disabled = true;
+    sourceDownloadBtn.textContent = 'Downloading…';
+    const source = new EventSource(`/api/sources/${encodeURIComponent(corpus.wg)}/${type}/download`);
+    const finish = (summary, links) => {
+      corpus.resources[type].downloadSummary = summary;
+      if (links) corpus.resources[type].links = links;
+      source.close();
+      document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
+    };
+    source.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'progress') {
+        sourceDownloadBtn.textContent = msg.message || 'Downloading…';
+      } else if (msg.type === 'result') {
+        const results = msg.data.results || [];
+        const ok = results.filter((r) => r.ok).length;
+        const links = results.filter((r) => r.ok && r.kind === 'link');
+        const capped = msg.data.total_available > results.length;
+        finish(`Downloaded ${ok}/${results.length}${capped ? ` of ${msg.data.total_available} available` : ''}`, links);
+      } else if (msg.type === 'error') {
+        finish(`Error: ${msg.message}`);
+      }
+    };
+    source.onerror = () => finish('Connection lost.');
+    return;
+  }
+});
+
 function toolLabel(name) { return toolDisplayNames[name] || name; }
 
 function renderTrace(trace) {
@@ -524,7 +830,16 @@ function statusLineForEvent(event) {
     return `${event.forced ? 'Auto-checking' : 'Using'}: ${toolLabel(event.tool)}…`;
   }
   if (event.stage === 'thinking') return event.message || 'Thinking…';
+  if (event.stage === 'reasoning') return 'Thinking…';
   return event.message || 'Working…';
+}
+
+function reasoningLogHtml(lines) {
+  if (!lines.length) return '';
+  const rendered = lines
+    .map((line, i) => `<div class="reasoning-line${i === lines.length - 1 ? ' latest' : ''}">${escapeHtml(line)}</div>`)
+    .join('');
+  return `<div class="reasoning-log">${rendered}</div>`;
 }
 
 const ASK_STEPS = [
@@ -581,9 +896,11 @@ function ask() {
   let activeKey = null;
   let extraNote = '';
   let errored = false;
+  const reasoningLines = [];
 
   const render = (bodyHtml) => {
-    turn.innerHTML = qHtml + stepDiagramHtml(ASK_STEPS, activeKey, visitCounts, errored, extraNote) + bodyHtml;
+    turn.innerHTML = qHtml + stepDiagramHtml(ASK_STEPS, activeKey, visitCounts, errored, extraNote)
+      + reasoningLogHtml(reasoningLines) + bodyHtml;
   };
 
   render('<div class="loading">Starting…</div>');
@@ -615,6 +932,8 @@ function ask() {
         } else {
           extraNote = `Also using: ${toolLabel(msg.tool)}`;
         }
+      } else if (msg.stage === 'reasoning' && msg.message) {
+        reasoningLines.push(msg.message);
       }
       render(`<div class="loading">${escapeHtml(statusLineForEvent(msg))}</div>`);
     } else if (msg.type === 'result') {
@@ -638,6 +957,115 @@ function ask() {
 
 askBtn.addEventListener('click', ask);
 queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
+
+// Same /api/ask backend and agent loop as the Ask tab above -- the only
+// difference is presentation. Ask maps the loop onto a fixed 5-node rail
+// (ASK_STEPS) approximating the typical path; this renders the REAL path
+// taken, one entry per actual tool call in the order it happened (including
+// repeats and anything outside the fixed list), each paired with the
+// reasoning that preceded it -- a growing plan instead of a fixed diagram.
+function renderPlan(steps) {
+  if (!steps.length) return '';
+  const items = steps.map((s) => {
+    const marker = s.status === 'done' ? '&check;' : (s.status === 'errored' ? '!' : '');
+    const forced = s.forced ? '<span class="forced-tag">auto</span>' : '';
+    const reason = s.reason ? `<div class="plan-reason">${escapeHtml(s.reason)}</div>` : '';
+    return `
+      <div class="plan-step ${s.status}">
+        <span class="plan-marker">${marker}</span>
+        <div class="plan-body">
+          <div class="plan-title">${escapeHtml(s.title)}${forced}</div>
+          ${reason}
+        </div>
+      </div>`;
+  }).join('');
+  return `<div class="agent-plan">${items}</div>`;
+}
+
+// Shared by Investigate and Deep Dive -- both render the same growing plan
+// list, and differ only in which backend endpoint they call (identical
+// agent/tools for Investigate; a more thorough pass with more iterations
+// and a depth-focused system-prompt addendum for Deep Dive -- see
+// /api/deep-dive in serve_ui.py). Not shared with Ask, which keeps its own
+// fixed-rail rendering deliberately unchanged.
+function runAgentFlow(endpoint, queryEl, btnEl, convEl) {
+  const query = queryEl.value.trim();
+  if (!query) return;
+  btnEl.disabled = true;
+
+  const turn = document.createElement('div');
+  turn.className = 'turn';
+  const draftLabel = draftEl.value ? ` <em>(draft: ${escapeHtml(draftEl.value)})</em>` : '';
+  const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
+
+  const steps = [];
+  let pendingReason = null;
+
+  const render = (bodyHtml) => {
+    turn.innerHTML = qHtml + renderPlan(steps) + bodyHtml;
+  };
+
+  render('<div class="loading">Starting…</div>');
+  convEl.appendChild(turn);
+  turn.scrollIntoView({behavior: 'smooth'});
+
+  const params = new URLSearchParams({query});
+  if (draftEl.value) params.set('draft', draftEl.value);
+  const source = new EventSource(`${endpoint}?${params}`);
+  let finished = false;
+
+  const stop = () => {
+    finished = true;
+    source.close();
+    btnEl.disabled = false;
+    queryEl.value = '';
+    turn.scrollIntoView({behavior: 'smooth'});
+  };
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      if (msg.stage === 'reasoning' && msg.message) {
+        pendingReason = msg.message;
+      } else if (msg.stage === 'tool_call') {
+        if (steps.length) steps[steps.length - 1].status = 'done';
+        steps.push({ title: toolLabel(msg.tool), reason: pendingReason, status: 'active', forced: msg.forced });
+        pendingReason = null;
+      }
+      render(steps.length ? '' : '<div class="loading">Starting…</div>');
+    } else if (msg.type === 'result') {
+      if (steps.length) steps[steps.length - 1].status = 'done';
+      render(`<div class="answer">${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace));
+      stop();
+    } else if (msg.type === 'error') {
+      if (steps.length) steps[steps.length - 1].status = 'errored';
+      render(`<div class="error-box">${escapeHtml(msg.message)}</div>`);
+      stop();
+    }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    if (steps.length) steps[steps.length - 1].status = 'errored';
+    render('<div class="error-box">Connection lost.</div>');
+    stop();
+  };
+}
+
+const investigateQueryEl = document.getElementById('investigateQuery');
+const investigateBtnEl = document.getElementById('investigateBtn');
+const investigateConvEl = document.getElementById('investigateConversation');
+investigateBtnEl.addEventListener('click', () => runAgentFlow('/api/ask', investigateQueryEl, investigateBtnEl, investigateConvEl));
+investigateQueryEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runAgentFlow('/api/ask', investigateQueryEl, investigateBtnEl, investigateConvEl);
+});
+
+const deepDiveQueryEl = document.getElementById('deepDiveQuery');
+const deepDiveBtnEl = document.getElementById('deepDiveBtn');
+const deepDiveConvEl = document.getElementById('deepDiveConversation');
+deepDiveBtnEl.addEventListener('click', () => runAgentFlow('/api/deep-dive', deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl));
+deepDiveQueryEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runAgentFlow('/api/deep-dive', deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl);
+});
 
 const threadQueryEl = document.getElementById('threadQuery');
 const trackThreadBtn = document.getElementById('trackThread');
@@ -842,6 +1270,8 @@ threadQueryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') trackD
 loadTools();
 loadSkills();
 loadDrafts();
+loadCorpora();
+loadResourceTypes();
 </script>
 </body>
 </html>
