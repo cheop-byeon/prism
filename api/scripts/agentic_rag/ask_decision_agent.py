@@ -439,9 +439,68 @@ _BODY_MODIFIED_RE = re.compile(r"Before \(rev \S+\):\n(.*?)\n\nAfter \(rev \S+\)
 _BODY_ADDED_RE = re.compile(r"New section added in rev \S+:\n(.*)", re.DOTALL)
 _BODY_REMOVED_RE = re.compile(r"Section removed after rev \S+:\n(.*)", re.DOTALL)
 _THREAD_SUBJECT_RE = re.compile(r"^Thread: (.+?) \(")
+# build_thread_records (services/email_threading.py) embeds each message's
+# archive URL in its own marker line so citations survive child splitting.
+# That url is a real https://mailarchive.ietf.org/... permalink only for
+# mail from ~2014 onward (Archived-At header); older mail falls back to a
+# synthetic "mid:<message-id>" identity (services/ietf_import_service.py),
+# which is not a fetchable link -- callers must check the scheme.
+_MESSAGE_MARKER_RE = re.compile(r"^--- Message \d+ \| (.+?) \| (.+?) \| (\S+) ---$", re.MULTILINE)
 
 
-def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int = 5) -> list[str]:
+def _extract_message_links(text: str) -> list[dict]:
+    """Pull {from, date, url} per message marker out of a mailarchive
+    segment's text, keeping only entries with a real http(s) permalink --
+    pre-2014 mail has no Archived-At header and only carries a non-fetchable
+    "mid:..." identity, so it's dropped here rather than shown as a dead link.
+    """
+    links = []
+    for match in _MESSAGE_MARKER_RE.finditer(text):
+        from_field, date_field, url = match.group(1), match.group(2), match.group(3)
+        if url.startswith("http://") or url.startswith("https://"):
+            links.append({"from": from_field, "date": date_field, "url": url})
+    return links
+
+
+def _resolve_discussion_links(mailarchive_dataset, candidate: dict) -> list[dict]:
+    """Find the real archive link(s) for a winning discussion candidate.
+
+    The candidate's own text usually already contains build_thread_records()'s
+    marker line for the message it's from -- but Economy/BM25 indexing can
+    split one thread-part document into several keyword segments, and a BM25
+    hit can land on a segment further into a message's body, past its marker
+    line (spot-checked directly against live data: this genuinely happens).
+    When that leaves _extract_message_links empty, walk backward through the
+    same document's earlier segments (by position) for the nearest preceding
+    marker instead of surfacing no link at all.
+    """
+    links = _extract_message_links(candidate["text"])
+    if links or not candidate.get("document_id"):
+        return links
+
+    from extensions.ext_database import db
+    from models.dataset import DocumentSegment
+
+    siblings = (
+        db.session.query(DocumentSegment)
+        .filter(
+            DocumentSegment.dataset_id == mailarchive_dataset.id,
+            DocumentSegment.document_id == candidate["document_id"],
+        )
+        .order_by(DocumentSegment.position)
+        .all()
+    )
+    cutoff = next((i for i, seg in enumerate(siblings) if seg.index_node_id == candidate.get("doc_id")), None)
+    if cutoff is None:
+        return []
+    for seg in reversed(siblings[: cutoff + 1]):
+        found = _extract_message_links(seg.content)
+        if found:
+            return found[-1:]
+    return []
+
+
+def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int = 5) -> list[dict]:
     """Gather candidate mailarchive messages for one specific change's own
     wording -- NOT a relevance verdict. Tried treating "any non-administrative
     BM25 hit" as the verdict directly (dropping Secretariat/datatracker bot
@@ -454,6 +513,12 @@ def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int
     administrative filter still earns its keep here as a cheap pre-filter
     to shrink what the judgment call in _judge_lane_discussion has to read,
     just not as the accept/reject decision itself.
+
+    Each returned dict is {"text", "document_id", "doc_id"} rather than a
+    bare string -- document_id/doc_id (the segment's index_node_id) are kept
+    so a winning candidate's real archive URL can be traced back to its
+    source segment later, even when the candidate text itself doesn't carry
+    a message marker line (see _resolve_discussion_links).
     """
     from services.ietf_import_service import IetfImportService
 
@@ -462,14 +527,21 @@ def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int
     # Lesson from this project's own retrieval testing: a short, distinctive
     # snippet beats a whole paragraph as a BM25 query.
     query = " ".join(query_text.split()[:30])
-    hits = _retrieve(mailarchive_dataset, query, top_k=top_k)
+    hits = _retrieve_documents(mailarchive_dataset, query, top_k=top_k)
     kept = []
     for hit in hits:
-        subject_match = _THREAD_SUBJECT_RE.match(hit)
+        text = hit.page_content
+        subject_match = _THREAD_SUBJECT_RE.match(text)
         subject = subject_match.group(1) if subject_match else ""
         if subject and IetfImportService._is_administrative_notice(subject):
             continue
-        kept.append(hit)
+        kept.append(
+            {
+                "text": text,
+                "document_id": hit.metadata.get("document_id") if hit.metadata else None,
+                "doc_id": hit.metadata.get("doc_id") if hit.metadata else None,
+            }
+        )
         if len(kept) >= 3:
             break
     return kept
@@ -498,6 +570,7 @@ _LANE_DISCUSSION_INSTRUCTION = (
 
 def _judge_lane_discussion(
     lane: dict,
+    mailarchive_dataset,
     tenant_id: str,
     model_provider: str,
     model_name: str,
@@ -523,6 +596,7 @@ def _judge_lane_discussion(
     for edge in lane["edges"]:
         edge["has_discussion"] = False
         edge["discussion"] = None
+        edge["discussion_links"] = []
 
     if not any(edge.get("_candidates") for edge in lane["edges"]):
         return
@@ -534,7 +608,7 @@ def _judge_lane_discussion(
         if not candidates:
             prompt_lines.append("(no candidate messages found)")
         for j, cand in enumerate(candidates, start=1):
-            prompt_lines.append(f"--- candidate {j} ---\n{cand[:600]}")
+            prompt_lines.append(f"--- candidate {j} ---\n{cand['text'][:600]}")
         prompt_lines.append("")
 
     model_instance = ModelManager().get_model_instance(
@@ -571,8 +645,10 @@ def _judge_lane_discussion(
             candidates = lane["edges"][idx].get("_candidates") or []
             cand_idx = int(match.group(3)) - 1
             if 0 <= cand_idx < len(candidates):
+                winner = candidates[cand_idx]
                 lane["edges"][idx]["has_discussion"] = True
-                lane["edges"][idx]["discussion"] = candidates[cand_idx]
+                lane["edges"][idx]["discussion"] = winner["text"]
+                lane["edges"][idx]["discussion_links"] = _resolve_discussion_links(mailarchive_dataset, winner)
 
 
 def _parse_evolution_body(body: str) -> tuple[str | None, str | None]:
@@ -796,13 +872,14 @@ def decision_thread(
     if mailarchive_dataset:
         for lane in lanes:
             _judge_lane_discussion(
-                lane, mailarchive_dataset.tenant_id, model_provider, model_name, on_event=on_event
+                lane, mailarchive_dataset, mailarchive_dataset.tenant_id, model_provider, model_name, on_event=on_event
             )
     for lane in lanes:
         for edge in lane["edges"]:
             edge.pop("_candidates", None)
             edge.setdefault("has_discussion", False)
             edge.setdefault("discussion", None)
+            edge.setdefault("discussion_links", [])
 
     return {
         "draft_name": draft_name,
@@ -813,34 +890,42 @@ def decision_thread(
 
 
 def _retrieve(dataset, query: str, top_k: int) -> list[str]:
+    return [doc.page_content for doc in _retrieve_documents(dataset, query, top_k)]
+
+
+def _retrieve_documents(dataset, query: str, top_k: int) -> list:
+    """Same dispatch _retrieve does, but keeps each hit's full Document
+    (page_content + metadata) instead of discarding metadata -- callers that
+    need to trace a hit back to its source segment/document (e.g. resolving
+    a discussion candidate's real archive URL) need doc.metadata["document_id"]
+    and ["doc_id"], which the flattened string list can't carry.
+    """
     from core.rag.datasource.retrieval_service import RetrievalService
     from core.rag.index_processor.constant.index_type import IndexTechniqueType
     from core.rag.retrieval.retrieval_methods import RetrievalMethod
 
     if dataset.indexing_technique == IndexTechniqueType.ECONOMY:
-        documents = RetrievalService.retrieve(
+        return RetrievalService.retrieve(
             retrieval_method=RetrievalMethod.KEYWORD_SEARCH,
             dataset_id=dataset.id,
             query=query,
             top_k=top_k,
         )
-    else:
-        retrieval_model = dataset.retrieval_model or {}
-        documents = RetrievalService.retrieve(
-            retrieval_method=retrieval_model.get("search_method", RetrievalMethod.SEMANTIC_SEARCH.value),
-            dataset_id=dataset.id,
-            query=query,
-            top_k=top_k,
-            score_threshold=(
-                retrieval_model.get("score_threshold", 0.0) if retrieval_model.get("score_threshold_enabled") else 0.0
-            ),
-            reranking_model=(
-                retrieval_model.get("reranking_model") if retrieval_model.get("reranking_enable") else None
-            ),
-            reranking_mode=retrieval_model.get("reranking_mode") or "reranking_model",
-            weights=retrieval_model.get("weights"),
-        )
-    return [doc.page_content for doc in documents]
+    retrieval_model = dataset.retrieval_model or {}
+    return RetrievalService.retrieve(
+        retrieval_method=retrieval_model.get("search_method", RetrievalMethod.SEMANTIC_SEARCH.value),
+        dataset_id=dataset.id,
+        query=query,
+        top_k=top_k,
+        score_threshold=(
+            retrieval_model.get("score_threshold", 0.0) if retrieval_model.get("score_threshold_enabled") else 0.0
+        ),
+        reranking_model=(
+            retrieval_model.get("reranking_model") if retrieval_model.get("reranking_enable") else None
+        ),
+        reranking_mode=retrieval_model.get("reranking_mode") or "reranking_model",
+        weights=retrieval_model.get("weights"),
+    )
 
 
 def _format_hits(hits: list[str]) -> str:

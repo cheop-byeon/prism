@@ -146,22 +146,34 @@
   .lane-head {
     font-family: var(--mono); font-size: 12px; color: var(--accent); margin-bottom: 10px;
   }
-  .chain { display: flex; flex-wrap: wrap; align-items: stretch; gap: 14px 0; }
+  .chain { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 0; }
   .dcard {
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
     padding: 14px 16px; width: 260px; flex-shrink: 0; display: flex; flex-direction: column;
   }
   .dcard .rev-label { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); }
   .dcard .rev-tag { font-size: 10.5px; color: var(--text-dim); margin-top: 1px; margin-bottom: 8px; min-height: 13px; }
-  .dcard .para { font-size: 12.5px; line-height: 1.5; color: var(--text); flex: 1; }
+  .dcard .para { font-size: 12.5px; line-height: 1.5; color: var(--text); flex: 1; position: relative; }
   .dcard .para mark {
     background: var(--modified-bg); color: var(--modified); font-weight: 600;
     padding: 0 2px; border-radius: 3px;
   }
+  .dcard.clamped .para { max-height: 220px; overflow: hidden; }
+  .dcard.clamped .para::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 34px;
+    background: linear-gradient(to bottom, transparent, var(--panel-2));
+  }
+  .dcard.expanded .para { max-height: none; }
+  .dcard.expanded .para::after { display: none; }
+  .dcard .expand-btn {
+    align-self: flex-start; margin-top: 8px; background: transparent; border: none; color: var(--accent);
+    font-size: 11px; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--sans);
+  }
+  .dcard .expand-btn:hover { text-decoration: underline; }
 
   .arrow-group {
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 5px; flex-shrink: 0; width: 100px; padding: 0 4px;
+    gap: 5px; flex-shrink: 0; width: 100px; padding: 0 4px; align-self: center;
   }
   .arrow-group .pill {
     font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
@@ -210,6 +222,13 @@
     padding: 16px 18px; overflow-y: auto; font-size: 12.5px; color: var(--text);
     line-height: 1.55; white-space: pre-wrap;
   }
+  .modal-links {
+    display: flex; flex-direction: column; gap: 4px; padding: 0 18px 12px; flex-shrink: 0;
+  }
+  .modal-link {
+    font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 500;
+  }
+  .modal-link:hover { text-decoration: underline; }
   .modal-caveat {
     font-size: 11px; color: var(--text-dim); padding: 10px 18px; border-top: 1px solid var(--border);
     flex-shrink: 0;
@@ -344,6 +363,7 @@
       <button class="modal-close" id="discussionModalClose">&times;</button>
     </div>
     <div class="modal-body" id="discussionModalBody"></div>
+    <div class="modal-links" id="discussionModalLinks"></div>
     <p class="modal-caveat">Found via keyword search and an LLM's best-effort judgment -- not a certainty that this is the actual reason for the change.</p>
   </div>
 </div>
@@ -724,11 +744,13 @@ function trackDecision() {
 function renderLaneChain(lane, laneIdx, query) {
   let html = '<div class="chain">';
   lane.nodes.forEach((node, i) => {
+    const isLong = (node.text || '').length > 420;
     html += `
-      <div class="dcard" style="animation-delay:${i * 60}ms">
+      <div class="dcard${isLong ? ' clamped' : ''}" style="animation-delay:${i * 60}ms">
         <div class="rev-label">rev ${escapeHtml(node.rev)}</div>
         <div class="rev-tag">${i === 0 ? 'earliest matching wording' : '&nbsp;'}</div>
         <div class="para">${highlight(node.text, query)}</div>
+        ${isLong ? '<button class="expand-btn" type="button">Show more</button>' : ''}
       </div>`;
     if (i < lane.edges.length) {
       const edge = lane.edges[i];
@@ -773,22 +795,41 @@ function renderThread(data) {
 const discussionModal = document.getElementById('discussionModal');
 const discussionModalTitle = document.getElementById('discussionModalTitle');
 const discussionModalBody = document.getElementById('discussionModalBody');
+const discussionModalLinks = document.getElementById('discussionModalLinks');
 const discussionModalClose = document.getElementById('discussionModalClose');
 
 function openDiscussionModal(edge) {
   discussionModalTitle.textContent = `Possibly related discussion — rev ${edge.from_rev} → rev ${edge.to_rev}`;
   discussionModalBody.textContent = edge.discussion;
+  const links = (edge.discussion_links || []).filter((l) => /^https?:\/\//.test(l.url));
+  discussionModalLinks.innerHTML = links.length
+    ? links
+        .map(
+          (l) =>
+            `<a class="modal-link" href="${escapeHtml(l.url)}" target="_blank" rel="noopener">` +
+            `View original email — ${escapeHtml(l.from)}, ${escapeHtml(l.date)} ↗</a>`
+        )
+        .join('')
+    : '';
   discussionModal.hidden = false;
 }
 
 function closeDiscussionModal() { discussionModal.hidden = true; }
 
 threadBody.addEventListener('click', (e) => {
-  const btn = e.target.closest('.discuss-btn');
-  if (!btn || !currentThreadData) return;
-  const laneIdx = parseInt(btn.dataset.lane, 10);
-  const edgeIdx = parseInt(btn.dataset.edge, 10);
-  openDiscussionModal(currentThreadData.lanes[laneIdx].edges[edgeIdx]);
+  const discussBtn = e.target.closest('.discuss-btn');
+  if (discussBtn && currentThreadData) {
+    const laneIdx = parseInt(discussBtn.dataset.lane, 10);
+    const edgeIdx = parseInt(discussBtn.dataset.edge, 10);
+    openDiscussionModal(currentThreadData.lanes[laneIdx].edges[edgeIdx]);
+    return;
+  }
+  const expandBtn = e.target.closest('.expand-btn');
+  if (expandBtn) {
+    const card = expandBtn.closest('.dcard');
+    const expanded = card.classList.toggle('expanded');
+    expandBtn.textContent = expanded ? 'Show less' : 'Show more';
+  }
 });
 
 discussionModalClose.addEventListener('click', closeDiscussionModal);
