@@ -59,6 +59,7 @@ _TOOL_KIND = {
     "search_wg_minutes": "retrieval",
     "get_rfc_relations": "discovery",
     "find_related_rfc_family": "discovery",
+    "get_iesg_ballot_comments": "retrieval",
 }
 
 # What each tool actually touches outside this script, and a real (not
@@ -161,6 +162,16 @@ _TOOL_DETAILS = {
         "example": (
             'find_related_rfc_family(rfc_number="4035")\n'
             "# -> 11 DNSSEC-specific RFCs including RFC 9364 (the DNSSEC roadmap), out of 513 total citing docs"
+        ),
+    },
+    "get_iesg_ballot_comments": {
+        "resource": (
+            "IETF Datatracker API (datatracker.ietf.org) -- the ballotpositiondocevent resource, "
+            "which carries the actual DISCUSS/comment text a plain docevent listing doesn't expose."
+        ),
+        "example": (
+            'get_iesg_ballot_comments(\n  draft_name="draft-ietf-sidr-bgpsec-protocol",\n'
+            '  query="SKI"\n)\n# -> Stephen Farrell\'s DISCUSS questioning the hardcoded SHA-1 SKI length'
         ),
     },
 }

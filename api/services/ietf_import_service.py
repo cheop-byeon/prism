@@ -833,6 +833,68 @@ class IetfImportService:
         return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": family}
 
     @staticmethod
+    def get_iesg_ballot_comments(draft_name: str) -> dict:
+        """Fetch IESG DISCUSS/comment text left on a draft during its
+        standards-track review -- a real, distinct venue from the mailing
+        list and meeting minutes where a decision can get argued out (an AD
+        raising a specific technical objection, the author's response, the
+        objection being cleared), tied to the exact revision it applied to.
+
+        Datatracker's plain docevent listing only shows that a position
+        changed ("New position, Discuss, has been recorded for X"), not the
+        DISCUSS/comment text itself -- that lives on the ballotpositiondocevent
+        sub-resource (Django's polymorphic event model exposed as its own
+        Tastypie resource), which is what this actually queries.
+
+        Only returns entries with real discuss/comment text -- a pure
+        "No Objection, no comment" position record is a vote, not evidence.
+        """
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                events: list[dict] = []
+                url = "https://datatracker.ietf.org/api/v1/doc/ballotpositiondocevent/"
+                params: dict | None = {"doc__name": draft_name, "format": "json", "limit": 100}
+                while url:
+                    resp = client.get(url, params=params)
+                    resp.raise_for_status()
+                    data = resp.json()
+                    events.extend(data.get("objects", []))
+                    next_page = data.get("meta", {}).get("next")
+                    url = f"https://datatracker.ietf.org{next_page}" if next_page else None
+                    params = None
+
+                with_text = [e for e in events if (e.get("discuss") or "").strip() or (e.get("comment") or "").strip()]
+                balloter_ids = sorted(
+                    {e["balloter"].rstrip("/").split("/")[-1] for e in with_text if e.get("balloter")}
+                )
+                names: dict[str, str] = {}
+                if balloter_ids:
+                    person_resp = client.get(
+                        "https://datatracker.ietf.org/api/v1/person/person/",
+                        params={"id__in": ",".join(balloter_ids), "format": "json", "limit": len(balloter_ids)},
+                    )
+                    person_resp.raise_for_status()
+                    names = {str(p["id"]): p["name"] for p in person_resp.json().get("objects", [])}
+        except httpx.HTTPError as exc:
+            return {"error": str(exc)}
+
+        comments = []
+        for event in with_text:
+            balloter_id = event["balloter"].rstrip("/").split("/")[-1] if event.get("balloter") else None
+            comments.append(
+                {
+                    "balloter": names.get(balloter_id, "unknown"),
+                    "position": (event.get("pos") or "").rstrip("/").split("/")[-1],
+                    "revision": event.get("rev", ""),
+                    "time": event.get("time", ""),
+                    "discuss": (event.get("discuss") or "").strip(),
+                    "comment": (event.get("comment") or "").strip(),
+                }
+            )
+        comments.sort(key=operator.itemgetter("time"))
+        return {"draft_name": draft_name, "comments": comments}
+
+    @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:
         """Fetch Internet-Drafts for a WG from IETF Datatracker.
 

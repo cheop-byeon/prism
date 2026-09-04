@@ -1157,6 +1157,42 @@ def _find_related_rfc_family(rfc_number: str) -> str:
     return "\n".join(lines)
 
 
+def _get_iesg_ballot_comments(draft_name: str, query: str | None = None) -> str:
+    """Format IetfImportService.get_iesg_ballot_comments() for the model --
+    IESG DISCUSS/comment text from standards-track review, a real venue for
+    decision debate separate from the mailing list and meeting minutes (an
+    AD raising a specific technical objection, tied to the exact revision
+    it applied to). Optionally filtered to entries mentioning a phrase, the
+    same way fetch_ietf_draft_text/fetch_ietf_rfc_text narrow a big primary
+    source down to what's actually relevant.
+    """
+    from services.ietf_import_service import IetfImportService
+
+    data = IetfImportService.get_iesg_ballot_comments(draft_name)
+    if data.get("error"):
+        return f"Could not fetch IESG ballot comments for {draft_name}: {data['error']}"
+
+    comments = data["comments"]
+    if query:
+        needle = query.lower()
+        comments = [c for c in comments if needle in c["discuss"].lower() or needle in c["comment"].lower()]
+
+    if not comments:
+        scope = f" mentioning {query!r}" if query else ""
+        return f"No IESG ballot discuss/comment text found for {draft_name}{scope}."
+
+    blocks = []
+    for c in comments:
+        header = f"--- {c['balloter']} | {c['position']} | rev {c['revision']} | {c['time'][:10]} ---"
+        body_parts = []
+        if c["discuss"]:
+            body_parts.append(f"[DISCUSS]\n{c['discuss']}")
+        if c["comment"]:
+            body_parts.append(f"[COMMENT]\n{c['comment']}")
+        blocks.append(f"{header}\n" + "\n\n".join(body_parts))
+    return "\n\n".join(blocks)
+
+
 def _diff_draft_revisions(draft_name: str, from_revision: str, to_revision: str, query: str | None) -> str:
     """Diff two draft revisions with the real `iddiff` tool (ietf-tools/iddiff on
     PyPI) -- a genuinely independent second opinion on what changed, using its
@@ -1319,6 +1355,7 @@ VERIFY_TOOL_NAME = "verify_answer"
 MINUTES_TOOL_NAME = "search_wg_minutes"
 RFC_RELATIONS_TOOL_NAME = "get_rfc_relations"
 RFC_FAMILY_TOOL_NAME = "find_related_rfc_family"
+IESG_BALLOT_TOOL_NAME = "get_iesg_ballot_comments"
 
 # Short, human-facing labels for live progress/UI display -- kept separate
 # from the tool names themselves (those are the function-calling contract;
@@ -1336,6 +1373,7 @@ _TOOL_DISPLAY_NAMES = {
     MINUTES_TOOL_NAME: "Search minutes",
     RFC_RELATIONS_TOOL_NAME: "Check RFC relations",
     RFC_FAMILY_TOOL_NAME: "Find RFC family",
+    IESG_BALLOT_TOOL_NAME: "Check IESG ballot",
 }
 
 
@@ -1501,6 +1539,24 @@ def _build_tools() -> list:
             {"rfc_number": {"type": "string", "description": "e.g. '4035' or 'RFC4035'"}},
             ["rfc_number"],
         ),
+        _tool(
+            IESG_BALLOT_TOOL_NAME,
+            (
+                "Fetch IESG DISCUSS/comment text left on a draft during its standards-track review -- a "
+                "real, distinct venue from the mailing list and meeting minutes where a decision can get "
+                "argued out (an Area Director raising a specific technical objection, tied to the exact "
+                "revision it applied to). Only returns positions with actual discuss/comment text, never "
+                "a bare vote. Optionally filter to comments mentioning a phrase."
+            ),
+            {
+                "draft_name": {"type": "string", "description": "e.g. draft-ietf-sidr-bgpsec-protocol"},
+                "query": {
+                    "type": "string",
+                    "description": "optional phrase -- only discuss/comment text containing it is returned",
+                },
+            },
+            ["draft_name"],
+        ),
     ]
 
 
@@ -1644,6 +1700,7 @@ def ask(
     minutes_tool_name = MINUTES_TOOL_NAME
     rfc_relations_tool_name = RFC_RELATIONS_TOOL_NAME
     rfc_family_tool_name = RFC_FAMILY_TOOL_NAME
+    iesg_ballot_tool_name = IESG_BALLOT_TOOL_NAME
     tools = _build_tools()
 
     # When hints are given (as every existing battery test script does), tell
@@ -1881,6 +1938,15 @@ def ask(
             if verbose:
                 print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r}", file=sys.stderr)
             observation = _find_related_rfc_family(rfc_number)
+            evidence_log.append(observation)
+            return observation
+
+        if tool_name == iesg_ballot_tool_name:
+            draft_name = args.get("draft_name", "")
+            ballot_query = args.get("query")
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} draft={draft_name!r} query={ballot_query!r}", file=sys.stderr)
+            observation = _get_iesg_ballot_comments(draft_name, ballot_query)
             evidence_log.append(observation)
             return observation
 
