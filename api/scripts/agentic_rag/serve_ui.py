@@ -425,6 +425,36 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
+    @app.route("/api/rfc-graph/<rfc_number>", methods=["GET"])
+    def api_rfc_graph(rfc_number):
+        """Consolidated {nodes, edges} graph for the RFC Graph tab's table
+        and interactive graph -- read-only, no download/attach, same as
+        every other Datatracker-backed lookup in this UI.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        try:
+            result = IetfImportService.build_rfc_relationship_graph(rfc_number)
+            if result.get("error"):
+                return jsonify(result), 502
+            return jsonify(result)
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/rfc-errata/<rfc_number>", methods=["GET"])
+    def api_rfc_errata(rfc_number):
+        """Errata for one RFC -- node detail, fetched on demand when a
+        graph node is clicked, not part of the graph payload itself.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        try:
+            return jsonify({"errata": IetfImportService.get_rfc_errata(rfc_number)})
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
     @app.route("/api/ask", methods=["GET"])
     def api_ask():
         from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent

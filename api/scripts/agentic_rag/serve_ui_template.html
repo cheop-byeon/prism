@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Decision Rationale Agent (standalone)</title>
+<script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
   :root {
     --bg: #0f1117; --panel: #171a23; --panel-2: #1e2230; --border: #2a2f3f;
@@ -44,7 +45,7 @@
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
   .tab-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-  .tab-pane { display: none; flex: 1; min-height: 0; flex-direction: column; }
+  .tab-pane { display: none; flex: 1; min-height: 0; flex-direction: column; overflow-y: auto; }
   .tab-pane.active { display: flex; }
   #pane-howto.active { display: block; overflow-y: auto; padding: 20px; }
 
@@ -370,6 +371,53 @@
     border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; margin-left: 6px;
   }
   .plan-reason { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-top: 2px; }
+
+  .rfc-graph-layout { display: flex; gap: 14px; margin-top: 14px; align-items: stretch; flex-shrink: 0; }
+  .rfc-graph-layout[hidden] { display: none; }
+  .rfc-graph-canvas-wrap {
+    flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
+  }
+  #rfcGraphCanvas { width: 100%; height: 480px; }
+  .rfc-graph-legend {
+    display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--border);
+    font-size: 11px; color: var(--text-dim); flex-wrap: wrap;
+  }
+  .rfc-graph-legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .rfc-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--accent); }
+  .rfc-line { width: 16px; height: 2px; display: inline-block; }
+  .rfc-line.obsoletes { background: #e0645a; }
+  .rfc-line.updates { background: #5fb0e0; }
+  .rfc-line.family { background: #b98cf0; opacity: 0.8; }
+  .rfc-graph-detail {
+    width: 280px; flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px; overflow-y: auto; max-height: 480px;
+  }
+  .rfc-graph-detail h4 { font-size: 13px; margin: 0 0 6px; color: var(--text); }
+  .rfc-graph-detail .rfc-detail-meta { font-size: 11.5px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.6; }
+  .rfc-graph-detail .rfc-detail-meta b { color: var(--text); font-weight: 600; }
+  .rfc-graph-detail button {
+    background: transparent; border: 1px solid var(--border); color: var(--accent);
+    padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    font-family: var(--sans);
+  }
+  .rfc-graph-detail button:hover { border-color: var(--accent); }
+  .rfc-errata-item {
+    margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+    font-size: 11.5px; color: var(--text-dim); line-height: 1.5;
+  }
+  .rfc-errata-item b { color: var(--text); }
+  .rfc-errata-item .errata-status { color: var(--modified); font-weight: 600; }
+
+  .rfc-graph-table-wrap { margin-top: 16px; overflow-x: auto; flex-shrink: 0; }
+  .rfc-graph-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rfc-graph-table th {
+    text-align: left; padding: 8px 10px; color: var(--text-dim); font-weight: 600;
+    border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  .rfc-graph-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); color: var(--text); }
+  .rfc-graph-table tr.is-center td { background: var(--accent-dim); }
+  .rfc-graph-table td.rfc-graph-title { max-width: 360px; }
 </style>
 </head>
 <body>
@@ -387,6 +435,7 @@
   <button class="tab-btn" data-tab="track">Track a Decision</button>
   <button class="tab-btn" data-tab="howto">How it Works</button>
   <button class="tab-btn" data-tab="corpora">Sources</button>
+  <button class="tab-btn" data-tab="rfcgraph">RFC Graph</button>
 </div>
 <div class="tab-content">
   <section class="tab-pane active" id="pane-ask">
@@ -454,6 +503,34 @@
       same as every corpus here was originally built.
     </p>
     <div id="corporaList"><div class="loading">Loading…</div></div>
+  </section>
+
+  <section class="tab-pane" id="pane-rfcgraph">
+    <div class="controls">
+      <input id="rfcGraphInput" type="text" placeholder="RFC number, e.g. 4035" />
+      <button id="rfcGraphBtn">Build Graph</button>
+    </div>
+    <div id="rfcGraphStatus"></div>
+    <div class="rfc-graph-layout" id="rfcGraphLayout" hidden>
+      <div class="rfc-graph-canvas-wrap">
+        <div id="rfcGraphCanvas"></div>
+        <div class="rfc-graph-legend">
+          <span><i class="rfc-dot center"></i> center RFC</span>
+          <span><i class="rfc-line obsoletes"></i> obsoletes</span>
+          <span><i class="rfc-line updates"></i> updates</span>
+          <span><i class="rfc-line family"></i> family</span>
+        </div>
+      </div>
+      <div class="rfc-graph-detail" id="rfcGraphDetail">
+        <p class="empty-state">Click a node or edge for detail.</p>
+      </div>
+    </div>
+    <div class="rfc-graph-table-wrap" id="rfcGraphTableWrap" hidden>
+      <table class="rfc-graph-table">
+        <thead><tr><th>RFC</th><th>Title</th><th>Level</th><th>WG</th><th>Relation to center</th></tr></thead>
+        <tbody id="rfcGraphTableBody"></tbody>
+      </table>
+    </div>
   </section>
 </div>
 <div class="modal-overlay" id="discussionModal" hidden>
@@ -807,6 +884,181 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     return;
   }
 });
+
+// RFC Graph tab -- vis-network renders {nodes, edges} from
+// /api/rfc-graph/<rfc>, built server-side by
+// IetfImportService.build_rfc_relationship_graph (obsoletes/updates +
+// citation-family clustering, deduplicated into one graph). Errata is
+// fetched separately, lazily, only once a node is actually clicked -- it's
+// node detail, not part of the graph payload.
+const STD_LEVEL_COLORS = {
+  std: '#5fb0e0', ds: '#5fb0e0', ps: '#5fb0e0',
+  bcp: '#6fd19a', inf: '#c9ae6c', exp: '#c9ae6c', hist: '#8890a0',
+};
+const EDGE_KIND_COLORS = { obsoletes: '#e0645a', updates: '#5fb0e0', family: '#b98cf0' };
+
+let rfcNetwork = null;
+let rfcGraphData = null;
+
+const rfcGraphInputEl = document.getElementById('rfcGraphInput');
+const rfcGraphBtnEl = document.getElementById('rfcGraphBtn');
+const rfcGraphStatusEl = document.getElementById('rfcGraphStatus');
+const rfcGraphLayoutEl = document.getElementById('rfcGraphLayout');
+const rfcGraphTableWrapEl = document.getElementById('rfcGraphTableWrap');
+const rfcGraphTableBodyEl = document.getElementById('rfcGraphTableBody');
+const rfcGraphDetailEl = document.getElementById('rfcGraphDetail');
+
+function relationToCenter(nodeId, data) {
+  if (nodeId === data.center) return '(center)';
+  const rels = data.edges
+    .filter((e) => e.source === nodeId || e.target === nodeId)
+    .map((e) => (e.source === data.center ? e.kind : `${e.kind} (reverse)`));
+  return rels.length ? rels.join(', ') : '';
+}
+
+function renderRfcGraphTable(data) {
+  const rows = data.nodes
+    .slice()
+    .sort((a, b) => (a.id === data.center ? -1 : b.id === data.center ? 1 : a.id.localeCompare(b.id)))
+    .map((n) => `
+      <tr class="${n.is_center ? 'is-center' : ''}">
+        <td>${escapeHtml(n.id)}</td>
+        <td class="rfc-graph-title">${escapeHtml(n.title)}</td>
+        <td>${escapeHtml((n.std_level || '').toUpperCase())}</td>
+        <td>${escapeHtml(n.wg || '—')}</td>
+        <td>${escapeHtml(relationToCenter(n.id, data))}</td>
+      </tr>`)
+    .join('');
+  rfcGraphTableBodyEl.innerHTML = rows;
+}
+
+function showNodeDetail(nodeId) {
+  const node = rfcGraphData.nodes.find((n) => n.id === nodeId);
+  if (!node) return;
+  rfcGraphDetailEl.innerHTML = `
+    <h4>${escapeHtml(node.id)}${node.is_center ? ' (center)' : ''}</h4>
+    <div class="rfc-detail-meta">
+      <div>${escapeHtml(node.title)}</div>
+      <div><b>Level:</b> ${escapeHtml((node.std_level || 'unknown').toUpperCase())}</div>
+      <div><b>WG:</b> ${escapeHtml(node.wg || '—')}</div>
+      <div><b>Relation to center:</b> ${escapeHtml(relationToCenter(node.id, rfcGraphData))}</div>
+    </div>
+    <button id="rfcLoadErrata" data-rfc="${escapeHtml(node.id)}">Load errata</button>
+    <div id="rfcErrataList"></div>`;
+}
+
+function showEdgeDetail(edgeId) {
+  const edge = rfcGraphData.edges[edgeId];
+  if (!edge) return;
+  rfcGraphDetailEl.innerHTML = `
+    <h4>Relationship</h4>
+    <div class="rfc-detail-meta">
+      <div><b>${escapeHtml(edge.source)}</b> &rarr; <b>${escapeHtml(edge.target)}</b></div>
+      <div><b>Kind:</b> ${escapeHtml(edge.kind)}</div>
+    </div>`;
+}
+
+document.getElementById('rfcGraphDetail').addEventListener('click', async (e) => {
+  const btn = e.target.closest('#rfcLoadErrata');
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = 'Loading…';
+  const listEl = document.getElementById('rfcErrataList');
+  try {
+    const res = await fetch(`/api/rfc-errata/${encodeURIComponent(btn.dataset.rfc)}`);
+    const data = await res.json();
+    const errata = data.errata || [];
+    if (!errata.length) {
+      listEl.innerHTML = '<p class="empty-state">No errata found.</p>';
+    } else {
+      listEl.innerHTML = errata.map((er) => `
+        <div class="rfc-errata-item">
+          <b>Errata ${escapeHtml(er.id)}</b> &middot; <span class="errata-status">${escapeHtml(er.status)}</span>
+          &middot; ${escapeHtml(er.type)}
+          ${Object.entries(er.texts || {}).map(([label, text]) =>
+            `<div><b>${escapeHtml(label)}:</b> ${escapeHtml(text.slice(0, 300))}</div>`).join('')}
+        </div>`).join('');
+    }
+  } catch (err) {
+    listEl.innerHTML = `<p class="empty-state">Failed to load errata: ${escapeHtml(String(err))}</p>`;
+  }
+  btn.remove();
+});
+
+function buildRfcGraph() {
+  const rfcNumber = rfcGraphInputEl.value.trim();
+  if (!rfcNumber) return;
+  rfcGraphBtnEl.disabled = true;
+  rfcGraphStatusEl.innerHTML = '<div class="loading">Building graph…</div>';
+  rfcGraphLayoutEl.hidden = true;
+  rfcGraphTableWrapEl.hidden = true;
+
+  fetch(`/api/rfc-graph/${encodeURIComponent(rfcNumber)}`)
+    .then((res) => res.json().then((data) => ({ ok: res.ok, data })))
+    .then(({ ok, data }) => {
+      rfcGraphBtnEl.disabled = false;
+      if (!ok || data.error) {
+        rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(data.error || 'Failed to build graph.')}</div>`;
+        return;
+      }
+      rfcGraphStatusEl.innerHTML = '';
+      rfcGraphData = data;
+      renderRfcGraphTable(data);
+      rfcGraphTableWrapEl.hidden = false;
+      rfcGraphLayoutEl.hidden = false;
+      rfcGraphDetailEl.innerHTML = '<p class="empty-state">Click a node or edge for detail.</p>';
+
+      const visNodes = data.nodes.map((n) => ({
+        id: n.id,
+        label: n.id,
+        title: n.title,
+        shape: n.is_center ? 'star' : 'dot',
+        size: n.is_center ? 26 : 14,
+        color: {
+          background: n.is_center ? '#7c9eff' : (STD_LEVEL_COLORS[n.std_level] || '#5b6072'),
+          border: n.is_center ? '#c7c8ef' : '#2a2f3f',
+          highlight: { background: '#7c9eff', border: '#c7c8ef' },
+        },
+        font: { color: '#e7e9ee', size: 12 },
+      }));
+      const visEdges = data.edges.map((e, i) => ({
+        id: i,
+        from: e.source,
+        to: e.target,
+        arrows: 'to',
+        color: { color: EDGE_KIND_COLORS[e.kind] || '#5b6072', opacity: 0.7 },
+        dashes: e.kind === 'family',
+        smooth: { type: 'continuous' },
+      }));
+
+      const container = document.getElementById('rfcGraphCanvas');
+      if (rfcNetwork) rfcNetwork.destroy();
+      rfcNetwork = new vis.Network(
+        container,
+        { nodes: new vis.DataSet(visNodes), edges: new vis.DataSet(visEdges) },
+        {
+          autoResize: true,
+          interaction: { hover: true, tooltipDelay: 100 },
+          physics: {
+            solver: 'forceAtlas2Based',
+            forceAtlas2Based: { gravitationalConstant: -60, springLength: 120, avoidOverlap: 0.6 },
+            stabilization: { iterations: 150 },
+          },
+        }
+      );
+      rfcNetwork.on('click', (params) => {
+        if (params.nodes.length) showNodeDetail(params.nodes[0]);
+        else if (params.edges.length) showEdgeDetail(params.edges[0]);
+      });
+    })
+    .catch((err) => {
+      rfcGraphBtnEl.disabled = false;
+      rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
+    });
+}
+
+rfcGraphBtnEl.addEventListener('click', buildRfcGraph);
+rfcGraphInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') buildRfcGraph(); });
 
 function toolLabel(name) { return toolDisplayNames[name] || name; }
 

@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 import httpx
+from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from yarl import URL
 
@@ -893,6 +894,179 @@ class IetfImportService:
             )
         comments.sort(key=operator.itemgetter("time"))
         return {"draft_name": draft_name, "comments": comments}
+
+    @staticmethod
+    def get_rfc_errata(rfc_number: str) -> list[dict]:
+        """Fetch published errata for an RFC -- corrections/clarifications
+        that sometimes explain exactly why later text reads oddly, or flag
+        that the original wording was outright wrong. Node detail for one
+        RFC, not a relationship between two, so this isn't part of
+        build_rfc_relationship_graph's edges -- it's meant to be fetched on
+        demand when a graph node is clicked.
+
+        RFC Editor's errata.json API ignores its own rfc/doc-id query
+        params entirely and always returns the full, 10MB+, unfiltered
+        database (confirmed live) -- there's no working filtered JSON
+        endpoint. The classic errata_search.php page (redirects to
+        errata.rfc-editor.org) IS server-rendered per-RFC HTML though, so
+        that's what gets scraped here instead.
+        """
+        number = re.sub(r"[^0-9]", "", rfc_number)
+        if not number:
+            return []
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get("https://www.rfc-editor.org/errata_search.php", params={"rfc": number})
+                resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.warning("RFC errata fetch failed for RFC%s: %s", number, exc)
+            return []
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        errata: list[dict] = []
+        for heading in soup.find_all("h4"):
+            if "Errata-ID" not in heading.get_text():
+                continue
+            link = heading.find("a")
+            card = heading.find_parent("div", class_="card")
+            if not card:
+                continue
+            body = card.find("div", class_="card-body", recursive=False)
+            if not body:
+                continue
+            dl = body.find("dl")
+            fields = {}
+            if dl:
+                for dt in dl.find_all("dt"):
+                    key = dt.get_text(strip=True).rstrip(":")
+                    dd = dt.find_next_sibling("dd")
+                    fields[key] = dd.get_text(strip=True) if dd else ""
+            texts = {}
+            for para in body.find_all("p"):
+                label = para.get_text(strip=True).rstrip(":")
+                pre = para.find_next_sibling("pre")
+                if pre:
+                    texts[label] = pre.get_text().strip()
+            errata.append(
+                {
+                    "id": link.get_text(strip=True) if link else "",
+                    "status": fields.get("Status", ""),
+                    "type": fields.get("Type", ""),
+                    "reported_by": fields.get("Reported By", ""),
+                    "date_reported": fields.get("Date Reported", ""),
+                    "texts": texts,
+                }
+            )
+        return errata
+
+    @staticmethod
+    def build_rfc_relationship_graph(rfc_number: str) -> dict:
+        """Assemble one consolidated {nodes, edges} graph for an RFC -- the
+        data foundation for the RFC Graph tab's table and interactive graph.
+
+        Combines get_rfc_relations (obsoletes/updates, structural) and
+        find_related_rfc_family (citation + keyword clustering) into a
+        single deduplicated node/edge list, since a graph UI needs one
+        coherent structure, not three separately-shaped tool outputs. Each
+        node carries its resolved title/std_level/wg (wg is for visual
+        grouping only -- drawing an edge between every same-WG pair would
+        just be a dense, low-information clique, so it's a node attribute
+        instead). Errata is deliberately NOT part of this graph: it's node
+        detail (one RFC's own history), not a relationship between two
+        RFCs -- fetched separately, on demand, when a node is clicked.
+        """
+        relations = IetfImportService.get_rfc_relations(rfc_number)
+        if relations.get("error"):
+            return {"error": relations["error"]}
+        family = IetfImportService.find_related_rfc_family(rfc_number)
+        center = relations["rfc"]
+
+        edges = []
+        for target in relations["obsoletes"]:
+            edges.append({"source": center, "target": target, "kind": "obsoletes"})
+        for source in relations["obsoleted_by"]:
+            edges.append({"source": source, "target": center, "kind": "obsoletes"})
+        for target in relations["updates"]:
+            edges.append({"source": center, "target": target, "kind": "updates"})
+        for source in relations["updated_by"]:
+            edges.append({"source": source, "target": center, "kind": "updates"})
+        for entry in family.get("family", []):
+            edges.append({"source": center, "target": entry["rfc"], "kind": "family"})
+
+        # obsoletes/updates can (rarely) point at a not-yet-published draft
+        # name rather than an RFC -- this graph only ever shows published
+        # RFCs, so anything that isn't "RFC<digits>" is dropped here.
+        node_names = sorted(
+            {name for e in edges for name in (e["source"], e["target"])} | {center},
+            key=str,
+        )
+        node_names = [n for n in node_names if IetfImportService._RFC_NAME_RE.fullmatch(n.lower())]
+
+        metas: dict[str, dict] = {}
+        try:
+            with httpx.Client(timeout=20.0) as client:
+                lookup = [n.lower() for n in node_names]
+                for i in range(0, len(lookup), 50):
+                    chunk = lookup[i : i + 50]
+                    resp = client.get(
+                        "https://datatracker.ietf.org/api/v1/doc/document/",
+                        params={"name__in": ",".join(chunk), "format": "json", "limit": len(chunk)},
+                    )
+                    resp.raise_for_status()
+                    for obj in resp.json().get("objects", []):
+                        metas[obj["name"].upper()] = obj
+
+                wg_ids = sorted(
+                    {
+                        meta["group"].rstrip("/").split("/")[-1]
+                        for meta in metas.values()
+                        if meta.get("group")
+                    }
+                )
+                wg_names: dict[str, str] = {}
+                if wg_ids:
+                    group_resp = client.get(
+                        "https://datatracker.ietf.org/api/v1/group/group/",
+                        params={"id__in": ",".join(wg_ids), "format": "json", "limit": len(wg_ids)},
+                    )
+                    group_resp.raise_for_status()
+                    # Datatracker uses the literal group acronym "none" for
+                    # individual submissions / no-WG documents -- normalized
+                    # to empty here so the UI doesn't render it as a real WG.
+                    wg_names = {
+                        str(g["id"]): (g["acronym"] if g["acronym"] != "none" else "")
+                        for g in group_resp.json().get("objects", [])
+                    }
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch node metadata: {exc}"}
+
+        nodes = []
+        for name in node_names:
+            meta = metas.get(name, {})
+            wg_id = meta["group"].rstrip("/").split("/")[-1] if meta.get("group") else None
+            nodes.append(
+                {
+                    "id": name,
+                    "title": meta.get("title", ""),
+                    "std_level": (meta.get("std_level") or "").rstrip("/").split("/")[-1],
+                    "wg": wg_names.get(wg_id, "") if wg_id else "",
+                    "is_center": name == center,
+                }
+            )
+
+        valid_ids = {n["id"] for n in nodes}
+        seen: set[tuple[str, str, str]] = set()
+        deduped_edges = []
+        for edge in edges:
+            if edge["source"] not in valid_ids or edge["target"] not in valid_ids:
+                continue
+            key = (edge["source"], edge["target"], edge["kind"])
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped_edges.append(edge)
+
+        return {"center": center, "nodes": nodes, "edges": deduped_edges}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:
