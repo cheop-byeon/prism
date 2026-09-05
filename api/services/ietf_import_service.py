@@ -779,7 +779,33 @@ class IetfImportService:
         specific_keywords = [k for k in keywords if not any(k != other and k in other for other in keywords)]
         topic_keyword = min(specific_keywords or keywords, key=len, default=None)
 
-        def _fetch_related_names(client: httpx.Client, field: str, relationship_slug: str) -> list[str]:
+        # No keyword means no reliable topic signal -- returning early here
+        # (before any citation fetch) both avoids the wasted requests and
+        # fixes a real bug: _keyword_matches used to treat "no keyword" as
+        # "match everything", so an RFC with no Datatracker keywords (RFC
+        # 5435, confirmed live) got an unfiltered dump of every citation as
+        # its "family" while well-keyworded RFCs got a properly narrow
+        # result -- an inconsistency a user caught by comparing RFCs side
+        # by side, not something that showed up as an error.
+        if not topic_keyword:
+            return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": []}
+
+        # Capped, not unbounded: RFC 2119 ("MUST/SHOULD/MAY") is cited by
+        # tens of thousands of documents -- confirmed live that fetching
+        # its full citation list hangs this call for minutes with zero
+        # progress feedback (this endpoint isn't SSE-streamed). Any RFC
+        # that's this broadly cited is a poor "family" candidate anyway --
+        # the signal we actually want (a tight topical cluster) is exactly
+        # what's absent when a single RFC is cited by half the corpus.
+        # 8 pages (800 citations) per direction/relationship-slug, up to 4
+        # combinations -- worst case ~15-25s instead of the ~58s a 20-page
+        # cap measured live for RFC 2119. This endpoint isn't SSE-streamed
+        # (unlike the global graph), so whatever this takes is a blank
+        # "Loading..." with no progress -- the priority is a bounded wait,
+        # not a bigger sample for the rare RFC that even hits the cap.
+        _MAX_RELATED_PAGES = 8
+
+        def _fetch_related_names(client: httpx.Client, field: str, relationship_slug: str) -> tuple[list[str], bool]:
             names: list[str] = []
             other_field = "target" if field == "source__name" else "source"
             url = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
@@ -789,6 +815,8 @@ class IetfImportService:
                 "format": "json",
                 "limit": 100,
             }
+            pages = 0
+            truncated = False
             while url:
                 resp = client.get(url, params=params)
                 resp.raise_for_status()
@@ -798,17 +826,24 @@ class IetfImportService:
                     doc_name = uri.rstrip("/").split("/")[-1]
                     if doc_name:
                         names.append(doc_name)
+                pages += 1
                 next_page = data.get("meta", {}).get("next")
+                if next_page and pages >= _MAX_RELATED_PAGES:
+                    truncated = True
+                    break
                 url = f"https://datatracker.ietf.org{next_page}" if next_page else None
                 params = None
-            return names
+            return names, truncated
 
         try:
             with httpx.Client(timeout=15.0) as client:
-                cited_by = set(_fetch_related_names(client, "target__name", "refinfo"))
-                cited_by |= set(_fetch_related_names(client, "target__name", "refnorm"))
-                cites = set(_fetch_related_names(client, "source__name", "refinfo"))
-                cites |= set(_fetch_related_names(client, "source__name", "refnorm"))
+                cited_by_1, trunc_1 = _fetch_related_names(client, "target__name", "refinfo")
+                cited_by_2, trunc_2 = _fetch_related_names(client, "target__name", "refnorm")
+                cites_1, trunc_3 = _fetch_related_names(client, "source__name", "refinfo")
+                cites_2, trunc_4 = _fetch_related_names(client, "source__name", "refnorm")
+                cited_by = set(cited_by_1) | set(cited_by_2)
+                cites = set(cites_1) | set(cites_2)
+                truncated = trunc_1 or trunc_2 or trunc_3 or trunc_4
         except httpx.HTTPError as exc:
             return {"error": f"Could not fetch citing documents for {name}: {exc}"}
 
@@ -834,7 +869,7 @@ class IetfImportService:
             return {"error": f"Could not fetch candidate metadata: {exc}"}
 
         def _keyword_matches(title: str) -> bool:
-            return not topic_keyword or topic_keyword.lower() in title.lower()
+            return topic_keyword.lower() in title.lower()
 
         family: dict[str, dict] = {}
         for candidate in cited_by_candidates:
@@ -861,7 +896,13 @@ class IetfImportService:
                     "direction": "cites",
                 }
 
-        return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": list(family.values())}
+        result = {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": list(family.values())}
+        if truncated:
+            result["note"] = (
+                "This RFC is cited by an unusually large number of documents; "
+                "family is based on a partial (capped) sample of its citations."
+            )
+        return result
 
     @staticmethod
     def get_iesg_ballot_comments(draft_name: str) -> dict:
