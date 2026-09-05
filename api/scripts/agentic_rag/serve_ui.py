@@ -455,6 +455,32 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
+    @app.route("/api/rfc-graph/focus", methods=["GET"])
+    def api_rfc_graph_focus():
+        """The RFC Graph tab's Focus mode -- an N-hop neighborhood (1-3
+        hops, obsoletes/updates/family all included) around one RFC,
+        streamed via SSE since a hop-3 expansion on a well-connected RFC can
+        take a while (each hop's per-node fetch is itself uncapped in count,
+        just bounded in time -- see build_focus_neighborhood). Registered as
+        a static path for the same Werkzeug-ordering reason as
+        /api/rfc-graph/global above.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        rfc_number = (request.args.get("rfc") or "").strip()
+        if not rfc_number:
+            return jsonify({"error": "rfc is required"}), 400
+        try:
+            max_hops = int(request.args.get("hops", "2"))
+        except ValueError:
+            max_hops = 2
+        max_hops = max(1, min(3, max_hops))
+
+        def work(on_event):
+            return IetfImportService.build_focus_neighborhood(rfc_number, max_hops=max_hops, on_event=on_event)
+
+        return _sse_stream(app, work)
+
     @app.route("/api/rfc-graph/<rfc_number>", methods=["GET"])
     def api_rfc_graph(rfc_number):
         """Consolidated {nodes, edges} graph for the RFC Graph tab's table

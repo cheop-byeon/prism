@@ -1031,25 +1031,18 @@ class IetfImportService:
         return errata
 
     @staticmethod
-    def build_rfc_relationship_graph(rfc_number: str) -> dict:
-        """Assemble one consolidated {nodes, edges} graph for an RFC -- the
-        data foundation for the RFC Graph tab's table and interactive graph.
-
-        Combines get_rfc_relations (obsoletes/updates, structural) and
-        find_related_rfc_family (citation + keyword clustering) into a
-        single deduplicated node/edge list, since a graph UI needs one
-        coherent structure, not three separately-shaped tool outputs. Each
-        node carries its resolved title/std_level/wg (wg is for visual
-        grouping only -- drawing an edge between every same-WG pair would
-        just be a dense, low-information clique, so it's a node attribute
-        instead). Errata is deliberately NOT part of this graph: it's node
-        detail (one RFC's own history), not a relationship between two
-        RFCs -- fetched separately, on demand, when a node is clicked.
+    def _structural_neighbors(rfc_number: str) -> dict:
+        """Obsoletes/updates neighbors only for one RFC -- no citation
+        lookup. This is the cheap half of build_rfc_relationship_graph,
+        factored out so build_focus_neighborhood can use it as a fast
+        expansion primitive for hop 2+ (see there for why: running the
+        citation-based family lookup for every node in a multi-hop BFS,
+        not just the focus node itself, is what made hop-2/3 focus
+        requests take minutes in practice, confirmed live).
         """
         relations = IetfImportService.get_rfc_relations(rfc_number)
         if relations.get("error"):
             return {"error": relations["error"]}
-        family = IetfImportService.find_related_rfc_family(rfc_number)
         center = relations["rfc"]
 
         edges = []
@@ -1061,15 +1054,51 @@ class IetfImportService:
             edges.append({"source": center, "target": target, "kind": "updates"})
         for source in relations["updated_by"]:
             edges.append({"source": source, "target": center, "kind": "updates"})
+
+        # obsoletes/updates can (rarely) point at a not-yet-published draft
+        # name rather than an RFC -- this graph only ever shows published
+        # RFCs, so anything that isn't "RFC<digits>" is dropped here.
+        node_names = sorted({name for e in edges for name in (e["source"], e["target"])} | {center}, key=str)
+        node_names = [n for n in node_names if IetfImportService._RFC_NAME_RE.fullmatch(n.lower())]
+
+        try:
+            nodes = IetfImportService._batch_fetch_rfc_nodes(node_names)
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch node metadata: {exc}"}
+
+        valid_ids = {n["id"] for n in nodes}
+        edges = IetfImportService._dedupe_edges(edges, valid_ids)
+        return {"center": center, "nodes": nodes, "edges": edges}
+
+    @staticmethod
+    def build_rfc_relationship_graph(rfc_number: str) -> dict:
+        """Assemble one consolidated {nodes, edges} graph for an RFC -- the
+        data foundation for the RFC Graph tab's table and interactive graph.
+
+        Combines _structural_neighbors (obsoletes/updates) and
+        find_related_rfc_family (citation + keyword clustering) into a
+        single deduplicated node/edge list, since a graph UI needs one
+        coherent structure, not three separately-shaped tool outputs. Each
+        node carries its resolved title/std_level/wg (wg is for visual
+        grouping only -- drawing an edge between every same-WG pair would
+        just be a dense, low-information clique, so it's a node attribute
+        instead). Errata is deliberately NOT part of this graph: it's node
+        detail (one RFC's own history), not a relationship between two
+        RFCs -- fetched separately, on demand, when a node is clicked.
+        """
+        structural = IetfImportService._structural_neighbors(rfc_number)
+        if structural.get("error"):
+            return structural
+        family = IetfImportService.find_related_rfc_family(rfc_number)
+        center = structural["center"]
+
+        edges = list(structural["edges"])
         for entry in family.get("family", []):
             if entry.get("direction") == "cited_by":
                 edges.append({"source": entry["rfc"], "target": center, "kind": "family"})
             else:
                 edges.append({"source": center, "target": entry["rfc"], "kind": "family"})
 
-        # obsoletes/updates can (rarely) point at a not-yet-published draft
-        # name rather than an RFC -- this graph only ever shows published
-        # RFCs, so anything that isn't "RFC<digits>" is dropped here.
         node_names = sorted(
             {name for e in edges for name in (e["source"], e["target"])} | {center},
             key=str,
@@ -1087,6 +1116,95 @@ class IetfImportService:
         edges = IetfImportService._dedupe_edges(edges, valid_ids)
 
         return {"center": center, "nodes": nodes, "edges": edges}
+
+    @staticmethod
+    def build_focus_neighborhood(rfc_number: str, max_hops: int = 2, on_event=None) -> dict:
+        """BFS outward from one RFC by obsoletes/updates/family edges, up to
+        max_hops rings out -- the data behind the RFC Graph tab's Focus mode
+        (as opposed to Overview mode's whole-corpus structural graph, which
+        deliberately excludes family since that can't be fetched corpus-wide).
+
+        Only the focus RFC itself is expanded with the full, citation-aware
+        build_rfc_relationship_graph (obsoletes/updates + family) -- every
+        node beyond that uses the cheap _structural_neighbors (obsoletes/
+        updates only). Confirmed live that using the full lookup at every
+        hop made a 2-hop expansion take 2+ minutes and still not finish:
+        find_related_rfc_family's citation fetch is the expensive part, and
+        running it for every node in a BFS multiplies that cost by the
+        frontier size at each hop. Family relative to a NEIGHBOR's neighbor
+        isn't a well-defined idea anyway -- "family" means "shares this
+        RFC's topic", which only makes sense relative to the one RFC the
+        user actually asked about.
+
+        Capped at a total expansion count (not just per hop) as a second
+        safety net against fan-out at hop 3. Every node gets tagged with
+        the hop distance it was first reached at (0 = the focus RFC itself),
+        which is what lets the UI size/color nodes by proximity instead of
+        the flat "expanded or not" look the old per-node click-to-expand had.
+        """
+        # 80, not the original 40 -- measured live that a structural-only
+        # (hop 2+) expansion is cheap, ~1s each, so this mostly costs time
+        # only for the single full (citation-aware) hop-1 expansion of the
+        # center. A well-connected hub RFC (RFC 4035: 35 hop-1 + 46 hop-2
+        # neighbors) can still exhaust this within 2 hops -- that's a
+        # legitimate truncation of an unusually dense neighborhood, not a
+        # bug, and is reported via the "truncated" flag.
+        _MAX_EXPANSIONS = 80
+
+        def _emit(message: str) -> None:
+            if on_event:
+                on_event({"stage": "focusing", "message": message})
+
+        digits = re.sub(r"[^0-9]", "", rfc_number)
+        if not digits:
+            return {"error": f"{rfc_number!r} doesn't look like an RFC number"}
+        center = f"RFC{digits}"
+
+        all_nodes: dict[str, dict] = {}
+        all_edges: dict[tuple[str, str, str], dict] = {}
+        hop_of: dict[str, int] = {center: 0}
+        frontier = [center]
+        expansions = 0
+        truncated = False
+
+        for hop in range(1, max_hops + 1):
+            next_frontier: list[str] = []
+            for node_id in frontier:
+                if expansions >= _MAX_EXPANSIONS:
+                    truncated = True
+                    break
+                expansions += 1
+                _emit(f"Hop {hop}: expanding {node_id}… ({expansions}/{_MAX_EXPANSIONS})")
+                if node_id == center:
+                    result = IetfImportService.build_rfc_relationship_graph(node_id)
+                else:
+                    result = IetfImportService._structural_neighbors(node_id)
+                if result.get("error"):
+                    continue  # one bad node shouldn't fail the whole neighborhood
+                for n in result.get("nodes", []):
+                    all_nodes.setdefault(n["id"], n)
+                    if n["id"] not in hop_of:
+                        hop_of[n["id"]] = hop
+                        next_frontier.append(n["id"])
+                for e in result.get("edges", []):
+                    all_edges[(e["source"], e["target"], e["kind"])] = e
+            if truncated:
+                break
+            frontier = next_frontier
+            if not frontier:
+                break
+
+        if center not in all_nodes:
+            return {"error": f"Could not resolve {center}"}
+
+        nodes = [{**n, "hop": hop_of.get(n["id"], max_hops + 1)} for n in all_nodes.values()]
+        valid_ids = set(all_nodes)
+        edges = IetfImportService._dedupe_edges(list(all_edges.values()), valid_ids)
+
+        result = {"center": center, "nodes": nodes, "edges": edges}
+        if truncated:
+            result["truncated"] = True
+        return result
 
     @staticmethod
     def _batch_fetch_rfc_nodes(names: list[str], on_event=None) -> list[dict]:

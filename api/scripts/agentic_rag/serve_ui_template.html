@@ -379,7 +379,9 @@
   }
   .rfc-graph-filter input { cursor: pointer; }
   #rfcGraphInput { flex: 0 0 220px; }
-  .rfc-view-toggle { display: inline-flex; gap: 4px; flex: none; }
+  .rfc-view-toggle, .rfc-mode-toggle { display: inline-flex; gap: 4px; flex: none; }
+  .rfc-mode-toggle { margin: 14px 0 10px; }
+  .rfc-mode-toggle .rfc-view-btn { padding: 6px 16px; font-size: 12px; }
   .rfc-view-btn {
     background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
     padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
@@ -535,23 +537,44 @@
   </section>
 
   <section class="tab-pane" id="pane-rfcgraph">
-    <p class="corpora-hint">
-      Default view: the whole-corpus Obsoletes/Updates graph -- every RFC connected to another by
-      one of those two relationship kinds, system-wide. Citations aren't in this default view since
-      that graph explodes into the tens of thousands corpus-wide (513 for RFC 4035 alone); look a
-      node's citation family up on demand instead by focusing that RFC below.
+    <div class="rfc-mode-toggle" id="rfcModeToggle">
+      <button class="rfc-view-btn active" data-mode="overview">Overview</button>
+      <button class="rfc-view-btn" data-mode="focus">Focus</button>
+    </div>
+    <p class="corpora-hint" id="rfcOverviewHint">
+      The whole-corpus Obsoletes/Updates graph -- every RFC connected to another by one of those
+      two relationship kinds, system-wide. Citations aren't part of this structural view (that
+      graph explodes into the tens of thousands corpus-wide -- 513 for RFC 4035 alone); switch to
+      Focus to pull in one RFC's full neighborhood, citation family included.
+    </p>
+    <p class="corpora-hint" id="rfcFocusHint" hidden>
+      Starts from one RFC and expands outward hop by hop: hop 1 is its direct obsoletes/updates/
+      family connections, hop 2 adds their connections too, hop 3 one ring further. Family is only
+      computed for the RFC you focus on, not for its neighbors -- "shares this RFC's topic" isn't a
+      well-defined idea two hops removed from it.
     </p>
     <div class="controls rfc-graph-controls">
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterObsoletes" checked> Obsoletes</label>
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterUpdates" checked> Updates</label>
-      <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterFamily" checked> Family</label>
+      <label class="rfc-graph-filter" id="rfcFilterFamilyLabel" hidden>
+        <input type="checkbox" id="rfcFilterFamily" checked> Family
+      </label>
       <div class="rfc-view-toggle" id="rfcViewToggle">
         <button class="rfc-view-btn active" data-view="both">Both</button>
         <button class="rfc-view-btn" data-view="graph">Force Graph</button>
         <button class="rfc-view-btn" data-view="arc">Arc Diagram</button>
       </div>
-      <input id="rfcGraphInput" type="text" placeholder="Focus on RFC number, e.g. 4035" />
-      <button id="rfcGraphBtn">Focus</button>
+      <span id="rfcFocusInputGroup" hidden>
+        <input id="rfcGraphInput" type="text" placeholder="RFC number, e.g. 4035" />
+        <label class="rfc-graph-filter">Hops:
+          <select id="rfcFocusHops">
+            <option value="1">1</option>
+            <option value="2" selected>2</option>
+            <option value="3">3</option>
+          </select>
+        </label>
+        <button id="rfcGraphBtn">Go</button>
+      </span>
     </div>
     <div id="rfcGraphStatus"></div>
     <div class="rfc-graph-layout" id="rfcGraphLayout" hidden>
@@ -559,13 +582,7 @@
         <div class="rfc-graph-canvas-wrap">
           <div class="rfc-view-label">Force graph</div>
           <div id="rfcGraphCanvas"></div>
-          <div class="rfc-graph-legend">
-            <span><i class="rfc-dot center"></i> full relations loaded</span>
-            <span><i class="rfc-dot leaf"></i> obsoletes/updates only</span>
-            <span><i class="rfc-line obsoletes"></i> obsoletes</span>
-            <span><i class="rfc-line updates"></i> updates</span>
-            <span><i class="rfc-line family"></i> family</span>
-          </div>
+          <div class="rfc-graph-legend" id="rfcGraphLegend"></div>
         </div>
         <div class="rfc-arc-pane">
           <div class="rfc-view-label">Arc diagram -- RFCs left to right in publication order</div>
@@ -954,15 +971,21 @@ const STD_LEVEL_COLORS = {
   bcp: '#6fd19a', inf: '#c9ae6c', exp: '#c9ae6c', hist: '#8890a0',
 };
 const EDGE_KIND_COLORS = { obsoletes: '#e0645a', updates: '#5fb0e0', family: '#b98cf0' };
+const HOP_SIZES = [22, 14, 10, 7]; // index = hop distance from the focused RFC
 
-const rfcNodes = new vis.DataSet([]);   // {id, label, title, rfcTitle, stdLevel, wg, enriched, color, ...}
+const rfcNodes = new vis.DataSet([]);   // {id, title, rfcTitle, stdLevel, wg, hop, color, size, ...}
 const rfcEdges = new vis.DataSet([]);   // {id: "source|target|kind", from, to, kind, hidden, ...}
-const enrichedIds = new Set();          // ids that have had their full relations (incl. family) loaded
 let rfcNetwork = null;
-let rfcGraphLoaded = false;             // true once the global graph has been fetched (success or not)
+let rfcMode = 'overview';               // 'overview' (whole-corpus obsoletes/updates) or 'focus' (one RFC, N hops)
+let rfcTabOpened = false;               // true once the tab's been opened at least once this session
+let rfcRequestToken = 0;                // bumped by resetRfcGraphState() -- lets an in-flight SSE
+                                         // request (e.g. a slow Overview load) recognize it's been
+                                         // superseded by a mode switch or a new Focus search, and
+                                         // ignore its own result instead of corrupting the new state
 
 const rfcGraphInputEl = document.getElementById('rfcGraphInput');
 const rfcGraphBtnEl = document.getElementById('rfcGraphBtn');
+const rfcFocusHopsEl = document.getElementById('rfcFocusHops');
 const rfcGraphStatusEl = document.getElementById('rfcGraphStatus');
 const rfcGraphLayoutEl = document.getElementById('rfcGraphLayout');
 const rfcGraphTableWrapEl = document.getElementById('rfcGraphTableWrap');
@@ -970,21 +993,36 @@ const rfcGraphTableBodyEl = document.getElementById('rfcGraphTableBody');
 const rfcTableToggleBtnEl = document.getElementById('rfcTableToggleBtn');
 const rfcTableFilterEl = document.getElementById('rfcTableFilter');
 const rfcGraphDetailEl = document.getElementById('rfcGraphDetail');
+const rfcGraphLegendEl = document.getElementById('rfcGraphLegend');
+const rfcOverviewHintEl = document.getElementById('rfcOverviewHint');
+const rfcFocusHintEl = document.getElementById('rfcFocusHint');
+const rfcFilterFamilyLabelEl = document.getElementById('rfcFilterFamilyLabel');
+const rfcFocusInputGroupEl = document.getElementById('rfcFocusInputGroup');
 const rfcFilterEls = {
   obsoletes: document.getElementById('rfcFilterObsoletes'),
   updates: document.getElementById('rfcFilterUpdates'),
   family: document.getElementById('rfcFilterFamily'),
 };
 
-function nodeVisual(id, enriched) {
-  const node = rfcNodes.get(id) || {};
-  return enriched
-    ? { color: { background: '#7c9eff', border: '#c7c8ef', highlight: { background: '#7c9eff', border: '#c7c8ef' } }, size: 16 }
-    : { color: { background: STD_LEVEL_COLORS[node.stdLevel] || '#5b6072', border: '#2a2f3f' }, size: 8 };
+// Overview nodes carry no hop (undefined) and get a flat, uniform look --
+// there's no "distance from the center" concept in a whole-corpus graph.
+// Focus nodes are sized by hop distance (0 = the focused RFC itself) so
+// proximity reads visually instead of every node looking the same, which
+// is what the old binary "enriched or not" coloring actually did.
+function nodeVisual(stdLevel, hop) {
+  const background = STD_LEVEL_COLORS[stdLevel] || '#5b6072';
+  if (hop === undefined || hop === null) {
+    return { color: { background, border: '#2a2f3f' }, size: 8 };
+  }
+  return {
+    color: { background, border: hop === 0 ? '#7c9eff' : '#2a2f3f', highlight: { background, border: '#7c9eff' } },
+    size: HOP_SIZES[hop] ?? 6,
+    borderWidth: hop === 0 ? 3 : 1,
+  };
 }
 
 // Merges a {nodes, edges} payload (either shape returned by
-// /api/rfc-graph/global or /api/rfc-graph/<rfc>) into the accumulated
+// /api/rfc-graph/global or /api/rfc-graph/focus) into the accumulated
 // vis DataSets. Returns true if anything new was actually added, so
 // callers can skip a pointless redraw.
 function mergeGraphData(data) {
@@ -999,8 +1037,8 @@ function mergeGraphData(data) {
       rfcTitle: n.title || '',
       stdLevel: n.std_level,
       wg: n.wg,
-      enriched: false,
-      ...nodeVisual(n.id, false),
+      hop: n.hop,
+      ...nodeVisual(n.std_level, n.hop),
     });
   });
   if (nodeUpdates.length) rfcNodes.add(nodeUpdates);
@@ -1022,29 +1060,33 @@ function mergeGraphData(data) {
     });
   });
   if (edgeUpdates.length) rfcEdges.add(edgeUpdates);
-  // A later enrichment merge, after the initial layout already settled and
-  // froze physics (see initNetwork) -- stabilize() reheats just enough to
-  // place the newly-added nodes sensibly instead of leaving them stacked
-  // at vis-network's default (0,0) spawn point. A bounded iteration count
-  // matters here: an unbounded stabilize() call re-simulates the WHOLE
-  // ~3930-node graph (confirmed live to hang the tab for many seconds),
-  // not just the couple dozen new nodes one enrichment actually adds.
+  // Reheats physics just enough to place newly-added nodes sensibly instead
+  // of leaving them stacked at vis-network's default (0,0) spawn point --
+  // bounded, since an unbounded stabilize() re-simulates the WHOLE graph
+  // (confirmed live to hang the tab for many seconds at ~3930 nodes).
   if (addedAny && rfcNetwork) rfcNetwork.stabilize(60);
   return addedAny;
 }
 
-function markEnriched(id) {
-  enrichedIds.add(id);
-  rfcNodes.update({ id, enriched: true, ...nodeVisual(id, true) });
-}
-
-async function enrichNode(rfcId) {
-  if (enrichedIds.has(rfcId)) return;
-  const res = await fetch(`/api/rfc-graph/${encodeURIComponent(rfcId)}`);
-  const data = await res.json();
-  if (!res.ok || data.error) throw new Error(data.error || `Failed to load relations for ${rfcId}`);
-  mergeGraphData(data);
-  markEnriched(rfcId);
+// Resets all accumulated graph state -- used on every mode switch and
+// every new Focus search, since mixing Overview's whole-corpus data with
+// a Focus neighborhood (or one Focus search's results with another's)
+// would be incoherent, not just visually but in what the hop/enrichment
+// state on each node even means.
+function resetRfcGraphState() {
+  rfcRequestToken += 1;
+  rfcNodes.clear();
+  rfcEdges.clear();
+  if (rfcNetwork) {
+    rfcNetwork.destroy();
+    rfcNetwork = null;
+  }
+  rfcGraphLayoutEl.hidden = true;
+  rfcTableToggleBtnEl.hidden = true;
+  rfcGraphTableWrapEl.hidden = true;
+  rfcTableToggleBtnEl.textContent = 'Show table';
+  rfcGraphDetailEl.innerHTML = '<p class="empty-state">Click a node to see detail.</p>';
+  rfcGraphStatusEl.innerHTML = '';
 }
 
 function nodeConnections(nodeId) {
@@ -1069,28 +1111,38 @@ function computeConnectionCounts() {
 const RFC_TABLE_ROW_CAP = 200;
 
 // The table is opt-in (see rfcTableToggleBtnEl) and, even once shown,
-// renders only what the user actually asked for -- the RFCs they've
-// enriched, or whatever a search matches -- never all ~3930 rows by
-// default. That earlier "render everything" behavior was the actual
-// source of the tab feeling slow, not the graphs themselves.
+// renders only what's actually useful for the current mode: in Overview
+// (thousands of nodes) it's search-only by default, since dumping
+// everything was the actual source of the tab feeling slow; in Focus the
+// neighborhood is already small (bounded by the hop cap) so it shows
+// everything loaded, sorted by hop distance from the focused RFC.
 function renderRfcGraphTable() {
   if (rfcGraphTableWrapEl.hidden) return;
   const filterText = rfcTableFilterEl.value.trim().toLowerCase();
   const allNodes = rfcNodes.get();
-  let matches = filterText
-    ? allNodes.filter(
-        (n) => n.id.toLowerCase().includes(filterText) || (n.rfcTitle || '').toLowerCase().includes(filterText)
-      )
-    : allNodes.filter((n) => n.enriched);
+  let matches;
+  if (filterText) {
+    matches = allNodes.filter(
+      (n) => n.id.toLowerCase().includes(filterText) || (n.rfcTitle || '').toLowerCase().includes(filterText)
+    );
+  } else if (rfcMode === 'focus') {
+    matches = allNodes;
+  } else {
+    matches = [];
+  }
 
   const totalMatches = matches.length;
-  matches = matches.sort((a, b) => a.id.localeCompare(b.id)).slice(0, RFC_TABLE_ROW_CAP);
+  matches = matches
+    .sort((a, b) => (a.hop ?? 99) - (b.hop ?? 99) || a.id.localeCompare(b.id))
+    .slice(0, RFC_TABLE_ROW_CAP);
 
   if (!matches.length) {
     rfcGraphTableBodyEl.innerHTML = `<tr><td colspan="6" class="empty-state">${
       filterText
         ? 'No RFCs match that filter.'
-        : "No RFCs loaded yet -- focus an RFC above, click a node's \"Load full relations\", or search by number/title here."
+        : rfcMode === 'focus'
+          ? 'Focus on an RFC above to see its neighborhood here.'
+          : 'Type an RFC number or title above to search the whole corpus.'
     }</td></tr>`;
     return;
   }
@@ -1098,14 +1150,14 @@ function renderRfcGraphTable() {
   const counts = computeConnectionCounts();
   const rows = matches
     .map((n) => `
-      <tr class="${n.enriched ? 'is-center' : ''}">
+      <tr class="${n.hop === 0 ? 'is-center' : ''}">
         <td>${escapeHtml(n.id)}</td>
         <td class="rfc-graph-title">${escapeHtml(n.rfcTitle)}</td>
         <td>${escapeHtml((n.stdLevel || '').toUpperCase())}</td>
         <td>${escapeHtml(n.wg || '—')}</td>
         <td>${counts.get(n.id) || 0}</td>
-        <td><button class="rfc-expand-btn" data-rfc="${escapeHtml(n.id)}" ${n.enriched ? 'disabled' : ''}>
-          ${n.enriched ? 'Loaded' : 'Load full relations'}
+        <td><button class="rfc-focus-btn" data-rfc="${escapeHtml(n.id)}" ${n.hop === 0 ? 'disabled' : ''}>
+          ${n.hop === 0 ? 'Center' : 'Focus →'}
         </button></td>
       </tr>`)
     .join('');
@@ -1167,10 +1219,11 @@ function renderArcDiagram() {
   const nodeMarkup = nodes
     .map((node) => {
       const x = xOf(node.id);
-      const color = node.enriched ? '#7c9eff' : (STD_LEVEL_COLORS[node.stdLevel] || '#5b6072');
+      const color = node.hop === 0 ? '#7c9eff' : (STD_LEVEL_COLORS[node.stdLevel] || '#5b6072');
+      const r = node.hop === 0 ? 3.5 : 2;
       return `<g class="rfc-arc-node" data-rfc="${escapeHtml(node.id)}">
         <circle cx="${x}" cy="${ARC_BASE_Y}" r="6" fill="transparent"/>
-        <circle cx="${x}" cy="${ARC_BASE_Y}" r="2" fill="${color}"/>
+        <circle cx="${x}" cy="${ARC_BASE_Y}" r="${r}" fill="${color}"/>
         <title>${escapeHtml(node.id)}: ${escapeHtml(node.rfcTitle)}</title>
       </g>`;
     })
@@ -1191,7 +1244,7 @@ document.getElementById('rfcArcScroll').addEventListener('click', (e) => {
 document.getElementById('rfcViewToggle').addEventListener('click', (e) => {
   const btn = e.target.closest('.rfc-view-btn');
   if (!btn) return;
-  document.querySelectorAll('.rfc-view-btn').forEach((b) => b.classList.remove('active'));
+  document.querySelectorAll('#rfcViewToggle .rfc-view-btn').forEach((b) => b.classList.remove('active'));
   btn.classList.add('active');
   document.getElementById('rfcGraphViews').dataset.view = btn.dataset.view;
 });
@@ -1199,6 +1252,49 @@ document.getElementById('rfcViewToggle').addEventListener('click', (e) => {
 function refreshRfcViews() {
   renderRfcGraphTable();
   renderArcDiagram();
+}
+
+// Legend content depends on mode: Overview has no family edges and no hop
+// concept (every node looks the same), Focus has both -- rendered via JS
+// instead of two static markup blocks so there's one source of truth for
+// what's actually in the current dataset.
+function renderLegend() {
+  rfcGraphLegendEl.innerHTML = rfcMode === 'focus'
+    ? `<span><i class="rfc-dot center"></i> focused RFC (larger = closer)</span>
+       <span><i class="rfc-line obsoletes"></i> obsoletes</span>
+       <span><i class="rfc-line updates"></i> updates</span>
+       <span><i class="rfc-line family"></i> family</span>`
+    : `<span><i class="rfc-line obsoletes"></i> obsoletes</span>
+       <span><i class="rfc-line updates"></i> updates</span>`;
+}
+
+function setRfcMode(mode) {
+  if (mode === rfcMode) return;
+  rfcMode = mode;
+  document.querySelectorAll('#rfcModeToggle .rfc-view-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  rfcOverviewHintEl.hidden = mode !== 'overview';
+  rfcFocusHintEl.hidden = mode !== 'focus';
+  rfcFilterFamilyLabelEl.hidden = mode !== 'focus';
+  rfcFocusInputGroupEl.hidden = mode !== 'focus';
+  resetRfcGraphState();
+  renderLegend();
+  if (mode === 'overview') loadGlobalGraph();
+}
+
+document.getElementById('rfcModeToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.rfc-view-btn');
+  if (btn) setRfcMode(btn.dataset.mode);
+});
+
+// The single action every "explore this RFC further" affordance funnels
+// into (Overview node detail/table row, Focus node detail/table row
+// alike) -- switches to Focus mode if needed and re-centers the N-hop
+// expansion on the given RFC, replacing the old per-node "load full
+// relations" click-to-expand with one consistent verb everywhere.
+function focusOnRfc(rfcId) {
+  if (rfcMode !== 'focus') setRfcMode('focus');
+  rfcGraphInputEl.value = rfcId.replace(/^RFC/i, '');
+  runFocus();
 }
 
 function applyEdgeFilters() {
@@ -1266,37 +1362,31 @@ function showNodeDetail(nodeId) {
   const node = rfcNodes.get(nodeId);
   if (!node) return;
   const conns = nodeConnections(nodeId);
+  const hopLabel = node.hop === 0 ? ' (focused RFC)' : (node.hop != null ? ` (hop ${node.hop})` : '');
   rfcGraphDetailEl.innerHTML = `
-    <h4>${escapeHtml(node.id)}${node.enriched ? ' (full relations loaded)' : ''}</h4>
+    <h4>${escapeHtml(node.id)}${hopLabel}</h4>
     <div class="rfc-detail-meta">
       <div>${escapeHtml(node.rfcTitle)}</div>
       <div><b>Level:</b> ${escapeHtml((node.stdLevel || 'unknown').toUpperCase())}</div>
       <div><b>WG:</b> ${escapeHtml(node.wg || '—')}</div>
       <div><b>Connections:</b> ${conns.length ? escapeHtml(conns.join(', ')) : 'none'}</div>
     </div>
-    <button id="rfcEnrichBtn" data-rfc="${escapeHtml(node.id)}" ${node.enriched ? 'disabled' : ''}>
-      ${node.enriched ? 'Full relations loaded' : 'Load full relations (incl. citation family)'}
+    <button class="rfc-focus-btn" data-rfc="${escapeHtml(node.id)}" ${node.hop === 0 ? 'disabled' : ''}>
+      ${node.hop === 0 ? 'This is the focused RFC' : 'Focus on this RFC'}
     </button>
     <button id="rfcLoadErrata" data-rfc="${escapeHtml(node.id)}">Load errata</button>
     <div id="rfcErrataList"></div>`;
 }
 
+function handleFocusBtnClick(e) {
+  const btn = e.target.closest('.rfc-focus-btn');
+  if (!btn || btn.disabled) return;
+  focusOnRfc(btn.dataset.rfc);
+}
+document.getElementById('rfcGraphDetail').addEventListener('click', handleFocusBtnClick);
+document.getElementById('rfcGraphTableBody').addEventListener('click', handleFocusBtnClick);
+
 document.getElementById('rfcGraphDetail').addEventListener('click', async (e) => {
-  const enrichBtn = e.target.closest('#rfcEnrichBtn');
-  if (enrichBtn) {
-    enrichBtn.disabled = true;
-    enrichBtn.textContent = 'Loading…';
-    try {
-      await enrichNode(enrichBtn.dataset.rfc);
-      refreshRfcViews();
-      showNodeDetail(enrichBtn.dataset.rfc);
-    } catch (err) {
-      rfcGraphDetailEl.insertAdjacentHTML(
-        'beforeend', `<p class="empty-state">Load failed: ${escapeHtml(String(err))}</p>`
-      );
-    }
-    return;
-  }
   const btn = e.target.closest('#rfcLoadErrata');
   if (!btn) return;
   btn.disabled = true;
@@ -1323,24 +1413,16 @@ document.getElementById('rfcGraphDetail').addEventListener('click', async (e) =>
   btn.remove();
 });
 
-document.getElementById('rfcGraphTableBody').addEventListener('click', async (e) => {
-  const btn = e.target.closest('.rfc-expand-btn');
-  if (!btn || btn.disabled) return;
-  btn.disabled = true;
-  btn.textContent = 'Loading…';
-  try {
-    await enrichNode(btn.dataset.rfc);
-    refreshRfcViews();
-  } catch (err) {
-    rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
-  }
-});
-
+// Overview's whole-corpus graph -- SSE-streamed since a cold build takes
+// ~2 minutes; cached server-side after that, so re-entering Overview mode
+// later in the session is near-instant. Called on first tab open and on
+// every switch back into Overview mode.
 function loadGlobalGraph() {
-  rfcGraphLoaded = true;
+  const token = rfcRequestToken;
   rfcGraphStatusEl.innerHTML = '<div class="loading">Building the whole-corpus graph (first load only, ~2 min)…</div>';
   const source = new EventSource('/api/rfc-graph/global');
   source.onmessage = (ev) => {
+    if (token !== rfcRequestToken) return source.close(); // superseded by a mode switch/new search
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
       rfcGraphStatusEl.innerHTML = `<div class="loading">${escapeHtml(msg.message || 'Working…')}</div>`;
@@ -1363,36 +1445,71 @@ function loadGlobalGraph() {
   };
   source.onerror = () => {
     source.close();
+    if (token !== rfcRequestToken) return;
     rfcGraphStatusEl.innerHTML = '<div class="error-box">Connection lost while building the graph.</div>';
   };
 }
 
-async function focusRfc() {
+// Focus mode's N-hop neighborhood -- SSE-streamed since a hop-3 expansion
+// on a well-connected RFC can take up to a minute (see
+// build_focus_neighborhood's own expansion cap). Always starts from a
+// clean slate: mixing one Focus search's results with another's, or with
+// Overview's data, wouldn't be a coherent graph.
+function runFocus() {
   const rfcNumber = rfcGraphInputEl.value.trim();
   if (!rfcNumber) return;
-  rfcGraphBtnEl.disabled = true;
+  const hops = rfcFocusHopsEl.value;
   const id = rfcNumber.toUpperCase().startsWith('RFC') ? rfcNumber.toUpperCase() : `RFC${rfcNumber}`;
-  try {
-    await enrichNode(id);
-    rfcGraphStatusEl.innerHTML = '';
-    rfcGraphLayoutEl.hidden = false;
-    rfcTableToggleBtnEl.hidden = false;
-    refreshRfcViews();
-    initNetwork();
-    showNodeDetail(id);
-    rfcNetwork.selectNodes([id]);
-    rfcNetwork.focus(id, { scale: 1.4, animation: { duration: 500, easingFunction: 'easeInOutQuad' } });
-  } catch (err) {
-    rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
-  }
-  rfcGraphBtnEl.disabled = false;
+  resetRfcGraphState();
+  const token = rfcRequestToken;
+  rfcGraphBtnEl.disabled = true;
+  rfcGraphStatusEl.innerHTML = `<div class="loading">Focusing on ${escapeHtml(id)}…</div>`;
+  const params = new URLSearchParams({ rfc: id, hops });
+  const source = new EventSource(`/api/rfc-graph/focus?${params}`);
+  source.onmessage = (ev) => {
+    if (token !== rfcRequestToken) return source.close(); // superseded by a mode switch/new search
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      rfcGraphStatusEl.innerHTML = `<div class="loading">${escapeHtml(msg.message || 'Working…')}</div>`;
+    } else if (msg.type === 'result') {
+      source.close();
+      rfcGraphBtnEl.disabled = false;
+      if (msg.data.error) {
+        rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(msg.data.error)}</div>`;
+        return;
+      }
+      mergeGraphData(msg.data);
+      rfcGraphStatusEl.innerHTML = msg.data.truncated
+        ? '<div class="loading">Note: this neighborhood was unusually large and got capped -- showing a partial expansion.</div>'
+        : '';
+      rfcGraphLayoutEl.hidden = false;
+      rfcTableToggleBtnEl.hidden = false;
+      refreshRfcViews();
+      initNetwork();
+      showNodeDetail(id);
+    } else if (msg.type === 'error') {
+      source.close();
+      rfcGraphBtnEl.disabled = false;
+      rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(msg.message)}</div>`;
+    }
+  };
+  source.onerror = () => {
+    source.close();
+    if (token !== rfcRequestToken) return;
+    rfcGraphBtnEl.disabled = false;
+    rfcGraphStatusEl.innerHTML = '<div class="error-box">Connection lost while focusing.</div>';
+  };
 }
 
-rfcGraphBtnEl.addEventListener('click', focusRfc);
-rfcGraphInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') focusRfc(); });
+rfcGraphBtnEl.addEventListener('click', runFocus);
+rfcGraphInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runFocus(); });
 
 document.querySelector('.tab-btn[data-tab="rfcgraph"]').addEventListener('click', () => {
-  if (!rfcGraphLoaded) loadGlobalGraph();
+  if (!rfcTabOpened) {
+    rfcTabOpened = true;
+    renderLegend();
+    loadGlobalGraph();
+  }
 });
 
 function toolLabel(name) { return toolDisplayNames[name] || name; }
