@@ -379,13 +379,30 @@
   }
   .rfc-graph-filter input { cursor: pointer; }
   #rfcGraphInput { flex: 0 0 220px; }
+  .rfc-view-toggle { display: inline-flex; gap: 4px; flex: none; }
+  .rfc-view-btn {
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
+    padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    font-family: var(--sans); white-space: nowrap;
+  }
+  .rfc-view-btn.active { color: var(--accent); border-color: var(--accent); }
   .rfc-graph-layout { display: flex; gap: 14px; margin-top: 14px; align-items: stretch; flex-shrink: 0; }
   .rfc-graph-layout[hidden] { display: none; }
-  .rfc-graph-canvas-wrap {
+  .rfc-graph-views { display: flex; gap: 14px; flex: 1; min-width: 0; }
+  .rfc-graph-views[data-view="graph"] .rfc-arc-pane { display: none; }
+  .rfc-graph-views[data-view="arc"] .rfc-graph-canvas-wrap { display: none; }
+  .rfc-graph-canvas-wrap, .rfc-arc-pane {
     flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
   }
+  .rfc-view-label {
+    font-size: 10.5px; color: var(--text-dim); padding: 7px 12px; border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
   #rfcGraphCanvas { width: 100%; height: 480px; }
+  .rfc-arc-scroll { flex: 1; min-height: 0; overflow-x: auto; overflow-y: hidden; }
+  .rfc-arc-scroll svg { display: block; height: 100%; }
+  .rfc-arc-node { cursor: pointer; }
   .rfc-graph-legend {
     display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--border);
     font-size: 11px; color: var(--text-dim); flex-wrap: wrap;
@@ -524,19 +541,31 @@
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterObsoletes" checked> Obsoletes</label>
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterUpdates" checked> Updates</label>
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterFamily" checked> Family</label>
+      <div class="rfc-view-toggle" id="rfcViewToggle">
+        <button class="rfc-view-btn active" data-view="both">Both</button>
+        <button class="rfc-view-btn" data-view="graph">Force Graph</button>
+        <button class="rfc-view-btn" data-view="arc">Arc Diagram</button>
+      </div>
       <input id="rfcGraphInput" type="text" placeholder="Focus on RFC number, e.g. 4035" />
       <button id="rfcGraphBtn">Focus</button>
     </div>
     <div id="rfcGraphStatus"></div>
     <div class="rfc-graph-layout" id="rfcGraphLayout" hidden>
-      <div class="rfc-graph-canvas-wrap">
-        <div id="rfcGraphCanvas"></div>
-        <div class="rfc-graph-legend">
-          <span><i class="rfc-dot center"></i> full relations loaded</span>
-          <span><i class="rfc-dot leaf"></i> obsoletes/updates only</span>
-          <span><i class="rfc-line obsoletes"></i> obsoletes</span>
-          <span><i class="rfc-line updates"></i> updates</span>
-          <span><i class="rfc-line family"></i> family</span>
+      <div class="rfc-graph-views" id="rfcGraphViews" data-view="both">
+        <div class="rfc-graph-canvas-wrap">
+          <div class="rfc-view-label">Force graph</div>
+          <div id="rfcGraphCanvas"></div>
+          <div class="rfc-graph-legend">
+            <span><i class="rfc-dot center"></i> full relations loaded</span>
+            <span><i class="rfc-dot leaf"></i> obsoletes/updates only</span>
+            <span><i class="rfc-line obsoletes"></i> obsoletes</span>
+            <span><i class="rfc-line updates"></i> updates</span>
+            <span><i class="rfc-line family"></i> family</span>
+          </div>
+        </div>
+        <div class="rfc-arc-pane">
+          <div class="rfc-view-label">Arc diagram -- RFCs left to right in publication order</div>
+          <div class="rfc-arc-scroll" id="rfcArcScroll"></div>
         </div>
       </div>
       <div class="rfc-graph-detail" id="rfcGraphDetail">
@@ -1032,12 +1061,90 @@ function renderRfcGraphTable() {
   rfcGraphTableBodyEl.innerHTML = rows;
 }
 
+// Arc diagram -- the same {nodes, edges} state as the force graph, laid out
+// on one axis instead of a physics simulation. RFC numbers are assigned
+// strictly in publication order, so sorting by the numeric id IS
+// chronological order, not an approximation of it -- rank (not the raw
+// number) sets each node's x position so the diagram stays evenly spaced
+// instead of compressing the sparse early-RFC era against a crowded
+// recent one. Arc height uses sqrt(span) so short local revisions stay
+// small while a handful of decades-spanning obsoletes edges still fit
+// within a bounded canvas height.
+const rfcNumValue = (id) => parseInt(String(id).replace(/^RFC/i, ''), 10) || 0;
+const ARC_SPACING = 4;
+const ARC_HEIGHT = 460;
+const ARC_BASE_Y = ARC_HEIGHT - 20;
+const ARC_MAX_HEIGHT = 400;
+
+function renderArcDiagram() {
+  const nodes = rfcNodes.get().slice().sort((a, b) => rfcNumValue(a.id) - rfcNumValue(b.id));
+  const scrollEl = document.getElementById('rfcArcScroll');
+  if (!nodes.length) {
+    scrollEl.innerHTML = '';
+    return;
+  }
+  const rank = new Map(nodes.map((n, i) => [n.id, i]));
+  const width = Math.max(nodes.length * ARC_SPACING + 20, 600);
+  const xOf = (id) => 20 + rank.get(id) * ARC_SPACING;
+
+  const edges = rfcEdges.get({ filter: (e) => !e.hidden && rank.has(e.from) && rank.has(e.to) });
+  const arcPaths = edges
+    .map((e) => {
+      const x1 = xOf(e.from);
+      const x2 = xOf(e.to);
+      const span = Math.abs(rank.get(e.from) - rank.get(e.to));
+      const h = Math.min(ARC_MAX_HEIGHT, 12 + Math.sqrt(span) * 13);
+      const left = Math.min(x1, x2);
+      const right = Math.max(x1, x2);
+      const rx = Math.max((right - left) / 2, 1);
+      return `<path d="M ${left},${ARC_BASE_Y} A ${rx},${h} 0 0 1 ${right},${ARC_BASE_Y}" fill="none" stroke="${EDGE_KIND_COLORS[e.kind] || '#5b6072'}" stroke-opacity="0.35" stroke-width="1"/>`;
+    })
+    .join('');
+
+  const nodeMarkup = nodes
+    .map((node) => {
+      const x = xOf(node.id);
+      const color = node.enriched ? '#7c9eff' : (STD_LEVEL_COLORS[node.stdLevel] || '#5b6072');
+      return `<g class="rfc-arc-node" data-rfc="${escapeHtml(node.id)}">
+        <circle cx="${x}" cy="${ARC_BASE_Y}" r="6" fill="transparent"/>
+        <circle cx="${x}" cy="${ARC_BASE_Y}" r="2" fill="${color}"/>
+        <title>${escapeHtml(node.id)}: ${escapeHtml(node.rfcTitle)}</title>
+      </g>`;
+    })
+    .join('');
+
+  scrollEl.innerHTML = `<svg viewBox="0 0 ${width} ${ARC_HEIGHT}" width="${width}" height="${ARC_HEIGHT}" xmlns="http://www.w3.org/2000/svg">
+    <line x1="0" y1="${ARC_BASE_Y}" x2="${width}" y2="${ARC_BASE_Y}" stroke="#2a2f3f" stroke-width="1"/>
+    ${arcPaths}
+    ${nodeMarkup}
+  </svg>`;
+}
+
+document.getElementById('rfcArcScroll').addEventListener('click', (e) => {
+  const g = e.target.closest('[data-rfc]');
+  if (g) showNodeDetail(g.dataset.rfc);
+});
+
+document.getElementById('rfcViewToggle').addEventListener('click', (e) => {
+  const btn = e.target.closest('.rfc-view-btn');
+  if (!btn) return;
+  document.querySelectorAll('.rfc-view-btn').forEach((b) => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('rfcGraphViews').dataset.view = btn.dataset.view;
+});
+
+function refreshRfcViews() {
+  renderRfcGraphTable();
+  renderArcDiagram();
+}
+
 function applyEdgeFilters() {
   const updates = rfcEdges.get().map((e) => ({
     id: e.id,
     hidden: !rfcFilterEls[e.kind] || !rfcFilterEls[e.kind].checked,
   }));
   if (updates.length) rfcEdges.update(updates);
+  renderArcDiagram();
 }
 
 Object.values(rfcFilterEls).forEach((el) => el && el.addEventListener('change', applyEdgeFilters));
@@ -1118,7 +1225,7 @@ document.getElementById('rfcGraphDetail').addEventListener('click', async (e) =>
     enrichBtn.textContent = 'Loading…';
     try {
       await enrichNode(enrichBtn.dataset.rfc);
-      renderRfcGraphTable();
+      refreshRfcViews();
       showNodeDetail(enrichBtn.dataset.rfc);
     } catch (err) {
       rfcGraphDetailEl.insertAdjacentHTML(
@@ -1160,7 +1267,7 @@ document.getElementById('rfcGraphTableBody').addEventListener('click', async (e)
   btn.textContent = 'Loading…';
   try {
     await enrichNode(btn.dataset.rfc);
-    renderRfcGraphTable();
+    refreshRfcViews();
   } catch (err) {
     rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
   }
@@ -1184,7 +1291,7 @@ function loadGlobalGraph() {
       rfcGraphStatusEl.innerHTML = '';
       rfcGraphLayoutEl.hidden = false;
       rfcGraphTableWrapEl.hidden = false;
-      renderRfcGraphTable();
+      refreshRfcViews();
       initNetwork();
     } else if (msg.type === 'error') {
       source.close();
@@ -1207,7 +1314,7 @@ async function focusRfc() {
     rfcGraphStatusEl.innerHTML = '';
     rfcGraphLayoutEl.hidden = false;
     rfcGraphTableWrapEl.hidden = false;
-    renderRfcGraphTable();
+    refreshRfcViews();
     initNetwork();
     showNodeDetail(id);
     rfcNetwork.selectNodes([id]);
