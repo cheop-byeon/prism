@@ -1035,61 +1035,86 @@ class IetfImportService:
         )
         node_names = [n for n in node_names if IetfImportService._RFC_NAME_RE.fullmatch(n.lower())]
 
-        metas: dict[str, dict] = {}
         try:
-            with httpx.Client(timeout=20.0) as client:
-                lookup = [n.lower() for n in node_names]
-                for i in range(0, len(lookup), 50):
-                    chunk = lookup[i : i + 50]
-                    resp = client.get(
-                        "https://datatracker.ietf.org/api/v1/doc/document/",
-                        params={"name__in": ",".join(chunk), "format": "json", "limit": len(chunk)},
-                    )
-                    resp.raise_for_status()
-                    for obj in resp.json().get("objects", []):
-                        metas[obj["name"].upper()] = obj
+            nodes = IetfImportService._batch_fetch_rfc_nodes(node_names)
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch node metadata: {exc}"}
+        for node in nodes:
+            node["is_center"] = node["id"] == center
 
-                wg_ids = sorted(
-                    {
-                        meta["group"].rstrip("/").split("/")[-1]
-                        for meta in metas.values()
-                        if meta.get("group")
-                    }
+        valid_ids = {n["id"] for n in nodes}
+        edges = IetfImportService._dedupe_edges(edges, valid_ids)
+
+        return {"center": center, "nodes": nodes, "edges": edges}
+
+    @staticmethod
+    def _batch_fetch_rfc_nodes(names: list[str], on_event=None) -> list[dict]:
+        """Batch-fetch {id, title, std_level, wg} for a list of RFC names,
+        via name__in chunks (not one lookup per name) -- shared by every
+        RFC-graph builder in this file (single-RFC neighborhood and the
+        whole-corpus structural graph alike) so the metadata/WG-resolution
+        logic exists in exactly one place. on_event is optional since the
+        single-RFC callers finish in a couple of chunks; the whole-corpus
+        caller (~80 chunks) is the one that actually needs progress.
+        """
+        metas: dict[str, dict] = {}
+        with httpx.Client(timeout=30.0) as client:
+            lookup = [n.lower() for n in names]
+            for i in range(0, len(lookup), 50):
+                chunk = lookup[i : i + 50]
+                resp = client.get(
+                    "https://datatracker.ietf.org/api/v1/doc/document/",
+                    params={"name__in": ",".join(chunk), "format": "json", "limit": len(chunk)},
                 )
-                wg_names: dict[str, str] = {}
-                if wg_ids:
+                resp.raise_for_status()
+                for obj in resp.json().get("objects", []):
+                    metas[obj["name"].upper()] = obj
+                if on_event:
+                    on_event(
+                        {
+                            "stage": "building",
+                            "message": f"Resolving RFC metadata… ({min(i + 50, len(lookup))}/{len(lookup)})",
+                        }
+                    )
+
+            wg_ids = sorted({meta["group"].rstrip("/").split("/")[-1] for meta in metas.values() if meta.get("group")})
+            wg_names: dict[str, str] = {}
+            if wg_ids:
+                for i in range(0, len(wg_ids), 50):
+                    chunk = wg_ids[i : i + 50]
                     group_resp = client.get(
                         "https://datatracker.ietf.org/api/v1/group/group/",
-                        params={"id__in": ",".join(wg_ids), "format": "json", "limit": len(wg_ids)},
+                        params={"id__in": ",".join(chunk), "format": "json", "limit": len(chunk)},
                     )
                     group_resp.raise_for_status()
                     # Datatracker uses the literal group acronym "none" for
                     # individual submissions / no-WG documents -- normalized
                     # to empty here so the UI doesn't render it as a real WG.
-                    wg_names = {
-                        str(g["id"]): (g["acronym"] if g["acronym"] != "none" else "")
-                        for g in group_resp.json().get("objects", [])
-                    }
-        except httpx.HTTPError as exc:
-            return {"error": f"Could not fetch node metadata: {exc}"}
+                    wg_names.update(
+                        {
+                            str(g["id"]): (g["acronym"] if g["acronym"] != "none" else "")
+                            for g in group_resp.json().get("objects", [])
+                        }
+                    )
 
         nodes = []
-        for name in node_names:
-            meta = metas.get(name, {})
+        for name in sorted(names, key=str.upper):
+            meta = metas.get(name.upper(), {})
             wg_id = meta["group"].rstrip("/").split("/")[-1] if meta.get("group") else None
             nodes.append(
                 {
-                    "id": name,
+                    "id": name.upper(),
                     "title": meta.get("title", ""),
                     "std_level": (meta.get("std_level") or "").rstrip("/").split("/")[-1],
                     "wg": wg_names.get(wg_id, "") if wg_id else "",
-                    "is_center": name == center,
                 }
             )
+        return nodes
 
-        valid_ids = {n["id"] for n in nodes}
+    @staticmethod
+    def _dedupe_edges(edges: list[dict], valid_ids: set[str]) -> list[dict]:
         seen: set[tuple[str, str, str]] = set()
-        deduped_edges = []
+        deduped = []
         for edge in edges:
             if edge["source"] not in valid_ids or edge["target"] not in valid_ids:
                 continue
@@ -1097,9 +1122,88 @@ class IetfImportService:
             if key in seen:
                 continue
             seen.add(key)
-            deduped_edges.append(edge)
+            deduped.append(edge)
+        return deduped
 
-        return {"center": center, "nodes": nodes, "edges": deduped_edges}
+    @staticmethod
+    def get_global_structural_graph(on_event=None) -> dict:
+        """Build the whole-corpus obsoletes/updates graph -- every RFC that
+        obsoletes or updates (or is obsoleted/updated by) another one, in
+        one graph. Unlike the citation graph (513 citations for RFC 4035
+        ALONE, tens of thousands corpus-wide -- not fetchable in bulk),
+        obsoletes/updates relations are rare enough to fetch completely:
+        1,543 obsoletes + 2,157 updates relations exist in the entire
+        system (confirmed live) -- but resolving metadata for the ~3,900
+        RFCs those relations touch takes ~80 more batched requests, and the
+        whole build measured at ~2 minutes live. Definitely not a per-request
+        cost -- see serve_ui.py's module-level cache -- and on_event (same
+        {"stage", "message"} shape as ask()/decision_thread()) lets a
+        caller stream progress instead of leaving the UI looking hung for
+        two minutes.
+
+        This is the real "overall graph" -- deliberately not the citation
+        family (still available per-node, on demand, as an enrichment),
+        since that genuinely can't be fetched whole. RFCs with no
+        obsoletes/updates relation at all are excluded rather than added
+        as disconnected dots; they'd add clutter without adding structure.
+        """
+
+        def _emit(message: str) -> None:
+            if on_event:
+                on_event({"stage": "building", "message": message})
+
+        def _fetch_all(client: httpx.Client, relationship_slug: str, label: str) -> list[tuple[str, str]]:
+            pairs: list[tuple[str, str]] = []
+            url = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
+            params: dict | None = {"relationship__slug": relationship_slug, "format": "json", "limit": 100}
+            while url:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                for obj in data.get("objects", []):
+                    source = (obj.get("source") or "").rstrip("/").split("/")[-1]
+                    target = (obj.get("target") or "").rstrip("/").split("/")[-1]
+                    if source and target:
+                        pairs.append((source, target))
+                total = data.get("meta", {}).get("total_count", len(pairs))
+                _emit(f"Fetching {label} relations… ({len(pairs)}/{total})")
+                next_page = data.get("meta", {}).get("next")
+                url = f"https://datatracker.ietf.org{next_page}" if next_page else None
+                params = None
+            return pairs
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                obs_pairs = _fetch_all(client, "obs", "obsoletes")
+                updates_pairs = _fetch_all(client, "updates", "updates")
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch global relations: {exc}"}
+
+        edges = [{"source": s, "target": t, "kind": "obsoletes"} for s, t in obs_pairs]
+        edges += [{"source": s, "target": t, "kind": "updates"} for s, t in updates_pairs]
+        # Same rule as the single-RFC graph: only published RFCs, no drafts.
+        edges = [
+            e
+            for e in edges
+            if IetfImportService._RFC_NAME_RE.fullmatch(e["source"].lower())
+            and IetfImportService._RFC_NAME_RE.fullmatch(e["target"].lower())
+        ]
+
+        node_names = sorted({n for e in edges for n in (e["source"], e["target"])}, key=str.upper)
+        if not node_names:
+            return {"nodes": [], "edges": []}
+
+        _emit(f"Resolving metadata for {len(node_names)} RFCs…")
+        try:
+            nodes = IetfImportService._batch_fetch_rfc_nodes(node_names, on_event=on_event)
+        except httpx.HTTPError as exc:
+            return {"error": f"Could not fetch node metadata: {exc}"}
+
+        valid_ids = {n["id"] for n in nodes}
+        edges = [{"source": e["source"].upper(), "target": e["target"].upper(), "kind": e["kind"]} for e in edges]
+        edges = IetfImportService._dedupe_edges(edges, valid_ids)
+
+        return {"nodes": nodes, "edges": edges}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:

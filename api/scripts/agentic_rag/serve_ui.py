@@ -193,6 +193,12 @@ def _tool_info() -> list[dict]:
 
 _PAGE_HTML = (Path(__file__).parent / "serve_ui_template.html").read_text(encoding="utf-8")
 
+# The whole-corpus obsoletes/updates graph takes ~2 minutes to build (a few
+# dozen paginated relation fetches plus ~80 batched metadata lookups) but
+# never changes within a container's lifetime -- cached here so only the
+# first request pays that cost; every request after returns instantly.
+_global_graph_cache: dict | None = None
+
 
 def _sse_stream(app, work_fn):
     """Run work_fn(on_event) -> JSON-serializable result in a background
@@ -422,6 +428,30 @@ def main() -> None:
                 except Exception as exc:
                     results.append({"name": name, "ok": False, "error": str(exc)})
             return {"results": results, "total_available": listing.get("count", len(results))}
+
+        return _sse_stream(app, work)
+
+    @app.route("/api/rfc-graph/global", methods=["GET"])
+    def api_rfc_graph_global():
+        """The whole-corpus obsoletes/updates graph -- the RFC Graph tab's
+        default "overall picture" view. Streamed via SSE since a cold build
+        takes ~2 minutes; cached at module level (see _global_graph_cache)
+        so it only runs once per container lifetime. Registered as a static
+        path so Werkzeug matches it before the dynamic
+        /api/rfc-graph/<rfc_number> route below, regardless of registration
+        order.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        def work(on_event):
+            global _global_graph_cache
+            if _global_graph_cache is not None:
+                on_event({"stage": "building", "message": "Using cached graph…"})
+                return _global_graph_cache
+            result = IetfImportService.get_global_structural_graph(on_event=on_event)
+            if not result.get("error"):
+                _global_graph_cache = result
+            return result
 
         return _sse_stream(app, work)
 
