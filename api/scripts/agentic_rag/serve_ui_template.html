@@ -434,7 +434,11 @@
   .rfc-errata-item b { color: var(--text); }
   .rfc-errata-item .errata-status { color: var(--modified); font-weight: 600; }
 
-  .rfc-graph-table-wrap { margin-top: 16px; overflow-x: auto; flex-shrink: 0; }
+  .rfc-table-toggle-btn { margin-top: 16px; }
+  .rfc-graph-table-wrap { margin-top: 10px; overflow-x: auto; flex-shrink: 0; }
+  .rfc-table-controls { margin-bottom: 8px; }
+  .rfc-table-controls input { width: 100%; max-width: 420px; }
+  .rfc-table-hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; display: block; }
   .rfc-graph-table { width: 100%; border-collapse: collapse; font-size: 12px; }
   .rfc-graph-table th {
     text-align: left; padding: 8px 10px; color: var(--text-dim); font-weight: 600;
@@ -572,7 +576,11 @@
         <p class="empty-state">Click a node to see detail.</p>
       </div>
     </div>
+    <button class="rfc-view-btn rfc-table-toggle-btn" id="rfcTableToggleBtn" hidden>Show table</button>
     <div class="rfc-graph-table-wrap" id="rfcGraphTableWrap" hidden>
+      <div class="rfc-table-controls">
+        <input id="rfcTableFilter" type="text" placeholder="Filter by RFC number or title (blank = only RFCs you've loaded)" />
+      </div>
       <table class="rfc-graph-table">
         <thead><tr><th>RFC</th><th>Title</th><th>Level</th><th>WG</th><th>Connections</th><th></th></tr></thead>
         <tbody id="rfcGraphTableBody"></tbody>
@@ -959,6 +967,8 @@ const rfcGraphStatusEl = document.getElementById('rfcGraphStatus');
 const rfcGraphLayoutEl = document.getElementById('rfcGraphLayout');
 const rfcGraphTableWrapEl = document.getElementById('rfcGraphTableWrap');
 const rfcGraphTableBodyEl = document.getElementById('rfcGraphTableBody');
+const rfcTableToggleBtnEl = document.getElementById('rfcTableToggleBtn');
+const rfcTableFilterEl = document.getElementById('rfcTableFilter');
 const rfcGraphDetailEl = document.getElementById('rfcGraphDetail');
 const rfcFilterEls = {
   obsoletes: document.getElementById('rfcFilterObsoletes'),
@@ -1043,23 +1053,76 @@ function nodeConnections(nodeId) {
   );
 }
 
+// One pass over all edges instead of nodeConnections()'s per-node filter --
+// at ~3930 nodes x ~3700 edges, calling the O(edges) nodeConnections() once
+// PER ROW made the table alone slower than the whole rest of the tab
+// (confirmed the real cost live: this is what "loading" actually was).
+function computeConnectionCounts() {
+  const counts = new Map();
+  rfcEdges.get().forEach((e) => {
+    counts.set(e.from, (counts.get(e.from) || 0) + 1);
+    counts.set(e.to, (counts.get(e.to) || 0) + 1);
+  });
+  return counts;
+}
+
+const RFC_TABLE_ROW_CAP = 200;
+
+// The table is opt-in (see rfcTableToggleBtnEl) and, even once shown,
+// renders only what the user actually asked for -- the RFCs they've
+// enriched, or whatever a search matches -- never all ~3930 rows by
+// default. That earlier "render everything" behavior was the actual
+// source of the tab feeling slow, not the graphs themselves.
 function renderRfcGraphTable() {
-  const rows = rfcNodes.get()
-    .sort((a, b) => a.id.localeCompare(b.id))
+  if (rfcGraphTableWrapEl.hidden) return;
+  const filterText = rfcTableFilterEl.value.trim().toLowerCase();
+  const allNodes = rfcNodes.get();
+  let matches = filterText
+    ? allNodes.filter(
+        (n) => n.id.toLowerCase().includes(filterText) || (n.rfcTitle || '').toLowerCase().includes(filterText)
+      )
+    : allNodes.filter((n) => n.enriched);
+
+  const totalMatches = matches.length;
+  matches = matches.sort((a, b) => a.id.localeCompare(b.id)).slice(0, RFC_TABLE_ROW_CAP);
+
+  if (!matches.length) {
+    rfcGraphTableBodyEl.innerHTML = `<tr><td colspan="6" class="empty-state">${
+      filterText
+        ? 'No RFCs match that filter.'
+        : "No RFCs loaded yet -- focus an RFC above, click a node's \"Load full relations\", or search by number/title here."
+    }</td></tr>`;
+    return;
+  }
+
+  const counts = computeConnectionCounts();
+  const rows = matches
     .map((n) => `
       <tr class="${n.enriched ? 'is-center' : ''}">
         <td>${escapeHtml(n.id)}</td>
         <td class="rfc-graph-title">${escapeHtml(n.rfcTitle)}</td>
         <td>${escapeHtml((n.stdLevel || '').toUpperCase())}</td>
         <td>${escapeHtml(n.wg || '—')}</td>
-        <td>${nodeConnections(n.id).length}</td>
+        <td>${counts.get(n.id) || 0}</td>
         <td><button class="rfc-expand-btn" data-rfc="${escapeHtml(n.id)}" ${n.enriched ? 'disabled' : ''}>
           ${n.enriched ? 'Loaded' : 'Load full relations'}
         </button></td>
       </tr>`)
     .join('');
-  rfcGraphTableBodyEl.innerHTML = rows;
+  const capNote =
+    totalMatches > RFC_TABLE_ROW_CAP
+      ? `<tr><td colspan="6" class="empty-state">${totalMatches - RFC_TABLE_ROW_CAP} more match -- narrow your search to see them.</td></tr>`
+      : '';
+  rfcGraphTableBodyEl.innerHTML = rows + capNote;
 }
+
+rfcTableToggleBtnEl.addEventListener('click', () => {
+  rfcGraphTableWrapEl.hidden = !rfcGraphTableWrapEl.hidden;
+  rfcTableToggleBtnEl.textContent = rfcGraphTableWrapEl.hidden ? 'Show table' : 'Hide table';
+  if (!rfcGraphTableWrapEl.hidden) renderRfcGraphTable();
+});
+
+rfcTableFilterEl.addEventListener('input', renderRfcGraphTable);
 
 // Arc diagram -- the same {nodes, edges} state as the force graph, laid out
 // on one axis instead of a physics simulation. RFC numbers are assigned
@@ -1290,7 +1353,7 @@ function loadGlobalGraph() {
       mergeGraphData(msg.data);
       rfcGraphStatusEl.innerHTML = '';
       rfcGraphLayoutEl.hidden = false;
-      rfcGraphTableWrapEl.hidden = false;
+      rfcTableToggleBtnEl.hidden = false;
       refreshRfcViews();
       initNetwork();
     } else if (msg.type === 'error') {
@@ -1313,7 +1376,7 @@ async function focusRfc() {
     await enrichNode(id);
     rfcGraphStatusEl.innerHTML = '';
     rfcGraphLayoutEl.hidden = false;
-    rfcGraphTableWrapEl.hidden = false;
+    rfcTableToggleBtnEl.hidden = false;
     refreshRfcViews();
     initNetwork();
     showNodeDetail(id);
