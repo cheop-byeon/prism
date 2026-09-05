@@ -719,34 +719,39 @@ class IetfImportService:
         couple dozen RFCs that neither obsolete nor update each other) are
         actually explained across a cluster of RFCs connected only by
         citation. Datatracker has no "topic cluster" or "roadmap" concept
-        to query directly, so this is a heuristic pipeline, validated
-        empirically against RFC 4035 -> DNSSEC before being written:
+        to query directly, so this is a heuristic pipeline over real
+        citation and keyword data, not a curated taxonomy.
 
-          1. Fetch every document that cites this RFC (informatively or
-             normatively). This is the noisy, complete set -- 513 for
-             RFC 4035, nearly all of them ordinary specs that just build on
-             it as one piece of a larger, unrelated design.
-          2. Keep only the citing documents that are themselves published
-             RFCs (120 of the 513) -- a draft citing it is essentially
-             never the kind of curated overview being looked for here.
-          3. Keep only BCP/Informational-track ones (49 of 120) -- an
-             overview/roadmap document is a description of practice or a
-             survey, not a Standards-track protocol spec that merely cites
-             this one as a building block.
-          4. Keep only the ones whose title contains this RFC's own most
-             specific keyword -- Datatracker tags each RFC with a handful
-             of free-text keywords (e.g. RFC 4035 has "dnssec" alongside
-             generic ones like "domain name system"); the SHORTEST tag is
-             used as a cheap proxy for "the specific acronym/term" rather
-             than a broad descriptive phrase, since a generic phrase would
-             let unrelated BCP/Informational RFCs back in.
+        Bidirectional, because a one-directional (inbound-only) version was
+        tried first and found wanting live: RFC 9364 -- a roadmap published
+        in 2026 -- had barely been cited by anything yet, so "who cites
+        this RFC" returned almost nothing, even though RFC 9364's own 37
+        outbound references (to RFC 4033/4034/4035 and the rest of the
+        DNSSEC family) ARE the family. The two directions need different
+        filters, not the same one:
 
-        513 citing documents collapse to 9 highly specific ones this way,
-        correctly including RFC 9364 itself and excluding unrelated
-        BCP/Informational noise (IPv6 node requirements, NAT64 deployment,
-        etc.) that happened to cite RFC 4035 in passing. Not exhaustive or
-        guaranteed for every topic -- it's a heuristic over real citation
-        and keyword data, not a curated taxonomy.
+          - Inbound (who cites this RFC): noisy and large for an old,
+            foundational RFC (513 for RFC 4035) -- kept only if the citing
+            document is itself an RFC, BCP/Informational-track (an
+            overview/survey, not a Standards-track spec that merely builds
+            on this one), and its title contains this RFC's own most
+            specific keyword.
+          - Outbound (what this RFC cites): a document's own reference list
+            is already curated by its authors, so no std_level filter is
+            applied here (RFC 9364 normatively cites RFC 4033/4034/4035,
+            all Standards-track -- filtering those out would gut the exact
+            case this method exists for). Still filtered by the topic
+            keyword, to drop ubiquitous boilerplate references every RFC
+            makes (RFC 2119's "MUST/SHOULD" keywords, base RFC numbers,
+            etc.) that have nothing to do with this RFC's actual topic.
+
+        The topic keyword itself is picked more carefully than "shortest
+        tag": a keyword that is a substring of another of this RFC's own
+        keywords is treated as the generic parent term and excluded first
+        (RFC 9364 is tagged "DNS", "DNSSEC", "DNS Security Extensions" --
+        "DNS" is a substring of both others and would match nearly any
+        DNS-related RFC if used directly), then the shortest of what's left
+        is used (correctly resolving to "DNSSEC", not "DNS").
         """
         number = re.sub(r"[^0-9]", "", rfc_number)
         if not number:
@@ -768,16 +773,18 @@ class IetfImportService:
         # as an actual JSON string value, not a JSON array) -- literal_eval
         # is the correct, safe parse for that, not a string-replace hack.
         try:
-            keywords = ast.literal_eval(origin.get("keywords") or "[]")
+            keywords = [k for k in ast.literal_eval(origin.get("keywords") or "[]") if k]
         except (ValueError, SyntaxError):
             keywords = []
-        topic_keyword = min((k for k in keywords if k), key=len, default=None)
+        specific_keywords = [k for k in keywords if not any(k != other and k in other for other in keywords)]
+        topic_keyword = min(specific_keywords or keywords, key=len, default=None)
 
-        def _fetch_citing_names(client: httpx.Client, relationship_slug: str) -> list[str]:
+        def _fetch_related_names(client: httpx.Client, field: str, relationship_slug: str) -> list[str]:
             names: list[str] = []
+            other_field = "target" if field == "source__name" else "source"
             url = "https://datatracker.ietf.org/api/v1/doc/relateddocument/"
             params: dict | None = {
-                "target__name": name,
+                field: name,
                 "relationship__slug": relationship_slug,
                 "format": "json",
                 "limit": 100,
@@ -787,7 +794,7 @@ class IetfImportService:
                 resp.raise_for_status()
                 data = resp.json()
                 for obj in data.get("objects", []):
-                    uri: str = obj.get("source", "") or ""
+                    uri: str = obj.get(other_field, "") or ""
                     doc_name = uri.rstrip("/").split("/")[-1]
                     if doc_name:
                         names.append(doc_name)
@@ -798,40 +805,63 @@ class IetfImportService:
 
         try:
             with httpx.Client(timeout=15.0) as client:
-                citing = set(_fetch_citing_names(client, "refinfo"))
-                citing |= set(_fetch_citing_names(client, "refnorm"))
+                cited_by = set(_fetch_related_names(client, "target__name", "refinfo"))
+                cited_by |= set(_fetch_related_names(client, "target__name", "refnorm"))
+                cites = set(_fetch_related_names(client, "source__name", "refinfo"))
+                cites |= set(_fetch_related_names(client, "source__name", "refnorm"))
         except httpx.HTTPError as exc:
             return {"error": f"Could not fetch citing documents for {name}: {exc}"}
 
-        rfc_candidates = sorted(n for n in citing if IetfImportService._RFC_NAME_RE.fullmatch(n))
-        if not rfc_candidates:
+        cited_by_candidates = sorted(n for n in cited_by if IetfImportService._RFC_NAME_RE.fullmatch(n))
+        cites_candidates = sorted(n for n in cites if IetfImportService._RFC_NAME_RE.fullmatch(n))
+        all_candidates = sorted(set(cited_by_candidates) | set(cites_candidates))
+        if not all_candidates:
             return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": []}
 
-        metas: list[dict] = []
+        metas: dict[str, dict] = {}
         try:
             with httpx.Client(timeout=20.0) as client:
-                for i in range(0, len(rfc_candidates), 50):
-                    chunk = rfc_candidates[i : i + 50]
+                for i in range(0, len(all_candidates), 50):
+                    chunk = all_candidates[i : i + 50]
                     resp = client.get(
                         "https://datatracker.ietf.org/api/v1/doc/document/",
                         params={"name__in": ",".join(chunk), "format": "json", "limit": len(chunk)},
                     )
                     resp.raise_for_status()
-                    metas.extend(resp.json().get("objects", []))
+                    for obj in resp.json().get("objects", []):
+                        metas[obj["name"]] = obj
         except httpx.HTTPError as exc:
             return {"error": f"Could not fetch candidate metadata: {exc}"}
 
-        family = []
-        for meta in metas:
-            level = (meta.get("std_level") or "").rstrip("/").split("/")[-1]
-            if level not in ("bcp", "inf"):
-                continue
-            title = meta.get("title") or ""
-            if topic_keyword and topic_keyword.lower() not in title.lower():
-                continue
-            family.append({"rfc": meta["name"].upper(), "title": title, "std_level": level})
+        def _keyword_matches(title: str) -> bool:
+            return not topic_keyword or topic_keyword.lower() in title.lower()
 
-        return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": family}
+        family: dict[str, dict] = {}
+        for candidate in cited_by_candidates:
+            meta = metas.get(candidate, {})
+            level = (meta.get("std_level") or "").rstrip("/").split("/")[-1]
+            title = meta.get("title") or ""
+            if level in ("bcp", "inf") and _keyword_matches(title):
+                family[candidate] = {
+                    "rfc": candidate.upper(),
+                    "title": title,
+                    "std_level": level,
+                    "direction": "cited_by",
+                }
+        for candidate in cites_candidates:
+            if candidate in family:
+                continue
+            meta = metas.get(candidate, {})
+            title = meta.get("title") or ""
+            if _keyword_matches(title):
+                family[candidate] = {
+                    "rfc": candidate.upper(),
+                    "title": title,
+                    "std_level": (meta.get("std_level") or "").rstrip("/").split("/")[-1],
+                    "direction": "cites",
+                }
+
+        return {"rfc": name.upper(), "topic_keyword": topic_keyword, "family": list(family.values())}
 
     @staticmethod
     def get_iesg_ballot_comments(draft_name: str) -> dict:
@@ -991,7 +1021,10 @@ class IetfImportService:
         for source in relations["updated_by"]:
             edges.append({"source": source, "target": center, "kind": "updates"})
         for entry in family.get("family", []):
-            edges.append({"source": center, "target": entry["rfc"], "kind": "family"})
+            if entry.get("direction") == "cited_by":
+                edges.append({"source": entry["rfc"], "target": center, "kind": "family"})
+            else:
+                edges.append({"source": center, "target": entry["rfc"], "kind": "family"})
 
         # obsoletes/updates can (rarely) point at a not-yet-published draft
         # name rather than an RFC -- this graph only ever shows published

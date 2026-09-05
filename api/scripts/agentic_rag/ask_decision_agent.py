@@ -1153,7 +1153,9 @@ def _find_related_rfc_family(rfc_number: str) -> str:
 
     lines = [f"RFCs related to {data['rfc']} (topic keyword: {data['topic_keyword']!r}):"]
     for entry in data["family"]:
-        lines.append(f"  {entry['rfc']} ({entry['std_level'].upper()}): {entry['title']}")
+        arrow = "cites" if entry.get("direction") == "cites" else "cited by"
+        level = entry["std_level"].upper() if entry["std_level"] else "?"
+        lines.append(f"  [{arrow}] {entry['rfc']} ({level}): {entry['title']}")
     return "\n".join(lines)
 
 
