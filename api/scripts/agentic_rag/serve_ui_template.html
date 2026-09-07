@@ -15,12 +15,20 @@
     --modified: #f0bf6c; --modified-bg: #3a2f16;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    /* The one horizontal gutter for the whole app -- header, tab bar, and
-       every tab's own content all pad themselves by this and only this, so
-       a tab's content always lines up with the tab label above it instead
-       of each region picking its own inset (or, as with .sources-toolbar
-       and #corporaList before this, no inset at all). */
-    --gutter-x: 20px;
+    /* Every reference app worth looking at (Dify's own dataset list,
+       opengeni.ai/developers) keeps its content off the true window edge by
+       a lot more than this app did -- Dify fixes it at 48px; OpenGeni goes
+       further and centers a capped column, leaving ~220px of open margin
+       on a 1512px display. A fixed pixel gutter can't do both "roomy on a
+       normal window" and "not absurd on a 27" monitor" at once, so this
+       centers a capped content column instead: --gutter-x still floors at
+       20px on narrow windows (unchanged there), but grows to center
+       --content-max-width once the window is wider than that plus the
+       floor -- the same technique both reference sites use, expressed as
+       one token so every consumer below (header, tab bar, tab-pane) keeps
+       lining up without each needing its own centering logic. */
+    --content-max-width: 1280px;
+    --gutter-x: max(20px, calc((100vw - var(--content-max-width)) / 2));
 
     /* Type scale -- 5 sizes, replacing 11 ad hoc values (11px through 20px,
        including half-pixel ones like 12.5px/13.5px that only existed
