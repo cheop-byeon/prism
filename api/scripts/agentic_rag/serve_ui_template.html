@@ -7,10 +7,10 @@
 <style>
   :root {
     --bg: #0f1117; --panel: #171a23; --panel-2: #1e2230; --border: #2a2f3f;
-    --text: #e7e9ee; --text-dim: #9aa1b2; --accent: #7c9eff; --accent-dim: #3a4a7a;
+    --text: #e7e9ee; --text-dim: #b8c0d0; --accent: #7c9eff; --accent-dim: #3a4a7a;
     --error: #e0645a;
     --kind-discovery: #7c9eff; --kind-retrieval: #4caf7d; --kind-fetch: #e0a94a;
-    --kind-diff: #c47ce0; --kind-verify: #e0645a; --kind-other: #9aa1b2;
+    --kind-diff: #c47ce0; --kind-verify: #e0645a; --kind-other: #9aa1b2; --kind-action: #e07b4a;
     --added: #5fd6a3; --added-bg: #16332a; --removed: #f28c84; --removed-bg: #3a2220;
     --modified: #f0bf6c; --modified-bg: #3a2f16;
     --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
@@ -25,13 +25,7 @@
     padding: 14px 20px; border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 12px; flex-shrink: 0;
   }
-  header h1 { font-size: 15px; margin: 0; font-weight: 600; }
-
-  .draft-bar {
-    padding: 10px 20px; border-bottom: 1px solid var(--border); flex-shrink: 0;
-    display: flex; align-items: center; gap: 10px;
-  }
-  .draft-bar label { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
 
   .tabs {
     display: flex; gap: 4px; padding: 0 16px; border-bottom: 1px solid var(--border);
@@ -39,7 +33,7 @@
   }
   .tab-btn {
     background: transparent; color: var(--text-dim); border: none; border-bottom: 2px solid transparent;
-    border-radius: 0; padding: 12px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    border-radius: 0; padding: 12px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   .tab-btn:hover { color: var(--text); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
@@ -51,13 +45,13 @@
 
   select, input[type=text] {
     background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
-    border-radius: 6px; padding: 8px 10px; font-size: 13px; font-family: var(--sans);
+    border-radius: 6px; padding: 8px 10px; font-size: 14px; font-family: var(--sans);
   }
   select { flex-shrink: 0; min-width: 220px; }
   input[type=text] { flex: 1; }
   button {
     background: var(--accent); color: #0a0e1a; border: none; border-radius: 6px;
-    padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+    padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
   }
   button:disabled { background: var(--accent-dim); color: var(--text-dim); cursor: default; }
 
@@ -65,38 +59,51 @@
     padding: 14px 20px; border-bottom: 1px solid var(--border); display: flex; gap: 10px;
     flex-shrink: 0; align-items: center;
   }
-  .thread-controls .hint { font-size: 11px; color: var(--text-dim); flex-shrink: 0; }
+  .thread-controls .hint { font-size: 13px; color: var(--text-dim); flex-shrink: 0; }
 
   .conversation, .thread-body-wrap { flex: 1; overflow-y: auto; padding: 20px; }
-  .empty-state { color: var(--text-dim); font-size: 13px; }
+  .empty-state { color: var(--text-dim); font-size: 14px; }
 
   .turn { max-width: 780px; margin: 0 auto 28px; }
-  .turn .q { font-size: 14px; color: var(--text-dim); margin-bottom: 10px; }
+  .turn .q { font-size: 15px; color: var(--text-dim); margin-bottom: 10px; }
   .turn .q strong { color: var(--text); }
+  .family-demo-step {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; margin-bottom: 8px; font-size: 14px; color: var(--text-dim); line-height: 1.5;
+  }
+  .family-demo-step.family-demo-found { border-color: var(--accent); color: var(--text); }
+  .family-demo-step.family-demo-found strong { color: var(--accent); }
+  .family-demo-step.family-demo-error { border-color: var(--error); color: var(--text); }
+  .family-demo-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .family-demo-confirm button {
+    background: var(--accent); color: #0a0e1a; border: none; border-radius: 6px;
+    padding: 5px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: var(--sans);
+  }
+  .family-demo-confirm button.no { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
   .answer {
     background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-    padding: 16px 18px; font-size: 14px; line-height: 1.6; white-space: pre-wrap;
+    padding: 16px 18px; font-size: 15px; line-height: 1.6; white-space: pre-wrap;
   }
   .answer a { color: var(--accent); }
   .trace { margin-top: 10px; }
   .trace summary {
-    cursor: pointer; font-size: 12px; color: var(--text-dim); user-select: none;
+    cursor: pointer; font-size: 13.5px; color: var(--text-dim); user-select: none;
   }
   .trace-item {
-    font-family: var(--mono); font-size: 11.5px; padding: 8px 10px; margin-top: 6px;
+    font-family: var(--mono); font-size: 13px; padding: 8px 10px; margin-top: 6px;
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
   }
   .trace-item .tool-line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
   .trace-item .tool-name { color: var(--accent); }
-  .trace-item .forced { color: var(--error); font-family: var(--sans); font-size: 10.5px; }
+  .trace-item .forced { color: var(--error); font-family: var(--sans); font-size: 12.5px; }
   .trace-item .args { color: var(--text-dim); margin-top: 4px; word-break: break-all; }
   .trace-item .preview { color: var(--text-dim); margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
-  .loading { color: var(--text-dim); font-size: 13px; padding: 4px 0; }
+  .loading { color: var(--text-dim); font-size: 14px; padding: 4px 0; }
 
   .step-diagram { display: flex; align-items: center; gap: 0; margin-bottom: 10px; flex-wrap: wrap; }
   .step-node {
     padding: 6px 12px; border-radius: 20px; border: 1px solid var(--border);
-    font-size: 11px; color: var(--text-dim); background: var(--panel-2); white-space: nowrap;
+    font-size: 13px; color: var(--text-dim); background: var(--panel-2); white-space: nowrap;
     display: inline-flex; align-items: center; gap: 5px;
     transition: background 0.3s ease, border-color 0.3s ease, color 0.3s ease;
   }
@@ -107,7 +114,7 @@
   }
   .step-node.errored { border-color: var(--error); color: var(--error); background: transparent; }
   .step-node .badge {
-    font-size: 9px; font-weight: 700; background: rgba(0, 0, 0, 0.28); border-radius: 8px; padding: 0 5px;
+    font-size: 11px; font-weight: 700; background: rgba(0, 0, 0, 0.28); border-radius: 8px; padding: 0 5px;
   }
   @keyframes step-pop { 0% { transform: scale(0.82); } 65% { transform: scale(1.08); } 100% { transform: scale(1); } }
   @keyframes step-glow {
@@ -133,38 +140,38 @@
     .step-connector.flowing::after { animation: none; left: 0; width: 100%; opacity: 0.5; }
   }
 
-  .step-extra { font-size: 11px; color: var(--text-dim); font-style: italic; margin: -4px 0 10px; }
+  .step-extra { font-size: 13px; color: var(--text-dim); font-style: italic; margin: -4px 0 10px; }
 
   .reasoning-log {
     margin: 2px 0 12px; padding-left: 12px; border-left: 2px solid var(--border);
     display: flex; flex-direction: column; gap: 5px;
   }
-  .reasoning-line { font-size: 12px; color: var(--text-dim); font-style: italic; line-height: 1.5; }
+  .reasoning-line { font-size: 13.5px; color: var(--text-dim); font-style: italic; line-height: 1.5; }
   .reasoning-line.latest { color: var(--text); font-style: normal; font-weight: 500; }
   @media (prefers-reduced-motion: no-preference) {
     .reasoning-line.latest { animation: step-pop 0.25s ease; }
   }
   .error-box {
     background: #2a1616; border: 1px solid var(--error); color: #ffb3ac;
-    border-radius: 8px; padding: 12px 14px; font-size: 13px; font-family: var(--mono); white-space: pre-wrap;
+    border-radius: 8px; padding: 12px 14px; font-size: 14px; font-family: var(--mono); white-space: pre-wrap;
   }
 
-  .thread-status { font-size: 12px; color: var(--text-dim); margin-bottom: 16px; }
+  .thread-status { font-size: 13.5px; color: var(--text-dim); margin-bottom: 16px; }
   .thread-status b { color: var(--text); font-weight: 600; }
 
   .lane { margin-bottom: 26px; }
   .lane:last-child { margin-bottom: 0; }
   .lane-head {
-    font-family: var(--mono); font-size: 12px; color: var(--accent); margin-bottom: 10px;
+    font-family: var(--mono); font-size: 13.5px; color: var(--accent); margin-bottom: 10px;
   }
   .chain { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 0; }
   .dcard {
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px;
     padding: 14px 16px; width: 260px; flex-shrink: 0; display: flex; flex-direction: column;
   }
-  .dcard .rev-label { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--text); }
-  .dcard .rev-tag { font-size: 10.5px; color: var(--text-dim); margin-top: 1px; margin-bottom: 8px; min-height: 13px; }
-  .dcard .para { font-size: 12.5px; line-height: 1.5; color: var(--text); flex: 1; position: relative; }
+  .dcard .rev-label { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--text); }
+  .dcard .rev-tag { font-size: 12.5px; color: var(--text-dim); margin-top: 1px; margin-bottom: 8px; min-height: 13px; }
+  .dcard .para { font-size: 14px; line-height: 1.5; color: var(--text); flex: 1; position: relative; }
   .dcard .para mark {
     background: var(--modified-bg); color: var(--modified); font-weight: 600;
     padding: 0 2px; border-radius: 3px;
@@ -178,7 +185,7 @@
   .dcard.expanded .para::after { display: none; }
   .dcard .expand-btn {
     align-self: flex-start; margin-top: 8px; background: transparent; border: none; color: var(--accent);
-    font-size: 11px; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--sans);
+    font-size: 13px; font-weight: 600; cursor: pointer; padding: 0; font-family: var(--sans);
   }
   .dcard .expand-btn:hover { text-decoration: underline; }
 
@@ -187,7 +194,7 @@
     gap: 5px; flex-shrink: 0; width: 100px; padding: 0 4px; align-self: center;
   }
   .arrow-group .pill {
-    font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
+    font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 20px;
     text-transform: uppercase; letter-spacing: 0.03em;
   }
   .pill.added { color: var(--added); background: var(--added-bg); }
@@ -195,12 +202,12 @@
   .pill.modified { color: var(--modified); background: var(--modified-bg); }
   .arrow-group svg.shaft { color: var(--accent-dim); }
   .arrow-group .diff-link {
-    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--accent);
+    display: inline-flex; align-items: center; gap: 4px; font-size: 13px; color: var(--accent);
     text-decoration: none; font-weight: 500; white-space: nowrap;
   }
   .arrow-group .diff-link:hover { text-decoration: underline; }
   .arrow-group .discuss-btn {
-    display: inline-flex; align-items: center; gap: 4px; font-size: 10.5px; color: var(--modified);
+    display: inline-flex; align-items: center; gap: 4px; font-size: 12.5px; color: var(--modified);
     background: var(--modified-bg); border: none; border-radius: 20px; padding: 2px 9px 2px 7px;
     cursor: pointer; font-weight: 500; font-family: var(--sans);
   }
@@ -221,7 +228,7 @@
     padding: 14px 18px; border-bottom: 1px solid var(--border); flex-shrink: 0;
   }
   .modal-title {
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--modified);
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--modified);
     font-weight: 600;
   }
   .modal-close {
@@ -230,28 +237,28 @@
   }
   .modal-close:hover { color: var(--text); }
   .modal-body {
-    padding: 16px 18px; overflow-y: auto; font-size: 12.5px; color: var(--text);
+    padding: 16px 18px; overflow-y: auto; font-size: 14px; color: var(--text);
     line-height: 1.55; white-space: pre-wrap;
   }
   .modal-links {
     display: flex; flex-direction: column; gap: 4px; padding: 0 18px 12px; flex-shrink: 0;
   }
   .modal-link {
-    font-size: 12px; color: var(--accent); text-decoration: none; font-weight: 500;
+    font-size: 13.5px; color: var(--accent); text-decoration: none; font-weight: 500;
   }
   .modal-link:hover { text-decoration: underline; }
   .modal-caveat {
-    font-size: 11px; color: var(--text-dim); padding: 10px 18px; border-top: 1px solid var(--border);
+    font-size: 13px; color: var(--text-dim); padding: 10px 18px; border-top: 1px solid var(--border);
     flex-shrink: 0;
   }
 
   .tail-note {
-    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); margin-top: 14px;
+    display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--text-dim); margin-top: 14px;
   }
   .tail-note b { color: var(--text); font-family: var(--mono); font-weight: 600; }
 
-  .howto-content h2 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 0 0 6px; }
-  .tools-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 12px; line-height: 1.4; }
+  .howto-content h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-dim); margin: 0 0 6px; }
+  .tools-hint { font-size: 13px; color: var(--text-dim); margin: 0 0 12px; line-height: 1.4; }
   .tools-layout { display: flex; gap: 20px; align-items: flex-start; }
   .tools-list { flex: 1; min-width: 0; max-width: 460px; }
 
@@ -264,22 +271,32 @@
     background: transparent; border: none; border-radius: 0; padding: 9px 12px;
     cursor: pointer; text-align: left; font-family: var(--sans);
   }
-  .tool-row-head .name { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .tool-row-head .name { font-size: 14px; font-weight: 600; color: var(--text); }
   .tool-row-head .kind {
-    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px;
     margin-left: 6px; font-weight: 600; color: #0a0e1a; background: var(--kind-color, var(--kind-other));
   }
-  .tool-row-head .chevron {
-    color: var(--text-dim); font-size: 10px; flex-shrink: 0; transition: transform 0.15s;
+  .tool-row-head .forced-badge {
+    display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px;
+    margin-left: 6px; font-weight: 600; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border);
   }
+  .tool-row-head .chevron {
+    color: var(--text-dim); font-size: 12px; flex-shrink: 0; transition: transform 0.15s;
+  }
+  .tool-group-heading {
+    font-size: 13px; font-weight: 700; color: var(--text); margin: 16px 0 6px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .tool-group-heading:first-child { margin-top: 0; }
+  .tool-group-note { font-size: 12.5px; color: var(--text-dim); margin: 0 0 8px; line-height: 1.4; }
   .tool-row.expanded > .tool-row-head .chevron { transform: rotate(90deg); }
   .tool-row-body { padding: 0 12px 12px; display: none; }
   .tool-row.expanded > .tool-row-body { display: block; }
-  .tool-row-body .internal-name { font-family: var(--mono); font-size: 10px; color: var(--text-dim); margin-bottom: 6px; }
-  .tool-row-body .desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; margin-bottom: 10px; }
+  .tool-row-body .internal-name { font-family: var(--mono); font-size: 12px; color: var(--text-dim); margin-bottom: 6px; }
+  .tool-row-body .desc { font-size: 13px; color: var(--text-dim); line-height: 1.4; margin-bottom: 10px; }
   .detail-btn {
     background: transparent; border: 1px solid var(--border); color: var(--accent);
-    padding: 4px 10px; font-size: 11px; font-weight: 600;
+    padding: 4px 10px; font-size: 13px; font-weight: 600;
   }
   .detail-btn:hover { border-color: var(--accent); }
   .detail-btn.active { background: var(--accent); color: #0a0e1a; }
@@ -289,72 +306,119 @@
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 16px;
   }
   .tool-detail-panel:empty { display: none; }
-  .tool-detail-panel h3 { font-size: 13px; margin: 0 0 12px; color: var(--text); }
+  .tool-detail-panel h3 { font-size: 14px; margin: 0 0 12px; color: var(--text); }
   .detail-section { margin-bottom: 14px; }
   .detail-section:last-child { margin-bottom: 0; }
   .detail-label {
-    display: block; font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em;
     color: var(--accent); font-weight: 600; margin-bottom: 4px;
   }
-  .detail-section p { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin: 0; }
+  .detail-section p { font-size: 13.5px; color: var(--text-dim); line-height: 1.5; margin: 0; }
   .detail-section pre {
-    font-family: var(--mono); font-size: 10.5px; color: var(--text); white-space: pre-wrap;
+    font-family: var(--mono); font-size: 12.5px; color: var(--text); white-space: pre-wrap;
     word-break: break-word; background: var(--bg); border: 1px solid var(--border);
     border-radius: 6px; padding: 8px 10px; margin: 0; line-height: 1.45;
   }
   .skills { margin-top: 22px; max-width: 640px; }
   .skills .tool-row-body pre {
-    font-family: var(--mono); font-size: 10.5px; color: var(--text-dim); white-space: pre-wrap;
+    font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); white-space: pre-wrap;
     word-break: break-word; background: var(--bg); border: 1px solid var(--border);
     border-radius: 6px; padding: 10px; margin: 0; line-height: 1.45; max-height: 340px; overflow-y: auto;
   }
   .skills .count-badge {
-    display: inline-block; font-size: 10px; padding: 1px 7px; border-radius: 10px;
+    display: inline-block; font-size: 12px; padding: 1px 7px; border-radius: 10px;
     margin-left: 6px; font-weight: 600; color: var(--text-dim); background: var(--bg); border: 1px solid var(--border);
   }
   .guardrail-list { margin-top: 10px; }
   .guardrail-list .tool-row { background: var(--bg); }
-  .guardrail-row .desc { font-size: 11.5px; color: var(--text-dim); line-height: 1.4; margin: 8px 0; }
+  .guardrail-row .desc { font-size: 13px; color: var(--text-dim); line-height: 1.4; margin: 8px 0; }
 
-  .corpora-hint { font-size: 11px; color: var(--text-dim); margin: 0 0 14px; line-height: 1.4; max-width: 640px; }
+  /* Shared by every tab's intro hint (Sources, RFC Graph's Overview/Focus,
+     Deep Dive, Panorama): previously 11px text capped at a 640px column
+     with zero top margin, so it sat flush against the tab bar's border
+     and looked cramped into the left edge of a much wider pane -- bumped
+     to a readable size, given real breathing room from the tab bar above,
+     and widened enough to stop looking oddly narrow without going so wide
+     that lines become hard to scan. */
+  .corpora-hint { font-size: 14px; color: var(--text-dim); margin: 16px 20px; line-height: 1.5; max-width: 820px; }
   .corpus-row {
     background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
     padding: 12px 14px; margin-bottom: 10px;
   }
   .corpus-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-  .corpus-head .name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; color: var(--text); }
-  .corpus-head .rfc { font-size: 11px; color: var(--text-dim); }
+  .corpus-head .name { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--text); }
+  .corpus-head .rfc { font-size: 13px; color: var(--text-dim); }
   .corpus-facet {
     display: flex; align-items: center; gap: 10px; padding: 6px 0;
     border-top: 1px solid var(--border);
   }
-  .corpus-facet .facet-label { font-size: 11px; color: var(--text-dim); width: 110px; flex-shrink: 0; }
-  .corpus-facet .facet-value { font-size: 12px; color: var(--text); flex: 1; }
+  .corpus-facet .facet-label { font-size: 13px; color: var(--text-dim); width: 110px; flex-shrink: 0; }
+  .corpus-facet .facet-value { font-size: 13.5px; color: var(--text); flex: 1; }
   .corpus-facet .facet-value.error { color: var(--error); }
   .corpus-facet button {
     background: transparent; border: 1px solid var(--border); color: var(--accent);
-    padding: 4px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    padding: 4px 10px; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer;
     font-family: var(--sans); flex-shrink: 0;
   }
   .corpus-facet button:hover { border-color: var(--accent); }
   .corpus-facet button:disabled { opacity: 0.5; cursor: default; }
   .sources-toggle {
-    background: transparent; border: none; color: var(--accent); font-size: 11.5px; font-weight: 600;
+    background: transparent; border: none; color: var(--accent); font-size: 13px; font-weight: 600;
     cursor: pointer; padding: 8px 0 0; font-family: var(--sans);
   }
   .sources-toggle:hover { text-decoration: underline; }
   .sources-panel { margin-top: 4px; }
   .source-facet .facet-label { width: 140px; }
-  .facet-note { font-size: 11px; color: var(--text-dim); padding: 0 0 6px 140px; }
+  .facet-note { font-size: 13px; color: var(--text-dim); padding: 0 0 6px 140px; }
   .facet-note a { color: var(--accent); text-decoration: none; }
   .facet-note a:hover { text-decoration: underline; }
+  .facet-note.warn { color: var(--kind-fetch); padding-left: 110px; }
+  .add-source-row .corpus-head .name { font-family: var(--sans); }
+  .add-source-subhint { font-size: 12.5px; color: var(--text-dim); margin: 0 0 10px; }
+  #newDraftResult, #newSourceResolved { padding-left: 110px; }
+  .local-badge {
+    font-size: 11px; font-weight: 600; color: var(--text-dim); border: 1px solid var(--border);
+    border-radius: 10px; padding: 1px 8px; margin-left: auto;
+  }
+  .corpus-row.local-source-row { border-style: dashed; }
+  .draft-suggest-wrap { position: relative; flex: 1; min-width: 0; }
+  .draft-suggest-wrap input { width: 100%; }
+  .draft-suggest-wrap input:read-only { color: var(--text-dim); cursor: default; background: var(--panel); }
+  .field-clear-btn {
+    flex-shrink: 0; background: transparent; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 6px; width: 28px; height: 28px; font-size: 16px; line-height: 1; cursor: pointer;
+    padding: 0;
+  }
+  .field-clear-btn:hover { color: var(--text); border-color: var(--accent); }
+  .draft-suggestions {
+    position: absolute; left: 0; right: 0; top: 100%; margin-top: 4px; z-index: 10;
+    max-height: 240px; overflow-y: auto; background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  }
+  .draft-suggestion-item {
+    display: block; width: 100%; text-align: left; background: transparent; border: none;
+    border-bottom: 1px solid var(--border); padding: 8px 10px; cursor: pointer; font-family: var(--sans);
+  }
+  .draft-suggestion-item:last-child { border-bottom: none; }
+  .draft-suggestion-item:hover { background: var(--panel); }
+  .draft-suggestion-doc { font-size: 13.5px; font-weight: 600; color: var(--text); }
+  .draft-suggestion-title { font-size: 12.5px; color: var(--text-dim); margin-top: 1px; }
+  .draft-suggestion-drafts { font-size: 12px; color: var(--text-dim); font-family: var(--mono); margin-top: 2px; }
+  .suggestion-section-label {
+    padding: 6px 10px; font-size: 11px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.04em; color: var(--text-dim); background: var(--panel); border-bottom: 1px solid var(--border);
+  }
+  .suggestion-wg-header { display: flex; align-items: center; gap: 6px; }
+  .suggestion-wg-header .draft-suggestion-doc::before { content: "▸ "; color: var(--text-dim); }
+  .suggestion-wg-header.expanded .draft-suggestion-doc::before { content: "▾ "; }
+  .draft-suggestion-item.suggestion-wg-doc { padding-left: 24px; }
 
   .agent-plan { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
   .plan-step { display: flex; gap: 10px; align-items: flex-start; }
   .plan-marker {
     width: 18px; height: 18px; border-radius: 50%; flex-shrink: 0; margin-top: 1px;
     display: flex; align-items: center; justify-content: center;
-    font-size: 10px; font-weight: 700; color: #0a0e1a; background: var(--accent-dim);
+    font-size: 12px; font-weight: 700; color: #0a0e1a; background: var(--accent-dim);
     transition: background 0.3s ease; line-height: 1;
   }
   .plan-step.active .plan-marker {
@@ -365,40 +429,59 @@
     .plan-step.active .plan-marker { animation: none; box-shadow: 0 0 0 3px rgba(124, 158, 255, 0.22); }
   }
   .plan-body { flex: 1; min-width: 0; padding-top: 1px; }
-  .plan-title { font-size: 12.5px; font-weight: 600; color: var(--text); }
+  .plan-title { font-size: 14px; font-weight: 600; color: var(--text); }
   .plan-title .forced-tag {
-    font-size: 9.5px; font-weight: 600; color: var(--text-dim); background: var(--panel-2);
+    font-size: 11px; font-weight: 600; color: var(--text-dim); background: var(--panel-2);
     border: 1px solid var(--border); border-radius: 8px; padding: 0 6px; margin-left: 6px;
   }
-  .plan-reason { font-size: 12px; color: var(--text-dim); line-height: 1.5; margin-top: 2px; }
+  .plan-reason { font-size: 13.5px; color: var(--text-dim); line-height: 1.5; margin-top: 2px; }
 
   .rfc-graph-controls { flex-wrap: wrap; }
   .rfc-graph-filter {
-    display: inline-flex; align-items: center; gap: 5px; font-size: 12px;
+    display: inline-flex; align-items: center; gap: 5px; font-size: 13.5px;
     color: var(--text-dim); cursor: pointer; white-space: nowrap; flex: none;
   }
+  /* Same class of bug as .rfc-graph-layout[hidden] earlier in this file:
+     author CSS (this class's own display:inline-flex) beats the browser's
+     default [hidden] { display:none } at equal specificity regardless of
+     source order -- confirmed live that rfcFilterFamilyLabel/
+     rfcFilterTopicBm25Label stayed visually flex-displayed in Overview
+     mode even with their `hidden` attribute correctly set to true by JS. */
+  .rfc-graph-filter[hidden] { display: none; }
   .rfc-graph-filter input { cursor: pointer; }
   #rfcGraphInput { flex: 0 0 220px; }
   .rfc-view-toggle, .rfc-mode-toggle { display: inline-flex; gap: 4px; flex: none; }
   .rfc-mode-toggle { margin: 14px 0 10px; }
-  .rfc-mode-toggle .rfc-view-btn { padding: 6px 16px; font-size: 12px; }
+  .rfc-mode-toggle .rfc-view-btn { padding: 6px 16px; font-size: 13.5px; }
   .rfc-view-btn {
     background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
-    padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    padding: 5px 10px; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer;
     font-family: var(--sans); white-space: nowrap;
   }
   .rfc-view-btn.active { color: var(--accent); border-color: var(--accent); }
-  .rfc-graph-layout { display: flex; gap: 14px; margin-top: 14px; align-items: stretch; flex-shrink: 0; }
+  /* Grid, not nested flex: the earlier flex version put the arc pane
+     inside a "views" column that excluded the detail sidebar's width, so
+     the arc diagram still wasn't full-width -- just stacked under the
+     force graph, aligned to its narrower column, with the detail sidebar
+     sitting oddly beside empty space. A 2-column grid lets the arc pane
+     span BOTH columns on its own row, genuinely spanning the whole
+     layout's width, while the detail sidebar stays a narrow column next
+     to the force graph on row 1 only. */
+  .rfc-graph-layout {
+    display: grid; grid-template-columns: 1fr 280px; gap: 14px; margin-top: 14px;
+  }
   .rfc-graph-layout[hidden] { display: none; }
-  .rfc-graph-views { display: flex; gap: 14px; flex: 1; min-width: 0; }
-  .rfc-graph-views[data-view="graph"] .rfc-arc-pane { display: none; }
-  .rfc-graph-views[data-view="arc"] .rfc-graph-canvas-wrap { display: none; }
+  .rfc-graph-canvas-wrap { grid-column: 1; grid-row: 1; }
+  .rfc-graph-detail { grid-column: 2; grid-row: 1; }
+  .rfc-arc-pane { grid-column: 1 / -1; grid-row: 2; }
+  .rfc-graph-layout[data-view="graph"] .rfc-arc-pane { display: none; }
+  .rfc-graph-layout[data-view="arc"] .rfc-graph-canvas-wrap { display: none; }
   .rfc-graph-canvas-wrap, .rfc-arc-pane {
-    flex: 1; min-width: 0; background: var(--panel-2); border: 1px solid var(--border);
+    height: 480px; min-width: 0; background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 10px; overflow: hidden; display: flex; flex-direction: column;
   }
   .rfc-view-label {
-    font-size: 10.5px; color: var(--text-dim); padding: 7px 12px; border-bottom: 1px solid var(--border);
+    font-size: 12.5px; color: var(--text-dim); padding: 7px 12px; border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
   #rfcGraphCanvas { width: 100%; height: 480px; }
@@ -407,7 +490,7 @@
   .rfc-arc-node { cursor: pointer; }
   .rfc-graph-legend {
     display: flex; gap: 16px; padding: 8px 14px; border-top: 1px solid var(--border);
-    font-size: 11px; color: var(--text-dim); flex-wrap: wrap;
+    font-size: 13px; color: var(--text-dim); flex-wrap: wrap;
   }
   .rfc-graph-legend span { display: inline-flex; align-items: center; gap: 6px; }
   .rfc-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; background: var(--accent); }
@@ -416,22 +499,23 @@
   .rfc-line.obsoletes { background: #e0645a; }
   .rfc-line.updates { background: #5fb0e0; }
   .rfc-line.family { background: #b98cf0; opacity: 0.8; }
+  .rfc-line.topic_bm25 { background: #4fd1c5; opacity: 0.8; }
   .rfc-graph-detail {
     width: 280px; flex-shrink: 0; background: var(--panel-2); border: 1px solid var(--border);
     border-radius: 10px; padding: 14px; overflow-y: auto; max-height: 480px;
   }
-  .rfc-graph-detail h4 { font-size: 13px; margin: 0 0 6px; color: var(--text); }
-  .rfc-graph-detail .rfc-detail-meta { font-size: 11.5px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.6; }
+  .rfc-graph-detail h4 { font-size: 14px; margin: 0 0 6px; color: var(--text); }
+  .rfc-graph-detail .rfc-detail-meta { font-size: 13px; color: var(--text-dim); margin-bottom: 10px; line-height: 1.6; }
   .rfc-graph-detail .rfc-detail-meta b { color: var(--text); font-weight: 600; }
   .rfc-graph-detail button {
     background: transparent; border: 1px solid var(--border); color: var(--accent);
-    padding: 5px 10px; font-size: 11px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    padding: 5px 10px; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer;
     font-family: var(--sans);
   }
   .rfc-graph-detail button:hover { border-color: var(--accent); }
   .rfc-errata-item {
     margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
-    font-size: 11.5px; color: var(--text-dim); line-height: 1.5;
+    font-size: 13px; color: var(--text-dim); line-height: 1.5;
   }
   .rfc-errata-item b { color: var(--text); }
   .rfc-errata-item .errata-status { color: var(--modified); font-weight: 600; }
@@ -440,8 +524,8 @@
   .rfc-graph-table-wrap { margin-top: 10px; overflow-x: auto; flex-shrink: 0; }
   .rfc-table-controls { margin-bottom: 8px; }
   .rfc-table-controls input { width: 100%; max-width: 420px; }
-  .rfc-table-hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; display: block; }
-  .rfc-graph-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rfc-table-hint { font-size: 13px; color: var(--text-dim); margin-top: 6px; display: block; }
+  .rfc-graph-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
   .rfc-graph-table th {
     text-align: left; padding: 8px 10px; color: var(--text-dim); font-weight: 600;
     border-bottom: 1px solid var(--border); white-space: nowrap;
@@ -455,14 +539,12 @@
 <header>
   <h1>Decision Rationale Agent</h1>
 </header>
-<div class="draft-bar">
-  <label for="draft">Draft</label>
-  <select id="draft"><option value="">(let the agent discover)</option></select>
-</div>
 <div class="tabs">
   <button class="tab-btn active" data-tab="ask">Ask</button>
   <button class="tab-btn" data-tab="investigate">Investigate</button>
   <button class="tab-btn" data-tab="deepdive">Deep Dive</button>
+  <button class="tab-btn" data-tab="panorama">Panorama</button>
+  <button class="tab-btn" data-tab="familydemo">Family Search (Demo)</button>
   <button class="tab-btn" data-tab="track">Track a Decision</button>
   <button class="tab-btn" data-tab="howto">How it Works</button>
   <button class="tab-btn" data-tab="corpora">Sources</button>
@@ -471,6 +553,7 @@
 <div class="tab-content">
   <section class="tab-pane active" id="pane-ask">
     <div class="controls">
+      <select id="draft"><option value="">(let the agent discover)</option></select>
       <input id="query" type="text" placeholder="Why was INIT_CWND set to 4?" />
       <button id="ask">Ask</button>
     </div>
@@ -479,6 +562,7 @@
 
   <section class="tab-pane" id="pane-investigate">
     <div class="controls">
+      <select id="investigateDraft"><option value="">(let the agent discover)</option></select>
       <input id="investigateQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
       <button id="investigateBtn">Ask</button>
     </div>
@@ -492,14 +576,51 @@
       settle for the first result. Slower and more expensive; use it when a quick answer isn't enough.
     </p>
     <div class="controls">
+      <select id="deepDiveDraft"><option value="">(let the agent discover)</option></select>
       <input id="deepDiveQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
       <button id="deepDiveBtn">Ask</button>
     </div>
     <div class="conversation" id="deepDiveConversation"></div>
   </section>
 
+  <section class="tab-pane" id="pane-panorama">
+    <p class="corpora-hint">
+      Same tools as Ask/Investigate/Deep Dive, but pointed outward at the wider RFC landscape
+      instead of one draft's own history -- told to proactively use the whole-corpus search tools
+      (Citation Match, Topic Match/BM25, obsoletes/updates) to find and cite other RFCs connected
+      to the one in question, and explain what changed across that family. A new, separate tier --
+      Deep Dive is unchanged and still the right choice for verifying one RFC's own history deeply.
+      Good for "what's the bigger picture behind X" questions, e.g. "What's the broader RFC family
+      behind RFC 6378's linear protection design, and how was it corrected in later RFCs?"
+    </p>
+    <div class="controls">
+      <select id="panoramaDraft"><option value="">(let the agent discover)</option></select>
+      <input id="panoramaQuery" type="text" placeholder="What's the broader RFC family behind RFC 6378's linear protection design?" />
+      <button id="panoramaBtn">Ask</button>
+    </div>
+    <div class="conversation" id="panoramaConversation"></div>
+  </section>
+
+  <section class="tab-pane" id="pane-familydemo">
+    <p class="corpora-hint">
+      Prototype with entirely fabricated data -- no real RFCs, no real emails (see
+      services/family_search_demo_service.py). Proves the workflow shape before importing a real
+      family's worth of mailarchive data: check one RFC's own mail archive, and if nothing relevant
+      turns up, rank its relatives by likely relevance and ask before checking the next one, one hop
+      at a time. Motivating case: DNSSEC-style families, where a later RFC often explains a decision
+      an earlier one made that its own mail archive never discusses.
+    </p>
+    <div class="controls">
+      <select id="familyDemoRoot"></select>
+      <input id="familyDemoQuery" type="text" placeholder="Why is the key rotation interval fixed at 90 days?" />
+      <button id="familyDemoBtn">Search</button>
+    </div>
+    <div class="conversation" id="familyDemoConversation"></div>
+  </section>
+
   <section class="tab-pane" id="pane-track">
     <div class="thread-controls">
+      <select id="trackDraft"><option value="">(let the agent discover)</option></select>
       <input id="threadQuery" type="text" placeholder="Track a decision, e.g. &quot;An INIT_CWND of&quot;" />
       <button id="trackThread">Track</button>
       <span class="hint">tighter phrases work better than bare identifiers</span>
@@ -531,8 +652,31 @@
       Pulls fresh raw material down to local storage only -- mail, draft text, and (under "Add
       sources" per WG) meeting minutes, slides, charters, recordings, and more from Datatracker.
       Nothing here attaches or indexes into a dataset -- that's still done by hand in Dify Studio,
-      same as every corpus here was originally built.
+      same as every corpus here was originally built. Adding a draft below that isn't already a
+      registered corpus tracks it locally and gives it its own row here, same shape as a real one,
+      just marked "local only" -- everything on it stays a plain download until it's built into a
+      real dataset in Studio.
     </p>
+    <div class="corpus-row add-source-row">
+      <div class="corpus-head"><span class="name">Add a new draft as a source</span></div>
+      <p class="add-source-subhint">Type a working group, an RFC, or a draft name -- whichever you know.</p>
+      <div class="corpus-facet">
+        <span class="facet-label">Search</span>
+        <div id="newSourceSearchWrap" class="draft-suggest-wrap">
+          <input id="newSourceSearchInput" type="text" placeholder="e.g. quic, 9000, or draft-ietf-quic-transport" autocomplete="off" />
+          <div id="newSourceSearchResults" class="draft-suggestions" hidden></div>
+        </div>
+        <button id="newSourceClearBtn" type="button" class="field-clear-btn" hidden title="Clear and search again">&times;</button>
+      </div>
+      <div id="newSourceResolved" class="facet-note" hidden></div>
+      <div class="corpus-facet">
+        <span class="facet-label">Draft name</span>
+        <input id="newDraftName" type="text" placeholder="draft-ietf-quic-transport" autocomplete="off" />
+        <button id="newDraftAddBtn">Add</button>
+      </div>
+      <div id="newDraftExistsNote" class="facet-note warn" hidden></div>
+      <div id="newDraftResult" class="facet-note" hidden></div>
+    </div>
     <div id="corporaList"><div class="loading">Loading…</div></div>
   </section>
 
@@ -545,19 +689,27 @@
       The whole-corpus Obsoletes/Updates graph -- every RFC connected to another by one of those
       two relationship kinds, system-wide. Citations aren't part of this structural view (that
       graph explodes into the tens of thousands corpus-wide -- 513 for RFC 4035 alone); switch to
-      Focus to pull in one RFC's full neighborhood, citation family included.
+      Focus to pull in one RFC's full neighborhood, citation family included. Click "Load overview
+      graph" below when you want it -- it isn't fetched or laid out automatically, since a cold
+      build takes a couple of minutes and laying out ~9,930 nodes client-side takes real time too,
+      not worth paying every time this tab is merely opened.
     </p>
     <p class="corpora-hint" id="rfcFocusHint" hidden>
       Starts from one RFC and expands outward hop by hop: hop 1 is its direct obsoletes/updates/
-      family connections, hop 2 adds their connections too, hop 3 one ring further. Family is only
-      computed for the RFC you focus on, not for its neighbors -- "shares this RFC's topic" isn't a
-      well-defined idea two hops removed from it.
+      Citation Match/Topic Match connections, hop 2 adds their connections too, hop 3 one ring
+      further. Citation Match (real citations, filtered to an exact keyword match) and Topic Match
+      (whole-corpus BM25 text ranking, catches relatives Citation Match's exact match misses) are
+      only computed for the RFC you focus on, not for its neighbors -- "shares this RFC's topic"
+      isn't a well-defined idea two hops removed from it.
     </p>
     <div class="controls rfc-graph-controls">
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterObsoletes" checked> Obsoletes</label>
       <label class="rfc-graph-filter"><input type="checkbox" id="rfcFilterUpdates" checked> Updates</label>
       <label class="rfc-graph-filter" id="rfcFilterFamilyLabel" hidden>
-        <input type="checkbox" id="rfcFilterFamily" checked> Family
+        <input type="checkbox" id="rfcFilterFamily" checked> Citation Match
+      </label>
+      <label class="rfc-graph-filter" id="rfcFilterTopicBm25Label" hidden>
+        <input type="checkbox" id="rfcFilterTopicBm25" checked> Topic Match (BM25)
       </label>
       <div class="rfc-view-toggle" id="rfcViewToggle">
         <button class="rfc-view-btn active" data-view="both">Both</button>
@@ -575,22 +727,23 @@
         </label>
         <button id="rfcGraphBtn">Go</button>
       </span>
+      <span id="rfcOverviewInputGroup">
+        <button id="rfcLoadOverviewBtn">Load overview graph</button>
+      </span>
     </div>
     <div id="rfcGraphStatus"></div>
-    <div class="rfc-graph-layout" id="rfcGraphLayout" hidden>
-      <div class="rfc-graph-views" id="rfcGraphViews" data-view="both">
-        <div class="rfc-graph-canvas-wrap">
-          <div class="rfc-view-label">Force graph</div>
-          <div id="rfcGraphCanvas"></div>
-          <div class="rfc-graph-legend" id="rfcGraphLegend"></div>
-        </div>
-        <div class="rfc-arc-pane">
-          <div class="rfc-view-label">Arc diagram -- RFCs left to right in publication order</div>
-          <div class="rfc-arc-scroll" id="rfcArcScroll"></div>
-        </div>
+    <div class="rfc-graph-layout" id="rfcGraphLayout" data-view="both" hidden>
+      <div class="rfc-graph-canvas-wrap">
+        <div class="rfc-view-label">Force graph</div>
+        <div id="rfcGraphCanvas"></div>
+        <div class="rfc-graph-legend" id="rfcGraphLegend"></div>
       </div>
       <div class="rfc-graph-detail" id="rfcGraphDetail">
         <p class="empty-state">Click a node to see detail.</p>
+      </div>
+      <div class="rfc-arc-pane">
+        <div class="rfc-view-label">Arc diagram -- RFCs left to right in publication order</div>
+        <div class="rfc-arc-scroll" id="rfcArcScroll"></div>
       </div>
     </div>
     <button class="rfc-view-btn rfc-table-toggle-btn" id="rfcTableToggleBtn" hidden>Show table</button>
@@ -643,17 +796,26 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
 let toolDisplayNames = {};
 let toolsData = [];
 
-async function loadTools() {
-  const res = await fetch('/api/tools');
-  const tools = await res.json();
-  toolsData = tools;
-  toolDisplayNames = Object.fromEntries(tools.map(t => [t.name, t.display_name]));
-  toolsEl.innerHTML = tools.map(t => `
+// Two groups, not one flat list: "kind" (discovery/retrieval/fetch/diff)
+// answers what domain a tool touches, but that was flattening a second,
+// more important question -- what ROLE it plays. Every capability tool
+// gives the agent a new external action; verify_answer doesn't, it
+// re-invokes the same LLM to audit the draft against evidence already
+// retrieved, which is a guardrail, not a capability, and gets its own
+// section instead of sitting next to "fetch RFC text" as if equivalent.
+// "forced" separately flags the handful with a safety-net floor (see
+// ask()'s _force_tool_call) -- not purely agent-chosen, a hybrid.
+function renderToolRow(t) {
+  const forcedBadge = t.forced
+    ? '<span class="forced-badge" title="Has a safety-net floor -- called even if the model doesn\'t choose to">forced</span>'
+    : '';
+  return `
     <div class="tool-row" data-tool="${escapeHtml(t.name)}">
       <button class="tool-row-head">
         <span>
           <span class="name">${escapeHtml(t.display_name)}</span>
           <span class="kind" style="--kind-color: var(--kind-${escapeHtml(t.kind)})">${escapeHtml(t.kind)}</span>
+          ${forcedBadge}
         </span>
         <span class="chevron">&#9656;</span>
       </button>
@@ -662,8 +824,30 @@ async function loadTools() {
         <p class="desc">${escapeHtml(t.description)}</p>
         <button class="detail-btn" data-tool="${escapeHtml(t.name)}">Detail &rarr;</button>
       </div>
-    </div>
-  `).join('');
+    </div>`;
+}
+
+async function loadTools() {
+  const res = await fetch('/api/tools');
+  const tools = await res.json();
+  toolsData = tools;
+  toolDisplayNames = Object.fromEntries(tools.map(t => [t.name, t.display_name]));
+
+  const capabilities = tools.filter(t => t.group !== 'guardrail');
+  const guardrails = tools.filter(t => t.group === 'guardrail');
+
+  toolsEl.innerHTML = `
+    <div class="tool-group-heading">Capability tools</div>
+    ${capabilities.map(renderToolRow).join('')}
+    ${guardrails.length ? `
+      <div class="tool-group-heading">Guardrails</div>
+      <p class="tool-group-note">
+        Not a new capability -- re-examines a draft answer against evidence already retrieved,
+        rather than fetching anything new. Mandatory (see the "forced" badge), not agent-chosen.
+      </p>
+      ${guardrails.map(renderToolRow).join('')}
+    ` : ''}
+  `;
 }
 
 function showToolDetail(name) {
@@ -743,11 +927,15 @@ document.getElementById('skills').addEventListener('click', (e) => {
 async function loadDrafts() {
   const res = await fetch('/api/corpora');
   const data = await res.json();
+  const draftSelects = [draftEl, investigateDraftEl, deepDiveDraftEl, panoramaDraftEl, trackDraftEl];
   for (const c of data.catalog) {
-    const opt = document.createElement('option');
-    opt.value = c.draft_name;
-    opt.textContent = c.rfc_number ? `${c.draft_name} (RFC ${c.rfc_number})` : c.draft_name;
-    draftEl.appendChild(opt);
+    const label = c.rfc_number ? `${c.draft_name} (RFC ${c.rfc_number})` : c.draft_name;
+    for (const sel of draftSelects) {
+      const opt = document.createElement('option');
+      opt.value = c.draft_name;
+      opt.textContent = label;
+      sel.appendChild(opt);
+    }
   }
 }
 
@@ -758,47 +946,101 @@ function renderCorpora(corpora) {
   return corpora.map((c, idx) => {
     const rfc = c.rfc_number ? `<span class="rfc">RFC ${escapeHtml(String(c.rfc_number))}</span>` : '';
 
+    const localBadge = c.is_local ? '<span class="local-badge">local only</span>' : '';
+    const ls = c.local_status || {};
+    const idxStat = c.index_status || {};
+
+    // Same two facets, same order, same labels for every row -- "Mail" then
+    // "Draft" -- whether it's a real Dify-dataset-backed corpus or a local
+    // source. What differs is only the status text and the action each
+    // kind actually needs: a real corpus already has its content indexed,
+    // so its actions just refresh sidecar freshness / grab one revision for
+    // a quick look; a local source has nothing but local files, so both of
+    // its facets share the same one "Sync" action (drafts+RFC+mail all at
+    // once -- see IetfImportService.sync_local_source), since splitting
+    // that into two independent buttons was exactly the "more granularity
+    // than useful" complaint that led here. "Search index" is the one
+    // genuinely extra facet, local-only, since a real corpus doesn't need
+    // a local BM25 index -- it's already queryable through the agent's
+    // normal dataset tools.
     let mailFacet = '';
     if (c.wg) {
-      const ms = c.mail_status || {};
-      const value = ms.error
-        ? escapeHtml(ms.error)
-        : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages &middot; ${escapeHtml(ms.status || 'unknown')}`;
+      let statusValue;
+      let actionsHtml;
+      if (c.is_local) {
+        statusValue = `mail: ${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`;
+        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}">Sync</button>`;
+      } else {
+        const ms = c.mail_status || {};
+        statusValue = ms.error
+          ? escapeHtml(ms.error)
+          : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages &middot; ${escapeHtml(ms.status || 'unknown')}`;
+        actionsHtml = `<button class="sync-mail-btn" data-list="${escapeHtml(c.wg)}" data-idx="${idx}">Sync now</button>`;
+      }
       mailFacet = `
         <div class="corpus-facet">
           <span class="facet-label">Mail (${escapeHtml(c.wg)})</span>
-          <span class="facet-value${ms.error ? ' error' : ''}">${value}</span>
-          <button class="sync-mail-btn" data-list="${escapeHtml(c.wg)}" data-idx="${idx}">Sync now</button>
+          <span class="facet-value">${statusValue}</span>
+          ${actionsHtml}
         </div>`;
     }
 
     let draftFacet = '';
     if (c.draft_name) {
-      const dr = c.draft_relations || {};
-      const value = dr.error
-        ? escapeHtml(dr.error)
-        : dr.latest_rev
-          ? `latest: rev ${escapeHtml(dr.latest_rev)}${dr.last_rev_date ? ' (' + escapeHtml(dr.last_rev_date.slice(0, 10)) + ')' : ''}`
-          : 'unknown';
-      draftFacet = `
-        <div class="corpus-facet">
-          <span class="facet-label">Draft text</span>
-          <span class="facet-value${dr.error ? ' error' : ''}">${value}</span>
-          <button class="download-draft-btn" data-draft="${escapeHtml(c.draft_name)}"
+      let value;
+      let actionsHtml;
+      if (c.is_local) {
+        const draftPart = ls.revisions_downloaded
+          ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${ls.latest_revision_downloaded})`
+          : 'no revisions yet';
+        const rfcPart = c.rfc_number
+          ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`)
+          : 'not yet an RFC';
+        value = `${draftPart} &middot; ${rfcPart}`;
+        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}">Sync</button>`;
+      } else {
+        const dr = c.draft_relations || {};
+        value = dr.error
+          ? escapeHtml(dr.error)
+          : dr.latest_rev
+            ? `latest: rev ${escapeHtml(dr.latest_rev)}${dr.last_rev_date ? ' (' + escapeHtml(dr.last_rev_date.slice(0, 10)) + ')' : ''}`
+            : 'unknown';
+        actionsHtml = `<button class="download-draft-btn" data-draft="${escapeHtml(c.draft_name)}"
                   data-rev="${escapeHtml(dr.latest_rev || '')}" ${dr.latest_rev ? '' : 'disabled'}>
             Download latest revision
-          </button>
+          </button>`;
+      }
+      draftFacet = `
+        <div class="corpus-facet">
+          <span class="facet-label">Draft</span>
+          <span class="facet-value">${value}</span>
+          ${actionsHtml}
+        </div>`;
+    }
+
+    let indexFacet = '';
+    if (c.is_local) {
+      const indexValue = idxStat.built
+        ? `${idxStat.total_documents} document${idxStat.total_documents === 1 ? '' : 's'} indexed (${Object.entries(idxStat.by_kind || {}).map(([k, n]) => `${n} ${k}`).join(', ')})`
+        : 'not indexed yet';
+      indexFacet = `
+        <div class="corpus-facet">
+          <span class="facet-label">Search index</span>
+          <span class="facet-value${idxStat.error ? ' error' : ''}">${idxStat.error ? escapeHtml(idxStat.error) : indexValue}</span>
+          <button class="local-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}">Build index</button>
         </div>`;
     }
 
     return `
-      <div class="corpus-row">
+      <div class="corpus-row${c.is_local ? ' local-source-row' : ''}">
         <div class="corpus-head">
           <span class="name">${escapeHtml(c.draft_name)}</span>
           ${rfc}
+          ${localBadge}
         </div>
         ${mailFacet}
         ${draftFacet}
+        ${indexFacet}
         ${renderSourcesSection(c, idx)}
       </div>`;
   }).join('');
@@ -811,6 +1053,299 @@ async function loadResourceTypes() {
   const data = await res.json();
   resourceTypes = data.types || [];
 }
+
+const newDraftNameEl = document.getElementById('newDraftName');
+
+// "Add" is idempotent (see IetfImportService.download_all_draft_revisions_to_local
+// -- already-downloaded revisions/RFC get skipped, not re-fetched), so
+// clicking it on something already tracked isn't harmful, just pointless --
+// this surfaces that instead of silently letting the button look like
+// "add a new thing" for something that's already a row below.
+function checkDraftNameExists() {
+  const noteEl = document.getElementById('newDraftExistsNote');
+  const draftName = newDraftNameEl.value.trim();
+  const existing = draftName && corporaData.find((c) => c.draft_name === draftName);
+  if (!existing) {
+    noteEl.hidden = true;
+    return;
+  }
+  noteEl.textContent = existing.is_local
+    ? `Already added as a local source -- Add will just re-sync it, same as its own "Sync" button.`
+    : `Already a registered corpus (real Dify dataset) -- see its row below instead of adding it again.`;
+  noteEl.hidden = false;
+}
+
+newDraftNameEl.addEventListener('input', checkDraftNameExists);
+
+// Already-tracked drafts sort first in search results below, with a badge
+// -- otherwise a draft you already have could sit buried under untracked
+// ones that happen to rank higher by pure text match, and re-adding
+// something you already pulled is what checkDraftNameExists above exists
+// to flag in the first place; surfacing it *before* the click is strictly
+// better than only catching it after.
+function isLocallyTracked(draftName) {
+  return corporaData.some((c) => c.draft_name === draftName);
+}
+
+function resolveDraftNameFromRfcSuggestion(s) {
+  return s.draft_base_name || (s.draft_names && s.draft_names[0]) || s.doc_id;
+}
+
+// One search box, not three separate fields -- typing anything (a WG name,
+// an RFC number, a draft name, or a keyword) queries get_mailing_lists
+// (cached client-side once, cheap to filter on every keystroke) and
+// get_rfc_suggestions (the server-side one, since that's the one that does
+// real per-query work) together, merging results into one dropdown: WGs as
+// expandable groups (clicking one loads that WG's full document list via
+// get_wg_documents, covering unpublished drafts too -- rfc_number is null
+// for those), RFCs/drafts as leaf items. Picking any leaf resolves the
+// search box into a read-only summary and fills "Draft name" below, which
+// stays freely editable regardless -- it's the one field the Add action
+// actually reads.
+let allMailingLists = [];
+let sourceWgMatches = [];
+let sourceRfcMatches = [];
+let sourceExpandedWg = null;
+let sourceExpandedDocs = [];
+let sourceExpandedLoading = false;
+let sourceSearchTimer = null;
+
+async function loadMailingLists() {
+  try {
+    const res = await fetch('/api/corpora/mailing-lists');
+    const data = await res.json();
+    allMailingLists = data.lists || [];
+  } catch (err) {
+    allMailingLists = [];
+  }
+}
+
+const newSourceSearchInputEl = document.getElementById('newSourceSearchInput');
+const newSourceClearBtnEl = document.getElementById('newSourceClearBtn');
+
+function lockSourceSearch(displayValue) {
+  newSourceSearchInputEl.value = displayValue;
+  newSourceSearchInputEl.readOnly = true;
+  newSourceClearBtnEl.hidden = false;
+}
+
+function unlockSourceSearch() {
+  newSourceSearchInputEl.value = '';
+  newSourceSearchInputEl.readOnly = false;
+  newSourceClearBtnEl.hidden = true;
+  document.getElementById('newSourceResolved').hidden = true;
+  sourceWgMatches = [];
+  sourceRfcMatches = [];
+  sourceExpandedWg = null;
+  sourceExpandedDocs = [];
+}
+
+newSourceClearBtnEl.addEventListener('click', unlockSourceSearch);
+
+function renderSourceSearchResults() {
+  const el = document.getElementById('newSourceSearchResults');
+  const rows = [];
+
+  if (sourceWgMatches.length) {
+    rows.push({ type: 'section', text: 'Working groups' });
+    for (const wg of sourceWgMatches) {
+      rows.push({ type: 'wg-header', wg });
+      if (wg === sourceExpandedWg) {
+        if (sourceExpandedLoading) rows.push({ type: 'loading' });
+        else for (const doc of sourceExpandedDocs) rows.push({ type: 'wg-doc', doc, wg });
+      }
+    }
+  }
+  if (sourceRfcMatches.length) {
+    rows.push({ type: 'section', text: 'RFCs & drafts' });
+    for (const s of sourceRfcMatches) rows.push({ type: 'rfc', suggestion: s });
+  }
+
+  if (!rows.length) {
+    el.hidden = true;
+    return;
+  }
+
+  el.innerHTML = rows.map((row, i) => {
+    if (row.type === 'section') return `<div class="suggestion-section-label">${escapeHtml(row.text)}</div>`;
+    if (row.type === 'loading') return `<div class="suggestion-section-label">Loading…</div>`;
+    if (row.type === 'wg-header') {
+      const expanded = row.wg === sourceExpandedWg;
+      return `
+        <button type="button" class="draft-suggestion-item suggestion-wg-header${expanded ? ' expanded' : ''}" data-idx="${i}">
+          <div class="draft-suggestion-doc">${escapeHtml(row.wg)}</div>
+        </button>`;
+    }
+    if (row.type === 'wg-doc') {
+      const badge = isLocallyTracked(row.doc.name) ? ' <span class="local-badge">already added</span>' : '';
+      return `
+        <button type="button" class="draft-suggestion-item suggestion-wg-doc" data-idx="${i}">
+          <div class="draft-suggestion-doc">${escapeHtml(row.doc.name)}${row.doc.rfc_number ? ` &middot; RFC ${escapeHtml(String(row.doc.rfc_number))}` : ''}${badge}</div>
+          <div class="draft-suggestion-title">${escapeHtml(row.doc.title || '')}</div>
+        </button>`;
+    }
+    // 'rfc'
+    const s = row.suggestion;
+    const draftNames = (s.draft_names && s.draft_names.length)
+      ? `<div class="draft-suggestion-drafts">${escapeHtml(s.draft_names.join(', '))}</div>`
+      : '';
+    const badge = isLocallyTracked(resolveDraftNameFromRfcSuggestion(s)) ? ' <span class="local-badge">already added</span>' : '';
+    return `
+      <button type="button" class="draft-suggestion-item" data-idx="${i}">
+        <div class="draft-suggestion-doc">${escapeHtml(s.doc_id)}${badge}</div>
+        <div class="draft-suggestion-title">${escapeHtml(s.title || '')}</div>
+        ${draftNames}
+      </button>`;
+  }).join('');
+  // data-idx above indexes into `rows`, a fresh flat list rebuilt on every
+  // render (expand/collapse, new query, ...) -- stash it for the click
+  // handler rather than reconstructing row semantics from the DOM.
+  el._rows = rows;
+  el.hidden = false;
+}
+
+async function expandSourceWg(wg) {
+  sourceExpandedWg = wg;
+  sourceExpandedDocs = [];
+  sourceExpandedLoading = true;
+  renderSourceSearchResults();
+  try {
+    const res = await fetch(`/api/corpora/wg-documents?wg=${encodeURIComponent(wg)}`);
+    const data = await res.json();
+    sourceExpandedDocs = data.documents || [];
+    sourceExpandedDocs.sort((a, b) => (isLocallyTracked(a.name) ? 0 : 1) - (isLocallyTracked(b.name) ? 0 : 1));
+  } catch (err) {
+    sourceExpandedDocs = [];
+  }
+  sourceExpandedLoading = false;
+  renderSourceSearchResults();
+}
+
+function resolveSourceSelection(draftName, wg, rfcLabel) {
+  newDraftNameEl.value = draftName;
+  const parts = [rfcLabel || 'not yet published as an RFC'];
+  if (wg) parts.push(`WG: ${wg}`);
+  lockSourceSearch(draftName);
+  const resolvedEl = document.getElementById('newSourceResolved');
+  resolvedEl.textContent = `Resolved: ${draftName} (${parts.join(', ')})`;
+  resolvedEl.hidden = false;
+  document.getElementById('newSourceSearchResults').hidden = true;
+  checkDraftNameExists();
+}
+
+function scheduleSourceSearch(query) {
+  clearTimeout(sourceSearchTimer);
+  sourceSearchTimer = setTimeout(async () => {
+    const q = query.toLowerCase();
+    sourceWgMatches = q ? allMailingLists.filter((l) => l.toLowerCase().includes(q)).slice(0, 6) : [];
+    sourceExpandedWg = null;
+    sourceExpandedDocs = [];
+    try {
+      const res = await fetch(`/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}&limit=20`);
+      const data = await res.json();
+      sourceRfcMatches = data.suggestions || [];
+      // Already-pulled RFCs float to the top. Array.sort is stable, so
+      // within each group the backend's own relevance order (exact
+      // RFC-number match first, etc.) is preserved.
+      sourceRfcMatches.sort((a, b) => {
+        const aTracked = isLocallyTracked(resolveDraftNameFromRfcSuggestion(a)) ? 0 : 1;
+        const bTracked = isLocallyTracked(resolveDraftNameFromRfcSuggestion(b)) ? 0 : 1;
+        return aTracked - bTracked;
+      });
+    } catch (err) {
+      sourceRfcMatches = [];
+    }
+    renderSourceSearchResults();
+  }, 250);
+}
+
+newSourceSearchInputEl.addEventListener('input', () => scheduleSourceSearch(newSourceSearchInputEl.value.trim()));
+newSourceSearchInputEl.addEventListener('focus', () => {
+  if (newSourceSearchInputEl.readOnly) return; // resolved mode -- use the (x) to search again
+  if (sourceWgMatches.length || sourceRfcMatches.length) renderSourceSearchResults();
+  else scheduleSourceSearch(newSourceSearchInputEl.value.trim());
+});
+
+document.getElementById('newSourceSearchResults').addEventListener('click', (e) => {
+  const el = e.currentTarget;
+  const item = e.target.closest('.draft-suggestion-item');
+  if (!item) return;
+  const row = (el._rows || [])[parseInt(item.dataset.idx, 10)];
+  if (!row) return;
+  if (row.type === 'wg-header') {
+    if (row.wg === sourceExpandedWg) {
+      sourceExpandedWg = null;
+      sourceExpandedDocs = [];
+      renderSourceSearchResults();
+    } else {
+      expandSourceWg(row.wg);
+    }
+    return;
+  }
+  if (row.type === 'wg-doc') {
+    resolveSourceSelection(row.doc.name, row.wg, row.doc.rfc_number ? `RFC ${row.doc.rfc_number}` : null);
+    return;
+  }
+  // 'rfc'
+  const s = row.suggestion;
+  resolveSourceSelection(resolveDraftNameFromRfcSuggestion(s), s.wg, s.doc_id);
+});
+
+document.addEventListener('mousedown', (e) => {
+  const wrap = document.getElementById('newSourceSearchWrap');
+  if (wrap && !wrap.contains(e.target)) document.getElementById('newSourceSearchResults').hidden = true;
+});
+
+// "Add a new draft as a source" -- registers the draft as a locally-tracked
+// source (see IetfImportService.register_local_source) and immediately
+// pulls every revision plus its published RFC, if any. Once added it
+// reappears as its own corpus-row unit from loadCorpora() below, same shape
+// as an already dataset-backed corpus (mail facet, draft-text facet, "Add
+// sources"), just flagged "local only" -- so this button doesn't need its
+// own result rendering beyond a short status line while it runs.
+document.getElementById('newDraftAddBtn').addEventListener('click', () => {
+  const btn = document.getElementById('newDraftAddBtn');
+  const resultEl = document.getElementById('newDraftResult');
+  const draftName = document.getElementById('newDraftName').value.trim();
+  if (!draftName) return;
+  btn.disabled = true;
+  resultEl.hidden = false;
+  resultEl.textContent = 'Starting…';
+  const source = new EventSource(`/api/corpora/draft-download-all?draft_name=${encodeURIComponent(draftName)}`);
+  const finish = (summary) => {
+    resultEl.textContent = summary;
+    source.close();
+    btn.disabled = false;
+    loadCorpora();
+  };
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      resultEl.textContent = msg.message || 'Downloading…';
+    } else if (msg.type === 'result') {
+      const data = msg.data;
+      if (data.error) {
+        finish(data.error);
+        return;
+      }
+      const revs = data.revisions || [];
+      const ok = revs.filter((r) => r.ok).length;
+      let summary = `Added. Downloaded ${ok}/${revs.length} revisions`;
+      if (data.rfc_number) {
+        summary += (data.rfc && data.rfc.ok)
+          ? `, plus RFC ${data.rfc_number}`
+          : `, but RFC ${data.rfc_number} failed (${(data.rfc || {}).error || 'unknown error'})`;
+      } else {
+        summary += ' (not yet published as an RFC)';
+      }
+      finish(summary);
+      document.getElementById('newDraftName').value = '';
+    } else if (msg.type === 'error') {
+      finish(`Error: ${msg.message}`);
+    }
+  };
+  source.onerror = () => finish('Connection lost.');
+});
 
 // Every non-draft/RFC/mailarchive Datatracker doctype (agenda, minutes,
 // slides, charter, recording, ...) for this WG -- download-only, same as
@@ -899,6 +1434,54 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     return;
   }
 
+  // Two local-source-only actions (see IetfImportService.
+  // register_local_source and LocalSourceIndexService): Sync pulls
+  // whatever's missing across drafts/RFC/mail in one call; Build index
+  // makes whatever's already synced searchable via BM25. Replaces what
+  // used to be three separate download buttons -- more granularity than
+  // was actually useful.
+  const localSyncBtn = e.target.closest('.local-sync-btn');
+  if (localSyncBtn) {
+    localSyncBtn.disabled = true;
+    const source = new EventSource(`/api/corpora/local-sync?draft_name=${encodeURIComponent(localSyncBtn.dataset.draft)}`);
+    source.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'progress') {
+        localSyncBtn.textContent = msg.message || 'Syncing…';
+      } else if (msg.type === 'result' || msg.type === 'error') {
+        source.close();
+        loadCorpora();
+      }
+    };
+    source.onerror = () => { source.close(); loadCorpora(); };
+    return;
+  }
+
+  const localIndexBtn = e.target.closest('.local-index-btn');
+  if (localIndexBtn) {
+    localIndexBtn.disabled = true;
+    localIndexBtn.textContent = 'Indexing…';
+    try {
+      const res = await fetch('/api/corpora/local-index', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft_name: localIndexBtn.dataset.draft }),
+      });
+      if (!res.ok) {
+        const result = await res.json();
+        localIndexBtn.textContent = result.error || 'Failed';
+        setTimeout(loadCorpora, 3000);
+        return;
+      }
+    } catch (err) {
+      localIndexBtn.textContent = String(err);
+      setTimeout(loadCorpora, 3000);
+      return;
+    }
+    loadCorpora();
+    return;
+  }
+
   const sourcesToggle = e.target.closest('.sources-toggle');
   if (sourcesToggle) {
     const idx = parseInt(sourcesToggle.dataset.idx, 10);
@@ -970,7 +1553,7 @@ const STD_LEVEL_COLORS = {
   std: '#5fb0e0', ds: '#5fb0e0', ps: '#5fb0e0',
   bcp: '#6fd19a', inf: '#c9ae6c', exp: '#c9ae6c', hist: '#8890a0',
 };
-const EDGE_KIND_COLORS = { obsoletes: '#e0645a', updates: '#5fb0e0', family: '#b98cf0' };
+const EDGE_KIND_COLORS = { obsoletes: '#e0645a', updates: '#5fb0e0', family: '#b98cf0', topic_bm25: '#4fd1c5' };
 const HOP_SIZES = [22, 14, 10, 7]; // index = hop distance from the focused RFC
 
 const rfcNodes = new vis.DataSet([]);   // {id, title, rfcTitle, stdLevel, wg, hop, color, size, ...}
@@ -997,12 +1580,22 @@ const rfcGraphLegendEl = document.getElementById('rfcGraphLegend');
 const rfcOverviewHintEl = document.getElementById('rfcOverviewHint');
 const rfcFocusHintEl = document.getElementById('rfcFocusHint');
 const rfcFilterFamilyLabelEl = document.getElementById('rfcFilterFamilyLabel');
+const rfcFilterTopicBm25LabelEl = document.getElementById('rfcFilterTopicBm25Label');
 const rfcFocusInputGroupEl = document.getElementById('rfcFocusInputGroup');
+const rfcOverviewInputGroupEl = document.getElementById('rfcOverviewInputGroup');
+const rfcLoadOverviewBtnEl = document.getElementById('rfcLoadOverviewBtn');
 const rfcFilterEls = {
   obsoletes: document.getElementById('rfcFilterObsoletes'),
   updates: document.getElementById('rfcFilterUpdates'),
   family: document.getElementById('rfcFilterFamily'),
+  topic_bm25: document.getElementById('rfcFilterTopicBm25'),
 };
+// "family" and "topic_bm25" are the wire-format edge kinds (unchanged, to
+// avoid touching the API contract) -- these are just their user-facing
+// labels, renamed for clarity (see the Family-vs-BM25 naming discussion):
+// "Citation Match" (real citations + exact keyword match) and "Topic
+// Match" (whole-corpus BM25 text ranking).
+const EDGE_KIND_LABELS = { obsoletes: 'obsoletes', updates: 'updates', family: 'citation match', topic_bm25: 'topic match' };
 
 // Overview nodes carry no hop (undefined) and get a flat, uniform look --
 // there's no "distance from the center" concept in a whole-corpus graph.
@@ -1055,7 +1648,7 @@ function mergeGraphData(data) {
       kind: e.kind,
       arrows: 'to',
       color: { color: EDGE_KIND_COLORS[e.kind] || '#5b6072', opacity: 0.6 },
-      dashes: e.kind === 'family',
+      dashes: e.kind === 'family' ? true : e.kind === 'topic_bm25' ? [2, 3] : false,
       hidden: !rfcFilterEls[e.kind] || !rfcFilterEls[e.kind].checked,
     });
   });
@@ -1090,9 +1683,10 @@ function resetRfcGraphState() {
 }
 
 function nodeConnections(nodeId) {
-  return rfcEdges.get({ filter: (e) => e.from === nodeId || e.to === nodeId }).map((e) =>
-    e.from === nodeId ? `${e.kind} -> ${e.to}` : `${e.from} ${e.kind} -> (this)`
-  );
+  return rfcEdges.get({ filter: (e) => e.from === nodeId || e.to === nodeId }).map((e) => {
+    const label = EDGE_KIND_LABELS[e.kind] || e.kind;
+    return e.from === nodeId ? `${label} -> ${e.to}` : `${e.from} ${label} -> (this)`;
+  });
 }
 
 // One pass over all edges instead of nodeConnections()'s per-node filter --
@@ -1199,8 +1793,18 @@ function renderArcDiagram() {
     return;
   }
   const rank = new Map(nodes.map((n, i) => [n.id, i]));
-  const width = Math.max(nodes.length * ARC_SPACING + 20, 600);
-  const xOf = (id) => 20 + rank.get(id) * ARC_SPACING;
+  // Small neighborhoods (Focus mode) stretch to fill the pane's actual
+  // width instead of clumping at a fixed minimum -- confirmed live that a
+  // 13-node Focus graph rendered as a tiny cluster in the corner of an
+  // otherwise-empty full-width row, once the arc pane itself got full
+  // page width (see the "Both" layout grid fix). Large graphs (Overview's
+  // ~3,930 nodes) still get real horizontal scroll: this only ever
+  // stretches spacing UP to fill available room, never compresses it
+  // below ARC_SPACING.
+  const availableWidth = document.getElementById('rfcArcScroll').clientWidth || 600;
+  const spacing = Math.max(ARC_SPACING, (availableWidth - 40) / Math.max(nodes.length - 1, 1));
+  const width = Math.max(nodes.length * spacing + 20, availableWidth);
+  const xOf = (id) => 20 + rank.get(id) * spacing;
 
   const edges = rfcEdges.get({ filter: (e) => !e.hidden && rank.has(e.from) && rank.has(e.to) });
   const arcPaths = edges
@@ -1246,7 +1850,7 @@ document.getElementById('rfcViewToggle').addEventListener('click', (e) => {
   if (!btn) return;
   document.querySelectorAll('#rfcViewToggle .rfc-view-btn').forEach((b) => b.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById('rfcGraphViews').dataset.view = btn.dataset.view;
+  rfcGraphLayoutEl.dataset.view = btn.dataset.view;
 });
 
 function refreshRfcViews() {
@@ -1263,7 +1867,8 @@ function renderLegend() {
     ? `<span><i class="rfc-dot center"></i> focused RFC (larger = closer)</span>
        <span><i class="rfc-line obsoletes"></i> obsoletes</span>
        <span><i class="rfc-line updates"></i> updates</span>
-       <span><i class="rfc-line family"></i> family</span>`
+       <span><i class="rfc-line family"></i> citation match</span>
+       <span><i class="rfc-line topic_bm25"></i> topic match (BM25)</span>`
     : `<span><i class="rfc-line obsoletes"></i> obsoletes</span>
        <span><i class="rfc-line updates"></i> updates</span>`;
 }
@@ -1275,10 +1880,17 @@ function setRfcMode(mode) {
   rfcOverviewHintEl.hidden = mode !== 'overview';
   rfcFocusHintEl.hidden = mode !== 'focus';
   rfcFilterFamilyLabelEl.hidden = mode !== 'focus';
+  rfcFilterTopicBm25LabelEl.hidden = mode !== 'focus';
   rfcFocusInputGroupEl.hidden = mode !== 'focus';
+  rfcOverviewInputGroupEl.hidden = mode !== 'overview';
   resetRfcGraphState();
   renderLegend();
-  if (mode === 'overview') loadGlobalGraph();
+  // Overview is opt-in, not automatic -- loadGlobalGraph() only runs when
+  // "Load overview graph" is clicked (see rfcLoadOverviewBtnEl below), not
+  // just from switching into this mode or opening the tab. A cold build
+  // is a couple of minutes server-side plus real client-side layout time
+  // for ~9,930 nodes -- not a cost worth paying every time someone glances
+  // at this tab, especially if all they actually wanted was Focus mode.
 }
 
 document.getElementById('rfcModeToggle').addEventListener('click', (e) => {
@@ -1419,6 +2031,7 @@ document.getElementById('rfcGraphDetail').addEventListener('click', async (e) =>
 // every switch back into Overview mode.
 function loadGlobalGraph() {
   const token = rfcRequestToken;
+  rfcLoadOverviewBtnEl.disabled = true;
   rfcGraphStatusEl.innerHTML = '<div class="loading">Building the whole-corpus graph (first load only, ~2 min)…</div>';
   const source = new EventSource('/api/rfc-graph/global');
   source.onmessage = (ev) => {
@@ -1428,6 +2041,7 @@ function loadGlobalGraph() {
       rfcGraphStatusEl.innerHTML = `<div class="loading">${escapeHtml(msg.message || 'Working…')}</div>`;
     } else if (msg.type === 'result') {
       source.close();
+      rfcLoadOverviewBtnEl.disabled = false;
       if (msg.data.error) {
         rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(msg.data.error)}</div>`;
         return;
@@ -1440,12 +2054,14 @@ function loadGlobalGraph() {
       initNetwork();
     } else if (msg.type === 'error') {
       source.close();
+      rfcLoadOverviewBtnEl.disabled = false;
       rfcGraphStatusEl.innerHTML = `<div class="error-box">${escapeHtml(msg.message)}</div>`;
     }
   };
   source.onerror = () => {
     source.close();
     if (token !== rfcRequestToken) return;
+    rfcLoadOverviewBtnEl.disabled = false;
     rfcGraphStatusEl.innerHTML = '<div class="error-box">Connection lost while building the graph.</div>';
   };
 }
@@ -1504,11 +2120,12 @@ function runFocus() {
 rfcGraphBtnEl.addEventListener('click', runFocus);
 rfcGraphInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runFocus(); });
 
+rfcLoadOverviewBtnEl.addEventListener('click', loadGlobalGraph);
+
 document.querySelector('.tab-btn[data-tab="rfcgraph"]').addEventListener('click', () => {
   if (!rfcTabOpened) {
     rfcTabOpened = true;
     renderLegend();
-    loadGlobalGraph();
   }
 });
 
@@ -1692,14 +2309,14 @@ function renderPlan(steps) {
 // and a depth-focused system-prompt addendum for Deep Dive -- see
 // /api/deep-dive in serve_ui.py). Not shared with Ask, which keeps its own
 // fixed-rail rendering deliberately unchanged.
-function runAgentFlow(endpoint, queryEl, btnEl, convEl) {
+function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl) {
   const query = queryEl.value.trim();
   if (!query) return;
   btnEl.disabled = true;
 
   const turn = document.createElement('div');
   turn.className = 'turn';
-  const draftLabel = draftEl.value ? ` <em>(draft: ${escapeHtml(draftEl.value)})</em>` : '';
+  const draftLabel = draftSelectEl.value ? ` <em>(draft: ${escapeHtml(draftSelectEl.value)})</em>` : '';
   const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
 
   const steps = [];
@@ -1714,7 +2331,7 @@ function runAgentFlow(endpoint, queryEl, btnEl, convEl) {
   turn.scrollIntoView({behavior: 'smooth'});
 
   const params = new URLSearchParams({query});
-  if (draftEl.value) params.set('draft', draftEl.value);
+  if (draftSelectEl.value) params.set('draft', draftSelectEl.value);
   const source = new EventSource(`${endpoint}?${params}`);
   let finished = false;
 
@@ -1755,22 +2372,164 @@ function runAgentFlow(endpoint, queryEl, btnEl, convEl) {
   };
 }
 
+const investigateDraftEl = document.getElementById('investigateDraft');
 const investigateQueryEl = document.getElementById('investigateQuery');
 const investigateBtnEl = document.getElementById('investigateBtn');
 const investigateConvEl = document.getElementById('investigateConversation');
-investigateBtnEl.addEventListener('click', () => runAgentFlow('/api/ask', investigateQueryEl, investigateBtnEl, investigateConvEl));
+investigateBtnEl.addEventListener('click', () => runAgentFlow('/api/ask', investigateDraftEl, investigateQueryEl, investigateBtnEl, investigateConvEl));
 investigateQueryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runAgentFlow('/api/ask', investigateQueryEl, investigateBtnEl, investigateConvEl);
+  if (e.key === 'Enter') runAgentFlow('/api/ask', investigateDraftEl, investigateQueryEl, investigateBtnEl, investigateConvEl);
 });
 
+const deepDiveDraftEl = document.getElementById('deepDiveDraft');
 const deepDiveQueryEl = document.getElementById('deepDiveQuery');
 const deepDiveBtnEl = document.getElementById('deepDiveBtn');
 const deepDiveConvEl = document.getElementById('deepDiveConversation');
-deepDiveBtnEl.addEventListener('click', () => runAgentFlow('/api/deep-dive', deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl));
+deepDiveBtnEl.addEventListener('click', () => runAgentFlow('/api/deep-dive', deepDiveDraftEl, deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl));
 deepDiveQueryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runAgentFlow('/api/deep-dive', deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl);
+  if (e.key === 'Enter') runAgentFlow('/api/deep-dive', deepDiveDraftEl, deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl);
 });
 
+const panoramaDraftEl = document.getElementById('panoramaDraft');
+const panoramaQueryEl = document.getElementById('panoramaQuery');
+const panoramaBtnEl = document.getElementById('panoramaBtn');
+const panoramaConvEl = document.getElementById('panoramaConversation');
+panoramaBtnEl.addEventListener('click', () => runAgentFlow('/api/panorama', panoramaDraftEl, panoramaQueryEl, panoramaBtnEl, panoramaConvEl));
+panoramaQueryEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runAgentFlow('/api/panorama', panoramaDraftEl, panoramaQueryEl, panoramaBtnEl, panoramaConvEl);
+});
+
+// Family Search (Demo) -- prototype-only, entirely fabricated data (see
+// services/family_search_demo_service.py). Unlike every other tab here,
+// this one genuinely pauses mid-investigation and waits for a human
+// decision (continue to the next candidate, or stop) instead of running
+// straight through to a final answer -- proving that interaction shape
+// works before any real mailarchive data for a real RFC family gets
+// imported. Each step is its own plain request (no SSE): the ranking
+// only happens once, right after the root's own mail comes up empty, and
+// the frontend just walks that ranked queue one confirmed hop at a time.
+const familyDemoRootEl = document.getElementById('familyDemoRoot');
+const familyDemoQueryEl = document.getElementById('familyDemoQuery');
+const familyDemoBtnEl = document.getElementById('familyDemoBtn');
+const familyDemoConvEl = document.getElementById('familyDemoConversation');
+
+async function loadFamilyDemoRoots() {
+  const res = await fetch('/api/family-search-demo/roots');
+  const roots = await res.json();
+  familyDemoRootEl.innerHTML = roots
+    .map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.id)}: ${escapeHtml(r.title)}</option>`)
+    .join('');
+}
+
+function familyDemoAddStep(turn, html, cls) {
+  const div = document.createElement('div');
+  div.className = `family-demo-step${cls ? ' ' + cls : ''}`;
+  div.innerHTML = html;
+  turn.appendChild(div);
+  turn.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  return div;
+}
+
+// Walks the ranked queue one hop at a time: show a checking step, fetch
+// that candidate's result, then either stop (found/exhausted) or render a
+// Yes/No confirm step before recursing into the next one. `checked` is
+// every id already tried, in order, purely for the final "stopped" /
+// "exhausted" summary message.
+async function familyDemoProceed(turn, query, checked, queue) {
+  if (!queue.length) {
+    familyDemoAddStep(
+      turn,
+      `No relevant discussion found in ${checked.map(escapeHtml).join(', ')}, and no further related RFCs to check.`,
+      'family-demo-error'
+    );
+    return;
+  }
+
+  const next = queue[0];
+  const confirmStep = familyDemoAddStep(
+    turn,
+    `<div>I haven't found any relevant discussion in ${escapeHtml(checked[checked.length - 1])}'s own mail archive. ` +
+      `There are other RFCs that are complementary to or update this one -- would you like me to check ` +
+      `<strong>${escapeHtml(next.id)}</strong> (${escapeHtml(next.title)}) next?</div>` +
+      `<div class="family-demo-confirm" style="margin-top:8px">` +
+      `<button class="yes">Yes, check it</button><button class="no">No, stop here</button></div>`
+  );
+
+  confirmStep.querySelector('.yes').addEventListener('click', async () => {
+    confirmStep.remove();
+    familyDemoAddStep(turn, `Checking ${escapeHtml(next.id)}'s mail archive…`);
+    try {
+      const res = await fetch(
+        `/api/family-search-demo/check-candidate?query=${encodeURIComponent(query)}&rfc_id=${encodeURIComponent(next.id)}`
+      );
+      const data = await res.json();
+      if (data.error) {
+        familyDemoAddStep(turn, `Error: ${escapeHtml(data.error)}`, 'family-demo-error');
+        return;
+      }
+      if (data.status === 'found') {
+        familyDemoAddStep(
+          turn,
+          `<strong>Found in ${escapeHtml(data.rfc)}</strong> (${escapeHtml(data.title)}): ${escapeHtml(data.answer)}`,
+          'family-demo-found'
+        );
+        return;
+      }
+      await familyDemoProceed(turn, query, [...checked, next.id], queue.slice(1));
+    } catch (err) {
+      familyDemoAddStep(turn, `Error: ${escapeHtml(String(err))}`, 'family-demo-error');
+    }
+  });
+
+  confirmStep.querySelector('.no').addEventListener('click', () => {
+    confirmStep.remove();
+    familyDemoAddStep(turn, `Stopped. Searched: ${checked.map(escapeHtml).join(', ')}. No answer found.`);
+  });
+}
+
+async function runFamilySearchDemo() {
+  const root = familyDemoRootEl.value;
+  const query = familyDemoQueryEl.value.trim();
+  if (!query || !root) return;
+  familyDemoBtnEl.disabled = true;
+
+  const turn = document.createElement('div');
+  turn.className = 'turn';
+  turn.innerHTML = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)} <em>(starting from ${escapeHtml(root)})</em></div>`;
+  familyDemoConvEl.appendChild(turn);
+  turn.scrollIntoView({ behavior: 'smooth' });
+
+  familyDemoAddStep(turn, `Checking ${escapeHtml(root)}'s own mail archive…`);
+
+  try {
+    const res = await fetch(
+      `/api/family-search-demo/check-root?query=${encodeURIComponent(query)}&root=${encodeURIComponent(root)}`
+    );
+    const data = await res.json();
+    if (data.error) {
+      familyDemoAddStep(turn, `Error: ${escapeHtml(data.error)}`, 'family-demo-error');
+    } else if (data.status === 'found') {
+      familyDemoAddStep(
+        turn,
+        `<strong>Found in ${escapeHtml(data.rfc)}</strong> (${escapeHtml(data.title)}): ${escapeHtml(data.answer)}`,
+        'family-demo-found'
+      );
+    } else if (data.status === 'exhausted') {
+      familyDemoAddStep(turn, `No relevant discussion found, and ${escapeHtml(root)} has no related RFCs to check.`, 'family-demo-error');
+    } else {
+      await familyDemoProceed(turn, query, [data.checked], data.queue);
+    }
+  } catch (err) {
+    familyDemoAddStep(turn, `Error: ${escapeHtml(String(err))}`, 'family-demo-error');
+  }
+  familyDemoBtnEl.disabled = false;
+}
+
+familyDemoBtnEl.addEventListener('click', runFamilySearchDemo);
+familyDemoQueryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runFamilySearchDemo(); });
+loadFamilyDemoRoots();
+
+const trackDraftEl = document.getElementById('trackDraft');
 const threadQueryEl = document.getElementById('threadQuery');
 const trackThreadBtn = document.getElementById('trackThread');
 const threadTitle = document.getElementById('threadTitle');
@@ -1812,7 +2571,7 @@ const TRACK_STEPS = [
 const trackStepEl = document.getElementById('threadStepDiagram');
 
 function trackDecision() {
-  const draft = draftEl.value;
+  const draft = trackDraftEl.value;
   const query = threadQueryEl.value.trim();
   if (!query) return;
 
@@ -1976,6 +2735,7 @@ loadSkills();
 loadDrafts();
 loadCorpora();
 loadResourceTypes();
+loadMailingLists();
 </script>
 </body>
 </html>

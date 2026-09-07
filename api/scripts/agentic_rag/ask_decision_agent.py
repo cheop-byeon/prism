@@ -256,6 +256,33 @@ _DEEP_DIVE_ADDENDUM = (
     "evidence, not just repetition."
 )
 
+# Panorama tab: a third tier, not a modification of Deep Dive -- Deep Dive
+# stays exactly as it was (verify-one-RFC-deeply), tested and working;
+# Panorama is untested new ground for the opposite direction (find and
+# connect several RFCs), kept as a separate endpoint/addendum specifically
+# so it can be iterated on and even get it wrong without touching Deep
+# Dive's already-working behavior.
+_PANORAMA_MAX_ITERATIONS = 20
+_PANORAMA_ADDENDUM = (
+    "This question is about the WIDER RFC landscape, not just one draft or RFC's own history. "
+    "Proactively use get_rfc_relations, find_related_rfc_family, and search_rfc_corpus_bm25 to "
+    "find other RFCs connected to the one in question -- structurally (obsoletes/updates), by "
+    "citation (find_related_rfc_family), and by topic (search_rfc_corpus_bm25, which takes an RFC "
+    "number directly as its query and searches using that RFC's own title+abstract). "
+    "find_related_rfc_family requires an exact keyword match and can come back empty even when a "
+    "real family exists (a confirmed, known limitation -- not evidence that nothing exists), so if "
+    "it's empty, try search_rfc_corpus_bm25 with the same RFC number before concluding there's no "
+    "broader family. When the question is about evolution across several RFCs, explain what each "
+    "one specifically added, corrected, or superseded -- cite the actual RFC numbers you found via "
+    "these tools, don't rely on your own prior knowledge of them without checking Datatracker first. "
+    "If the user is asking you to gather, pull, crawl, or build up local material on a topic (not "
+    "just explain it), use add_local_source on the RFCs you found that genuinely look central to the "
+    "question -- not every RFC discovery/search tool returns, since each add_local_source call is a "
+    "real, moderately expensive fetch, not a free lookup. After pulling one, search_local_source can "
+    "query it immediately in this same conversation, so you can actually read what you just pulled "
+    "before finishing your answer, not just report that you pulled it."
+)
+
 _ARCHIVE_BASE = "https://www.ietf.org/archive/id/"
 _RFC_EDITOR_BASE = "https://www.rfc-editor.org/rfc/"
 _DATATRACKER_BASE = "https://datatracker.ietf.org"
@@ -391,38 +418,80 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
     for entry in corpora:
         by_draft.setdefault(entry["draft_name"], []).append(entry)
 
-    if not by_draft:
-        return "No evolution corpora found in this Dify instance.", []
-
     catalog: list[dict] = []
     lines: list[str] = []
-    for draft_name in sorted(by_draft):
-        entries = sorted(by_draft[draft_name], key=operator.itemgetter("created_at"), reverse=True)
-        newest = entries[0]
-        wg = _resolve_wg_for_draft(draft_name)
-        rfc_number = _resolve_rfc_number_for_draft(draft_name)
-        mailarchive_dataset_id = _MAILARCHIVE_REGISTRY.get(wg) if wg else None
-        catalog.append(
-            {
-                "draft_name": draft_name,
-                "rfc_number": rfc_number,
-                "wg": wg,
-                "evolution_dataset_id": newest["dataset_id"],
-                "mailarchive_dataset_id": mailarchive_dataset_id,
-            }
-        )
-        rfc_suffix = f", published as RFC {rfc_number}" if rfc_number else " (not yet published as an RFC)"
+
+    if not by_draft:
+        lines.append("No evolution corpora found in this Dify instance.")
+    else:
+        for draft_name in sorted(by_draft):
+            entries = sorted(by_draft[draft_name], key=operator.itemgetter("created_at"), reverse=True)
+            newest = entries[0]
+            wg = _resolve_wg_for_draft(draft_name)
+            rfc_number = _resolve_rfc_number_for_draft(draft_name)
+            mailarchive_dataset_id = _MAILARCHIVE_REGISTRY.get(wg) if wg else None
+            catalog.append(
+                {
+                    "draft_name": draft_name,
+                    "rfc_number": rfc_number,
+                    "wg": wg,
+                    "evolution_dataset_id": newest["dataset_id"],
+                    "mailarchive_dataset_id": mailarchive_dataset_id,
+                }
+            )
+            rfc_suffix = f", published as RFC {rfc_number}" if rfc_number else " (not yet published as an RFC)"
+            lines.append(
+                f"Draft: {draft_name}{rfc_suffix}" + (f" (WG: {wg})" if wg else " (WG: could not be resolved)")
+            )
+            for entry in entries:
+                marker = " <- most recent, recommended" if entry is newest else ""
+                lines.append(f"  evolution dataset_id={entry['dataset_id']} name={entry['dataset_name']!r}{marker}")
+            if mailarchive_dataset_id:
+                lines.append(f"  mailarchive dataset_id={mailarchive_dataset_id}")
+            else:
+                lines.append("  mailarchive dataset: none registered for this WG -- discussion search unavailable")
+
+    # Local sources (Sources tab "Add a new draft as a source") are never a
+    # real Dify dataset -- see services.ietf_import_service.register_local_source
+    # -- so they don't belong in `catalog` (which drives real dataset_id
+    # hints/resolution elsewhere in ask()). Mentioned here purely as extra
+    # context so the model knows search_local_source is worth trying for
+    # them, since there's no other discovery path that would tell it these
+    # exist at all.
+    registered_names = set(by_draft.keys())
+    local_lines = _list_indexed_local_sources(exclude=registered_names)
+    if local_lines:
+        lines.append("")
         lines.append(
-            f"Draft: {draft_name}{rfc_suffix}" + (f" (WG: {wg})" if wg else " (WG: could not be resolved)")
+            "Local-only sources (added via the Sources tab, indexed locally via BM25 -- "
+            "search with search_local_source, NOT search_ietf_evolution_dataset/"
+            "search_ietf_mailarchive_dataset, since these have no real Dify dataset):"
         )
-        for entry in entries:
-            marker = " <- most recent, recommended" if entry is newest else ""
-            lines.append(f"  evolution dataset_id={entry['dataset_id']} name={entry['dataset_name']!r}{marker}")
-        if mailarchive_dataset_id:
-            lines.append(f"  mailarchive dataset_id={mailarchive_dataset_id}")
-        else:
-            lines.append("  mailarchive dataset: none registered for this WG -- discussion search unavailable")
+        lines.extend(local_lines)
+
     return "\n".join(lines), catalog
+
+
+def _list_indexed_local_sources(exclude: set[str]) -> list[str]:
+    """One line per locally-tracked source that actually has a built
+    search_local_source index -- an unindexed local source (downloaded but
+    "Build index" never clicked) has nothing for the tool to search, so
+    it's left out rather than advertising a call that would just fail.
+    """
+    from services.ietf_import_service import IetfImportService
+    from services.local_source_index_service import LocalSourceIndexService
+
+    lines = []
+    for draft_name in IetfImportService.list_local_source_names():
+        if draft_name in exclude:
+            continue
+        status = LocalSourceIndexService.get_index_status(draft_name)
+        if not status.get("built"):
+            continue
+        by_kind = status.get("by_kind", {})
+        kind_summary = ", ".join(f"{n} {k}" for k, n in by_kind.items())
+        lines.append(f"  {draft_name}: {status.get('total_documents', 0)} documents indexed ({kind_summary})")
+    return lines
 
 
 def _resolve_draft_hint(hint: str, catalog: list[dict]) -> dict | None:
@@ -1159,6 +1228,160 @@ def _find_related_rfc_family(rfc_number: str) -> str:
     return "\n".join(lines)
 
 
+def _search_rfc_corpus_bm25(query: str, scope: str, top_k: int) -> str:
+    """Format RfcCorpusIndexService.search_bm25() for the model -- a
+    whole-corpus lexical search, unlike find_related_rfc_family which only
+    considers RFCs already linked to one specific RFC by citation. Useful
+    both for "find an RFC by topic" when there's no starting RFC yet, and
+    as a cross-check when the citation-based family heuristic comes up
+    empty (e.g. an RFC whose own keyword is a narrow acronym that related
+    RFCs' titles don't repeat -- BM25 over the full title+abstract text
+    can still surface them on shared vocabulary elsewhere in the text).
+    """
+    from services.rfc_corpus_index_service import RfcCorpusIndexService
+
+    data = RfcCorpusIndexService.search_bm25(query, scope=scope, top_k=top_k)
+    if data.get("error"):
+        return f"BM25 search failed: {data['error']}"
+    if not data["results"]:
+        return f"No RFCs matched {query!r} via BM25 (scope={scope})."
+    lines = [f"Top BM25 matches for {query!r} (scope={scope}):"]
+    for r in data["results"]:
+        lines.append(f"  {r['rfc']} (score {r['score']}): {r['title']}")
+    return "\n".join(lines)
+
+
+def _find_similar_rfcs_by_meaning(query: str, top_k: int) -> str:
+    """Format RfcCorpusIndexService.search_semantic() for the model --
+    embedding-based similarity over title+abstract, which catches RFCs
+    using different terminology for the same idea (an RFC's own internal
+    acronym vs. the descriptive phrase other RFCs use in their titles)
+    that neither exact-keyword matching nor BM25's term overlap would.
+    """
+    from services.rfc_corpus_index_service import RfcCorpusIndexService
+
+    data = RfcCorpusIndexService.search_semantic(query, top_k=top_k)
+    if data.get("error"):
+        return f"Semantic search failed: {data['error']}"
+    if not data["results"]:
+        return f"No RFCs found for {query!r}."
+    lines = [f"RFCs semantically closest to {query!r}:"]
+    for r in data["results"]:
+        lines.append(f"  {r['rfc']} (similarity {r['similarity']}): {r['title']}")
+    return "\n".join(lines)
+
+
+def _search_local_source(draft_name: str, query: str, top_k: int) -> str:
+    """Format LocalSourceIndexService.search() for the model -- BM25 over
+    one locally-tracked source's own downloaded content (draft/RFC text
+    plus threaded mail; see services/local_source_index_service.py). This
+    is the ONLY way this agent can search a Sources-tab-added draft that
+    isn't a real Dify dataset -- search_ietf_evolution_dataset and
+    search_ietf_mailarchive_dataset only work for drafts with an actual
+    dataset_id, which a local source never has.
+
+    Accepts an RFC number too, resolved the same way add_local_source does
+    -- confirmed live that a model which had just pulled a source by RFC
+    number turned around and searched for it by that same RFC number
+    rather than its draft name (both refer to the same thing to a human,
+    and there's no reason the model should have to track which form this
+    one tool happens to require).
+    """
+    from services.ietf_import_service import IetfImportService
+    from services.local_source_index_service import LocalSourceIndexService
+
+    rfc_match = _RFC_IDENTIFIER_RE.match(draft_name.strip())
+    if rfc_match:
+        resolved = IetfImportService.resolve_draft_name_for_rfc(rfc_match.group(1))
+        if resolved:
+            draft_name = resolved
+
+    data = LocalSourceIndexService.search(draft_name, query, top_k=top_k)
+    if data.get("error"):
+        return f"Local search failed for {draft_name!r}: {data['error']}"
+    if not data["results"]:
+        return f"No local matches for {query!r} in {draft_name!r}."
+    lines = [f"Top local BM25 matches for {query!r} in {draft_name!r}:"]
+    for r in data["results"]:
+        lines.append(f"  [{r['kind']}] {r['id']} (score {r['score']}): {r['snippet']}")
+    return "\n".join(lines)
+
+
+_RFC_IDENTIFIER_RE = re.compile(r"^(?:rfc)?\s*(\d+)$", re.IGNORECASE)
+
+
+def _add_local_source(identifier: str) -> str:
+    """The one tool in this agent with a real side effect: given an RFC
+    number or a draft name, actually pull it -- register it as a tracked
+    local source, download every revision + its RFC + its WG's mail (raw
+    and threaded, see IetfImportService.sync_local_source), then build a
+    BM25 index over all of it (LocalSourceIndexService.build_index) so
+    search_local_source can use it immediately in the same conversation.
+    This is genuinely not free (real network fetches, real disk writes,
+    real time -- seconds to roughly a minute depending on the WG's mail
+    volume), which is why every call is announced as a progress step, not
+    silently absorbed into "thinking".
+
+    Accepts an RFC number (resolved to its draft name via
+    IetfImportService.resolve_draft_name_for_rfc -- the reverse of the
+    forward draft->RFC lookup used elsewhere) or a draft name directly,
+    since find_related_rfc_family/search_rfc_corpus_bm25/get_rfc_relations
+    all surface RFC numbers, not draft names, and this project's whole
+    local-source machinery is keyed by draft name.
+    """
+    from services.ietf_import_service import IetfImportService
+    from services.local_source_index_service import LocalSourceIndexService
+
+    identifier = identifier.strip()
+    rfc_match = _RFC_IDENTIFIER_RE.match(identifier)
+    if rfc_match:
+        draft_name = IetfImportService.resolve_draft_name_for_rfc(rfc_match.group(1))
+        if not draft_name:
+            return (
+                f"Could not resolve RFC{rfc_match.group(1)} to a draft name -- it may never have "
+                "been a separate Internet-Draft, or Datatracker's page layout didn't match. Try "
+                "passing the draft name directly if you know it."
+            )
+    else:
+        draft_name = identifier
+
+    result = IetfImportService.sync_local_source(draft_name)
+    if result.get("error"):
+        return f"Could not sync {draft_name!r}: {result['error']}"
+
+    revisions = result.get("revisions", [])
+    ok_revs = sum(1 for r in revisions if r.get("ok"))
+    rfc_number = result.get("rfc_number")
+    rfc_info = result.get("rfc") or {}
+    wg = result.get("wg")
+    mail_info = result.get("mail") or {}
+
+    summary = [f"Pulled {draft_name}: {ok_revs}/{len(revisions)} revisions"]
+    if rfc_number:
+        summary.append(f"RFC {rfc_number} {'ok' if rfc_info.get('ok') else 'failed: ' + str(rfc_info.get('error'))}")
+    else:
+        summary.append("not yet published as an RFC")
+    if wg:
+        if mail_info.get("ok"):
+            years = mail_info.get("years", [])
+            total_emails = sum(y.get("total_emails", 0) for y in years)
+            summary.append(f"WG {wg} mail: {total_emails} messages across {len(years)} years, threaded")
+        else:
+            summary.append(f"WG {wg} mail sync failed: {mail_info.get('error')}")
+    else:
+        summary.append("no WG resolved -- mail unavailable")
+
+    index_result = LocalSourceIndexService.build_index(draft_name, wg, rfc_number)
+    if index_result.get("error"):
+        summary.append(f"indexing failed: {index_result['error']}")
+    else:
+        by_kind = ", ".join(f"{n} {k}" for k, n in index_result.get("by_kind", {}).items())
+        summary.append(f"indexed {index_result.get('total_documents', 0)} documents ({by_kind})")
+        summary.append(f"-- now searchable via search_local_source(draft_name={draft_name!r}, ...)")
+
+    return "; ".join(summary)
+
+
 def _get_iesg_ballot_comments(draft_name: str, query: str | None = None) -> str:
     """Format IetfImportService.get_iesg_ballot_comments() for the model --
     IESG DISCUSS/comment text from standards-track review, a real venue for
@@ -1358,6 +1581,10 @@ MINUTES_TOOL_NAME = "search_wg_minutes"
 RFC_RELATIONS_TOOL_NAME = "get_rfc_relations"
 RFC_FAMILY_TOOL_NAME = "find_related_rfc_family"
 IESG_BALLOT_TOOL_NAME = "get_iesg_ballot_comments"
+RFC_BM25_SEARCH_TOOL_NAME = "search_rfc_corpus_bm25"
+RFC_SEMANTIC_SEARCH_TOOL_NAME = "find_similar_rfcs_by_meaning"
+LOCAL_SOURCE_SEARCH_TOOL_NAME = "search_local_source"
+ADD_LOCAL_SOURCE_TOOL_NAME = "add_local_source"
 
 # Short, human-facing labels for live progress/UI display -- kept separate
 # from the tool names themselves (those are the function-calling contract;
@@ -1373,9 +1600,13 @@ _TOOL_DISPLAY_NAMES = {
     CITE_DIFF_TOOL_NAME: "Cite a diff",
     VERIFY_TOOL_NAME: "Verify answer",
     MINUTES_TOOL_NAME: "Search minutes",
-    RFC_RELATIONS_TOOL_NAME: "Check RFC relations",
-    RFC_FAMILY_TOOL_NAME: "Find RFC family",
+    RFC_RELATIONS_TOOL_NAME: "Check RFC relations (obsoletes/updates)",
+    RFC_FAMILY_TOOL_NAME: "Find RFC family (citations)",
+    RFC_BM25_SEARCH_TOOL_NAME: "Search all RFCs (BM25 keyword)",
+    RFC_SEMANTIC_SEARCH_TOOL_NAME: "Find similar RFCs (semantic)",
     IESG_BALLOT_TOOL_NAME: "Check IESG ballot",
+    LOCAL_SOURCE_SEARCH_TOOL_NAME: "Search local source (BM25)",
+    ADD_LOCAL_SOURCE_TOOL_NAME: "Pull a new RFC/draft locally",
 }
 
 
@@ -1535,11 +1766,119 @@ def _build_tools() -> list:
                 "topic, with one or more BCP/Informational documents acting as an overview or roadmap "
                 "(e.g. RFC 9364 for DNSSEC). Use this when get_rfc_relations comes back empty or "
                 "insufficient and the decision still looks like it might be explained elsewhere in the "
-                "same topic family. Heuristic, not exhaustive -- an empty result means nothing found, "
-                "not that nothing exists."
+                "same topic family. Requires an exact keyword match between this RFC's own topic "
+                "keyword and a candidate's title, so it can come back empty even when a real family "
+                "exists (e.g. an RFC whose keyword is its own narrow internal acronym, not shared "
+                "vocabulary with related RFCs' titles) -- if that happens, try search_rfc_corpus_bm25 "
+                "or find_similar_rfcs_by_meaning instead of concluding no family exists."
             ),
             {"rfc_number": {"type": "string", "description": "e.g. '4035' or 'RFC4035'"}},
             ["rfc_number"],
+        ),
+        _tool(
+            RFC_BM25_SEARCH_TOOL_NAME,
+            (
+                "Keyword-search the ENTIRE published RFC corpus (~9,930 RFCs) via BM25 ranking -- "
+                "unlike find_related_rfc_family, which only considers RFCs already linked to one "
+                "RFC by citation, this searches every RFC ever published for a topic phrase. Pass "
+                "an RFC number instead of a phrase to search using that RFC's own title+abstract "
+                "text. Use this to find an RFC by topic when you don't have a starting RFC yet, or "
+                "as a cross-check when find_related_rfc_family comes back empty -- that heuristic "
+                "requires an exact keyword match and can miss real relations that BM25's broader "
+                "term overlap over title+abstract still catches."
+            ),
+            {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "a topic phrase (e.g. 'DNSSEC key rollover'), or an RFC number to search "
+                        "using its own title+abstract"
+                    ),
+                },
+                "scope": {
+                    "type": "string",
+                    "description": (
+                        "'title_abstract' (default, always available) or 'full_text' (requires a "
+                        "one-time index build; the tool returns build instructions if it isn't built yet)"
+                    ),
+                },
+                "top_k": {"type": "integer", "description": "how many results to return (default 10)"},
+            },
+            ["query"],
+        ),
+        _tool(
+            RFC_SEMANTIC_SEARCH_TOOL_NAME,
+            (
+                "Semantic-search the whole RFC corpus (title+abstract) by meaning via a local "
+                "embedding model, not exact wording -- catches RFCs that describe the same idea "
+                "with different terminology (e.g. an RFC's own internal acronym vs. the descriptive "
+                "phrase other related RFCs use), which neither find_related_rfc_family's exact-"
+                "keyword match nor search_rfc_corpus_bm25's term overlap would find. Requires a "
+                "one-time index build; returns build instructions if it isn't built yet."
+            ),
+            {
+                "query": {
+                    "type": "string",
+                    "description": "a topic phrase, or an RFC number to search using its own title+abstract",
+                },
+                "top_k": {"type": "integer", "description": "how many results to return (default 10)"},
+            },
+            ["query"],
+        ),
+        _tool(
+            LOCAL_SOURCE_SEARCH_TOOL_NAME,
+            (
+                "Keyword-search (BM25) the local-only content of one draft added via the Sources tab's "
+                "\"Add a new draft as a source\" flow -- draft/RFC text plus its WG's mail, already "
+                "threaded (parent/child, no BM25 or embedding model involved in the threading itself). "
+                "This is the ONLY tool that can search such a draft's mail or text: it has no real Dify "
+                "dataset, so search_ietf_evolution_dataset and search_ietf_mailarchive_dataset don't work "
+                "for it. list_available_ietf_corpora's observation lists which local sources currently "
+                "have a built index (and how many documents of each kind) -- only those can be searched; "
+                "one that's been added/synced but never indexed via \"Build index\" has nothing to search "
+                "yet, and this tool will say so rather than silently returning nothing."
+            ),
+            {
+                "draft_name": {
+                    "type": "string",
+                    "description": (
+                        "the local source's draft name (e.g. 'draft-ietf-quic-transport') or its RFC "
+                        "number (e.g. '4035') -- either resolves to the same source"
+                    ),
+                },
+                "query": {"type": "string", "description": "a topic phrase or keyword"},
+                "top_k": {"type": "integer", "description": "how many results to return (default 5)"},
+            },
+            ["draft_name", "query"],
+        ),
+        _tool(
+            ADD_LOCAL_SOURCE_TOOL_NAME,
+            (
+                "Actually pull a new RFC or draft in as a searchable local source -- registers it, "
+                "downloads every revision plus its RFC plus its WG's mail (raw and threaded), and "
+                "builds a local BM25 index over all of it in one call, so search_local_source can use "
+                "it immediately afterward in this same conversation. This is the ONLY tool in this "
+                "agent that writes anything or costs real time (real network fetches and disk writes, "
+                "typically seconds up to roughly a minute depending on the WG's mail volume) -- every "
+                "other tool is a read-only lookup. Use it when the user asks you to gather, pull, crawl, "
+                "or build up material on a topic (e.g. 'find RFCs related to DNSSEC and pull the "
+                "relevant ones'): first use find_related_rfc_family / search_rfc_corpus_bm25 / "
+                "get_rfc_relations to discover candidate RFCs, THEN call this only on the ones that "
+                "genuinely look central to the question -- not every match found, since each call is a "
+                "real, moderately expensive operation, not a free lookup. Accepts either an RFC number "
+                "(e.g. '4035', resolved to its original draft name automatically) or a draft name "
+                "directly."
+            ),
+            {
+                "identifier": {
+                    "type": "string",
+                    "description": (
+                        "an RFC number (e.g. '4035' or 'RFC4035') or a draft name "
+                        "(e.g. 'draft-ietf-dnsext-dnssec-protocol')"
+                    ),
+                },
+            },
+            ["identifier"],
         ),
         _tool(
             IESG_BALLOT_TOOL_NAME,
@@ -1703,6 +2042,10 @@ def ask(
     rfc_relations_tool_name = RFC_RELATIONS_TOOL_NAME
     rfc_family_tool_name = RFC_FAMILY_TOOL_NAME
     iesg_ballot_tool_name = IESG_BALLOT_TOOL_NAME
+    rfc_bm25_search_tool_name = RFC_BM25_SEARCH_TOOL_NAME
+    rfc_semantic_search_tool_name = RFC_SEMANTIC_SEARCH_TOOL_NAME
+    local_source_search_tool_name = LOCAL_SOURCE_SEARCH_TOOL_NAME
+    add_local_source_tool_name = ADD_LOCAL_SOURCE_TOOL_NAME
     tools = _build_tools()
 
     # When hints are given (as every existing battery test script does), tell
@@ -1952,6 +2295,46 @@ def ask(
             evidence_log.append(observation)
             return observation
 
+        if tool_name == rfc_bm25_search_tool_name:
+            search_query = args.get("query", "")
+            scope = args.get("scope") or "title_abstract"
+            top_k = args.get("top_k") or 10
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} query={search_query!r} scope={scope!r}", file=sys.stderr)
+            observation = _search_rfc_corpus_bm25(search_query, scope, top_k)
+            evidence_log.append(observation)
+            return observation
+
+        if tool_name == rfc_semantic_search_tool_name:
+            search_query = args.get("query", "")
+            top_k = args.get("top_k") or 10
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} query={search_query!r}", file=sys.stderr)
+            observation = _find_similar_rfcs_by_meaning(search_query, top_k)
+            evidence_log.append(observation)
+            return observation
+
+        if tool_name == local_source_search_tool_name:
+            local_draft_name = args.get("draft_name", "")
+            search_query = args.get("query", "")
+            top_k = args.get("top_k") or 5
+            if verbose:
+                print(
+                    f"[iter {iteration}] {tool_name} draft={local_draft_name!r} query={search_query!r}",
+                    file=sys.stderr,
+                )
+            observation = _search_local_source(local_draft_name, search_query, top_k)
+            evidence_log.append(observation)
+            return observation
+
+        if tool_name == add_local_source_tool_name:
+            identifier = args.get("identifier", "")
+            if verbose:
+                print(f"[iter {iteration}] {tool_name} identifier={identifier!r}", file=sys.stderr)
+            observation = _add_local_source(identifier)
+            evidence_log.append(observation)
+            return observation
+
         return f"there is no tool named {tool_name}"
 
     def _force_tool_call(tool_name: str, args: dict, content: str, iteration: int) -> None:
@@ -2001,11 +2384,30 @@ def ask(
                 not evolution_dataset_id_candidate
                 and not mailarchive_dataset_id_candidate
                 and not (discovery_called or discovery_forced)
+                and not verify_called
             ):
                 # Safety net #0: nothing known yet and discovery never ran --
                 # force it so the mailarchive floor below has a candidate to
                 # use. No-op once a CLI hint or a prior discovery call has
                 # already populated a candidate.
+                #
+                # The `not verify_called` guard: confirmed live (Panorama,
+                # an RFC-relationship question with no draft/dataset context
+                # at all) that without it, a model which legitimately never
+                # needed discovery -- it answered entirely via
+                # get_rfc_relations/find_related_rfc_family/
+                # search_rfc_corpus_bm25 and already ran verify_answer --
+                # still got a discovery call forced on it AFTER verification,
+                # out of order and by then pointless. That forced call
+                # wasn't just wasted: the very next LLM invocation failed
+                # with a generic, reproducible provider error every retry
+                # (not transient -- same failure 3/3 times), strongly
+                # suggesting the late, out-of-order forced call corrupted
+                # the conversation state the provider expected. Once
+                # verify_answer has already run, the answer is already
+                # substantiated by whatever tools the model actually used --
+                # forcing discovery that late can only break things, not
+                # improve the answer.
                 discovery_forced = True
                 if verbose:
                     print(f"[forced] {discovery_tool_name}", file=sys.stderr)

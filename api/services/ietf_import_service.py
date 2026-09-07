@@ -214,6 +214,318 @@ class IetfImportService:
             201,
         )
 
+    @staticmethod
+    def download_rfcs_to_local(payload: IetfRfcImportPayload) -> tuple[dict, int]:
+        """Download RFC text into local mounted storage and return local file
+        metadata -- mirrors download_drafts_to_local: no FileService/account
+        dependency, so the standalone decision-agent UI's Sources tab can pull
+        a brand-new RFC's raw text without also needing to attach/index it.
+        """
+
+        sidecar_payload = IetfImportService._request_sidecar("/api/v1/import/rfcs", dict(payload))
+        try:
+            content = base64.b64decode(sidecar_payload.content_base64)
+        except ValueError as exc:
+            raise RemoteFileUploadError("IETF data service returned invalid file content") from exc
+
+        local_dir = Path("/app/api/storage/ietf-downloads")
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        filename = sidecar_payload.filename
+        destination = local_dir / filename
+        destination.write_bytes(content)
+
+        relative_hint = destination.as_posix().replace("/app/api/storage/", "docker/volumes/app/storage/")
+        return (
+            {
+                "saved_path": destination.as_posix(),
+                "host_path_hint": relative_hint,
+                "filename": destination.name,
+                "size": destination.stat().st_size,
+            },
+            201,
+        )
+
+    @staticmethod
+    def resolve_rfc_number_for_draft(draft_name: str) -> str | None:
+        """Live lookup of the RFC number a draft was published as, if any.
+
+        Datatracker's draft-keyed document record always has rfc/rfc_number set
+        to null (confirmed directly, even for long-published drafts), so the
+        only lookup that actually works is the plain doc page's redirect:
+        https://datatracker.ietf.org/doc/<draft_name>/ 302s to
+        https://datatracker.ietf.org/doc/rfcNNNN/ once a draft is published,
+        and just stays on the draft's own page otherwise. Returns None if
+        unpublished or on any lookup failure.
+        """
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get(f"https://datatracker.ietf.org/doc/{draft_name}/")
+                if resp.status_code != 200:
+                    return None
+                match = re.search(r"/doc/rfc(\d+)/", str(resp.url))
+                return match.group(1) if match else None
+        except httpx.HTTPError:
+            return None
+
+    @staticmethod
+    def resolve_wg_for_draft(draft_name: str) -> str | None:
+        """Live lookup of a draft's owning WG acronym via IETF Datatracker
+        (draft -> group -> acronym) -- not cached, matching the pattern used
+        by every other live-fetch tool. Returns None on any lookup failure.
+        """
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                doc_resp = client.get(
+                    f"https://datatracker.ietf.org/api/v1/doc/document/{draft_name}/", params={"format": "json"}
+                )
+                if doc_resp.status_code != 200:
+                    return None
+                group_url = doc_resp.json().get("group")
+                if not group_url:
+                    return None
+                group_resp = client.get(f"https://datatracker.ietf.org{group_url}", params={"format": "json"})
+                if group_resp.status_code != 200:
+                    return None
+                return group_resp.json().get("acronym")
+        except httpx.HTTPError:
+            return None
+
+    _RFC_WAS_DRAFT_RE = re.compile(r'Was\s*<a href="/doc/([a-z0-9-]+)/\d+/">')
+
+    @staticmethod
+    def resolve_draft_name_for_rfc(rfc_number: str) -> str | None:
+        """Reverse of resolve_rfc_number_for_draft: given a published RFC,
+        find the draft name it was before publication -- needed for an
+        agent that discovers RFCs by number (via find_related_rfc_family,
+        search_rfc_corpus_bm25, ...) but ultimately has to act in terms of
+        draft names, since that's this project's whole identity key
+        (register_local_source, sync_local_source, the corpus catalog).
+
+        No API field carries this directly (confirmed: the RFC's own
+        Datatracker document record has no draft-name field at all, and the
+        docalias API that historically exposed this has been removed). The
+        RFC's own Datatracker doc *page* HTML does show it, in a "Was
+        draft-..." line -- confirmed live against RFC 4035, which links
+        directly to "draft-ietf-dnsext-dnssec-protocol". Returns None if
+        that line isn't present (the RFC was never a separate I-D, or the
+        page layout doesn't match) rather than guessing.
+        """
+        rfc_id = rfc_number.strip().lower()
+        if not rfc_id.startswith("rfc"):
+            rfc_id = f"rfc{rfc_id}"
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get(f"https://datatracker.ietf.org/doc/{rfc_id}/")
+                if resp.status_code != 200:
+                    return None
+        except httpx.HTTPError:
+            return None
+        match = IetfImportService._RFC_WAS_DRAFT_RE.search(resp.text)
+        return match.group(1) if match else None
+
+    # A brand-new draft added from the Sources tab has no Dify dataset (so
+    # _discover_evolution_corpora can't find it by content signature) --
+    # this is the minimal local record of "the user chose to track this one",
+    # just the draft name itself. Everything else about it (WG, RFC number,
+    # mail sync status, latest revision) is resolved live the same way the
+    # real, dataset-backed corpora already are -- keeping this registry as
+    # thin as possible avoids a second, divergent source of truth for facts
+    # that are already fetched fresh elsewhere.
+    _LOCAL_SOURCES_PATH = Path("/app/api/storage/ietf-downloads/local_sources.json")
+
+    @staticmethod
+    def list_local_source_names() -> list[str]:
+        if not IetfImportService._LOCAL_SOURCES_PATH.is_file():
+            return []
+        try:
+            data = json.loads(IetfImportService._LOCAL_SOURCES_PATH.read_text())
+            return [str(name) for name in data] if isinstance(data, list) else []
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    @staticmethod
+    def register_local_source(draft_name: str) -> None:
+        names = IetfImportService.list_local_source_names()
+        if draft_name in names:
+            return
+        names.append(draft_name)
+        IetfImportService._LOCAL_SOURCES_PATH.parent.mkdir(parents=True, exist_ok=True)
+        IetfImportService._LOCAL_SOURCES_PATH.write_text(json.dumps(names, indent=2))
+
+    @staticmethod
+    def get_local_download_status(draft_name: str, wg: str | None, rfc_number: str | None) -> dict:
+        """What's actually already on disk for one local source, as opposed
+        to what Datatracker/the sidecar report is available -- a local
+        source's facets need to show real download state (has this already
+        been pulled, or not) rather than always presenting a generic action
+        button that looks identical whether or not anything's been fetched.
+        """
+        local_dir = Path("/app/api/storage/ietf-downloads")
+        if not local_dir.is_dir():
+            return {
+                "revisions_downloaded": 0,
+                "latest_revision_downloaded": None,
+                "rfc_downloaded": False,
+                "mail_downloaded": False,
+                "mail_thread_downloaded": False,
+            }
+
+        revision_re = re.compile(rf"^{re.escape(draft_name)}-(\d+)\.txt$")
+        revisions = sorted(
+            int(match.group(1))
+            for entry in local_dir.iterdir()
+            if entry.is_file() and (match := revision_re.match(entry.name))
+        )
+        rfc_downloaded = bool(rfc_number and any(local_dir.glob(f"ietf-RFC{rfc_number}.*")))
+        mail_downloaded = bool(wg and any(local_dir.glob(f"ietf-mailarchive-{wg}-*.mbox")))
+        thread_dir = local_dir / "preprocessed"
+        mail_thread_downloaded = bool(
+            wg and thread_dir.is_dir() and any(thread_dir.glob(f"ietf-mailarchive-{wg}-*-threads.jsonl"))
+        )
+        return {
+            "revisions_downloaded": len(revisions),
+            "latest_revision_downloaded": f"{revisions[-1]:02d}" if revisions else None,
+            "rfc_downloaded": rfc_downloaded,
+            "mail_downloaded": mail_downloaded,
+            "mail_thread_downloaded": mail_thread_downloaded,
+        }
+
+    @staticmethod
+    def download_all_draft_revisions_to_local(draft_name: str, on_event=None) -> dict:
+        """Sync every existing revision of one draft's plain text to local
+        storage, plus its published RFC (in whatever format the sidecar
+        actually reports for it) if it has one -- the bulk counterpart to
+        download_drafts_to_local's one-revision-at-a-time flow. Idempotent:
+        a revision or the RFC already on disk is skipped rather than
+        re-fetched, so this is cheap to call repeatedly (a first call pulls
+        everything; a later call only pulls what's newly appeared -- a new
+        revision, or the RFC once the draft finally gets published). Also
+        registers the draft as a tracked local source (see
+        register_local_source) so it shows up as its own unit in the
+        Sources tab from now on, the same way an already dataset-backed
+        draft does.
+
+        Fetches revisions directly from the IETF archive (the same approach
+        _fetch_all_revisions already uses for generate_draft_evolution)
+        rather than one sidecar round-trip per revision -- N sequential sidecar
+        calls for a 30+ revision draft would be far slower for no benefit,
+        since the archive serves the exact same plain text the sidecar would
+        relay anyway.
+        """
+
+        def _emit(message: str) -> None:
+            if on_event:
+                on_event({"stage": "downloading", "message": message})
+
+        try:
+            with httpx.Client(timeout=15.0) as client:
+                resp = client.get(
+                    f"https://datatracker.ietf.org/api/v1/doc/document/{draft_name}/", params={"format": "json"}
+                )
+                resp.raise_for_status()
+                max_rev = int(resp.json().get("rev", "0"))
+        except Exception as exc:
+            return {"error": f"Could not retrieve revision info for '{draft_name}': {exc}"}
+
+        IetfImportService.register_local_source(draft_name)
+
+        local_dir = Path("/app/api/storage/ietf-downloads")
+        local_dir.mkdir(parents=True, exist_ok=True)
+
+        def _fetch_one(rev: str) -> dict:
+            destination = local_dir / f"{draft_name}-{rev}.txt"
+            if destination.exists():
+                return {"rev": rev, "ok": True, "skipped": True, "filename": destination.name}
+            url = f"https://www.ietf.org/archive/id/{draft_name}-{rev}.txt"
+            try:
+                with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                    resp = client.get(url)
+                if resp.status_code != 200:
+                    return {"rev": rev, "ok": False, "error": f"HTTP {resp.status_code}"}
+                destination.write_bytes(resp.content)
+                return {"rev": rev, "ok": True, "filename": destination.name, "size": destination.stat().st_size}
+            except httpx.HTTPError as exc:
+                return {"rev": rev, "ok": False, "error": str(exc)}
+
+        revisions = [f"{i:02d}" for i in range(max_rev + 1)]
+        results = []
+        for i, rev in enumerate(revisions, start=1):
+            _emit(f"{draft_name}-{rev} ({i}/{len(revisions)})")
+            results.append(_fetch_one(rev))
+
+        rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
+        rfc_result = None
+        if rfc_number:
+            rfc_id = f"RFC{rfc_number}"
+            existing_rfc = next(iter(local_dir.glob(f"ietf-{rfc_id}.*")), None)
+            if existing_rfc:
+                rfc_result = {"ok": True, "skipped": True, "filename": existing_rfc.name}
+            else:
+                _emit(f"{rfc_id} (published RFC)")
+                try:
+                    formats, _status = IetfImportService.get_rfc_formats(rfc_id=rfc_id)
+                    available = {f["key"] for f in formats.get("formats", [])}
+                    if not available:
+                        rfc_result = {"ok": False, "error": "no downloadable formats reported"}
+                    else:
+                        fmt = next((f for f in ("txt", "html") if f in available), next(iter(available)))
+                        file_result, _status = IetfImportService.download_rfcs_to_local(
+                            {
+                                "rfc_ids": [rfc_id],
+                                "since": None,
+                                "until": None,
+                                "stream": None,
+                                "wg": None,
+                                "status": None,
+                                "limit": 20,
+                                "format": fmt,
+                            }
+                        )
+                        rfc_result = {"ok": True, **file_result}
+                except Exception as exc:
+                    rfc_result = {"ok": False, "error": str(exc)}
+
+        return {"draft_name": draft_name, "revisions": results, "rfc_number": rfc_number, "rfc": rfc_result}
+
+    @staticmethod
+    def sync_local_source(draft_name: str, on_event=None) -> dict:
+        """The single "Sync" action for a locally-tracked source: everything
+        raw it could have -- draft revisions, its RFC once published, and
+        its WG's mail (both raw and threaded) -- pulled current in one call.
+        Idempotent/incremental on the draft+RFC side (see
+        download_all_draft_revisions_to_local); the mail side re-runs the
+        full mbox+threading pass each time (already fast in practice -- a
+        few seconds to under a minute even for a large, decades-old list --
+        so a from-scratch incremental-fetch/merge mechanism isn't worth the
+        complexity it would add on top of that).
+        """
+        from datetime import UTC, datetime
+
+        def _emit(message: str) -> None:
+            if on_event:
+                on_event({"stage": "syncing", "message": message})
+
+        draft_result = IetfImportService.download_all_draft_revisions_to_local(draft_name, on_event=on_event)
+        wg = IetfImportService.resolve_wg_for_draft(draft_name)
+
+        mail_result = None
+        if wg:
+            _emit(f"Syncing mail for {wg}…")
+            current_year = datetime.now(tz=UTC).year
+            try:
+                thread_result, _status = IetfImportService.download_and_preprocess_years(
+                    mailing_list=wg,
+                    sent_after="1985-01-01T00:00:00",
+                    sent_before=f"{current_year}-12-31T23:59:59",
+                    group_threads=True,
+                )
+                mail_result = {"ok": True, **thread_result}
+            except Exception as exc:
+                mail_result = {"ok": False, "error": str(exc)}
+
+        return {**draft_result, "wg": wg, "mail": mail_result}
+
     # Meeting-numbered material's own name embeds which meeting it's from
     # (e.g. "minutes-65-sidr", "slides-66-sidr-4") -- extracted here instead
     # of a second lookup, since it's also how download_wg_resource_to_local
@@ -1075,16 +1387,28 @@ class IetfImportService:
         """Assemble one consolidated {nodes, edges} graph for an RFC -- the
         data foundation for the RFC Graph tab's table and interactive graph.
 
-        Combines _structural_neighbors (obsoletes/updates) and
-        find_related_rfc_family (citation + keyword clustering) into a
-        single deduplicated node/edge list, since a graph UI needs one
-        coherent structure, not three separately-shaped tool outputs. Each
-        node carries its resolved title/std_level/wg (wg is for visual
-        grouping only -- drawing an edge between every same-WG pair would
-        just be a dense, low-information clique, so it's a node attribute
-        instead). Errata is deliberately NOT part of this graph: it's node
-        detail (one RFC's own history), not a relationship between two
-        RFCs -- fetched separately, on demand, when a node is clicked.
+        Combines _structural_neighbors (obsoletes/updates), find_related_rfc_family
+        (citation graph + exact keyword match -- "Citation Match" in the UI),
+        and, when the whole-corpus BM25 index is already built, a "Topic
+        Match" lookup (RfcCorpusIndexService.search_bm25) into a single
+        deduplicated node/edge list, since a graph UI needs one coherent
+        structure, not several separately-shaped tool outputs. Topic Match
+        exists because Citation Match has a real, confirmed-live blind spot:
+        it requires this RFC's own topic keyword to appear verbatim in a
+        candidate's title, which fails whenever that keyword is a narrow
+        internal acronym (RFC 6378's "PSC" never appears in its real
+        relatives' titles, which all say "Linear Protection" instead) --
+        BM25's term overlap over the full title+abstract text catches
+        exactly those. Skipped (not lazily built) if the BM25 index isn't
+        already there, since building it is a multi-minute one-time cost
+        that shouldn't silently happen inside an ordinary graph fetch -- see
+        build_rfc_corpus_index.py. Each node carries its resolved
+        title/std_level/wg (wg is for visual grouping only -- drawing an
+        edge between every same-WG pair would just be a dense,
+        low-information clique, so it's a node attribute instead). Errata is
+        deliberately NOT part of this graph: it's node detail (one RFC's own
+        history), not a relationship between two RFCs -- fetched separately,
+        on demand, when a node is clicked.
         """
         structural = IetfImportService._structural_neighbors(rfc_number)
         if structural.get("error"):
@@ -1098,6 +1422,14 @@ class IetfImportService:
                 edges.append({"source": entry["rfc"], "target": center, "kind": "family"})
             else:
                 edges.append({"source": center, "target": entry["rfc"], "kind": "family"})
+
+        from services.rfc_corpus_index_service import RfcCorpusIndexService
+
+        if RfcCorpusIndexService.is_title_abstract_corpus_built():
+            topic_matches = RfcCorpusIndexService.search_bm25(center, scope="title_abstract", top_k=10)
+            for r in topic_matches.get("results", []):
+                if r["rfc"] != center:
+                    edges.append({"source": center, "target": r["rfc"], "kind": "topic_bm25"})
 
         node_names = sorted(
             {name for e in edges for name in (e["source"], e["target"])} | {center},
@@ -1119,22 +1451,23 @@ class IetfImportService:
 
     @staticmethod
     def build_focus_neighborhood(rfc_number: str, max_hops: int = 2, on_event=None) -> dict:
-        """BFS outward from one RFC by obsoletes/updates/family edges, up to
-        max_hops rings out -- the data behind the RFC Graph tab's Focus mode
-        (as opposed to Overview mode's whole-corpus structural graph, which
-        deliberately excludes family since that can't be fetched corpus-wide).
+        """BFS outward from one RFC by obsoletes/updates/Citation-Match/
+        Topic-Match edges, up to max_hops rings out -- the data behind the
+        RFC Graph tab's Focus mode (as opposed to Overview mode's whole-
+        corpus structural graph, which deliberately excludes both since
+        neither can be fetched corpus-wide).
 
-        Only the focus RFC itself is expanded with the full, citation-aware
-        build_rfc_relationship_graph (obsoletes/updates + family) -- every
-        node beyond that uses the cheap _structural_neighbors (obsoletes/
-        updates only). Confirmed live that using the full lookup at every
-        hop made a 2-hop expansion take 2+ minutes and still not finish:
+        Only the focus RFC itself is expanded with the full build_rfc_relationship_graph
+        (obsoletes/updates + Citation Match + Topic Match) -- every node
+        beyond that uses the cheap _structural_neighbors (obsoletes/updates
+        only). Confirmed live that using the full lookup at every hop made a
+        2-hop expansion take 2+ minutes and still not finish:
         find_related_rfc_family's citation fetch is the expensive part, and
         running it for every node in a BFS multiplies that cost by the
-        frontier size at each hop. Family relative to a NEIGHBOR's neighbor
-        isn't a well-defined idea anyway -- "family" means "shares this
-        RFC's topic", which only makes sense relative to the one RFC the
-        user actually asked about.
+        frontier size at each hop. Neither Citation Match nor Topic Match is
+        well-defined relative to a neighbor's neighbor anyway -- both mean
+        "shares this RFC's topic", which only makes sense relative to the
+        one RFC the user actually asked about.
 
         Capped at a total expansion count (not just per hop) as a second
         safety net against fan-out at hop 3. Every node gets tagged with

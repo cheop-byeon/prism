@@ -59,7 +59,35 @@ _TOOL_KIND = {
     "search_wg_minutes": "retrieval",
     "get_rfc_relations": "discovery",
     "find_related_rfc_family": "discovery",
+    "search_rfc_corpus_bm25": "discovery",
+    "find_similar_rfcs_by_meaning": "discovery",
     "get_iesg_ballot_comments": "retrieval",
+    "search_local_source": "retrieval",
+    "add_local_source": "action",
+}
+
+# Two different questions were being flattened into one flat list: what
+# domain a tool touches (_TOOL_KIND above) versus what ROLE it plays in the
+# agent's reasoning. Every entry here is a genuine external capability
+# (fetch/search/query something outside the model) except verify_answer,
+# which is a guardrail -- it doesn't reach outside the conversation at all,
+# it re-invokes the same LLM to audit the draft answer against evidence
+# already retrieved. Grouping them separately in the UI says that
+# distinction out loud instead of listing a grounding check next to
+# "fetch RFC text" as if they were the same kind of thing.
+_TOOL_GROUP = {
+    "verify_answer": "guardrail",
+}
+
+# Tools with a safety-net floor (ask()'s _force_tool_call) that invokes
+# them even if the model doesn't choose to -- not purely agent-driven, a
+# hybrid with a hardcoded minimum. Surfaced in the UI so "how agentic is
+# this really" has an honest answer instead of every tool looking equally
+# optional.
+_TOOL_FORCIBLE = {
+    "list_available_ietf_corpora",
+    "search_ietf_mailarchive_dataset",
+    "verify_answer",
 }
 
 # What each tool actually touches outside this script, and a real (not
@@ -164,6 +192,32 @@ _TOOL_DETAILS = {
             "# -> 11 DNSSEC-specific RFCs including RFC 9364 (the DNSSEC roadmap), out of 513 total citing docs"
         ),
     },
+    "search_rfc_corpus_bm25": {
+        "resource": (
+            "Local BM25 index over the whole published RFC corpus (~9,930 RFCs' title+abstract, "
+            "built once via build_rfc_corpus_index.py and cached to disk) -- no external call at "
+            "query time. A 'full_text' scope also exists but needs its own separate, much larger "
+            "one-time index build first."
+        ),
+        "example": (
+            'search_rfc_corpus_bm25(query="RFC6378", top_k=8)\n'
+            "# -> RFC7324, RFC5654, RFC6372, RFC5921... real MPLS-TP linear-protection relatives that\n"
+            "# find_related_rfc_family missed entirely (its exact-keyword match required the literal\n"
+            "# text \"PSC\" -- RFC 6378's own internal acronym -- in each candidate's title)"
+        ),
+    },
+    "find_similar_rfcs_by_meaning": {
+        "resource": (
+            "Local embedding index (rfc-dralign-q8 via Ollama on the host machine, title+abstract "
+            "for the whole corpus, built once via build_rfc_corpus_index.py) -- no external call at "
+            "query time beyond embedding the query itself."
+        ),
+        "example": (
+            'find_similar_rfcs_by_meaning(query="RFC6378", top_k=8)\n'
+            "# -> ranks the corpus by meaning, not exact wording -- catches relatives that use\n"
+            "# different terminology than either RFC 6378's own keywords or BM25's term overlap would"
+        ),
+    },
     "get_iesg_ballot_comments": {
         "resource": (
             "IETF Datatracker API (datatracker.ietf.org) -- the ballotpositiondocevent resource, "
@@ -172,6 +226,32 @@ _TOOL_DETAILS = {
         "example": (
             'get_iesg_ballot_comments(\n  draft_name="draft-ietf-sidr-bgpsec-protocol",\n'
             '  query="SKI"\n)\n# -> Stephen Farrell\'s DISCUSS questioning the hardcoded SHA-1 SKI length'
+        ),
+    },
+    "search_local_source": {
+        "resource": (
+            "Local BM25 index built from one Sources-tab local source's own downloaded files -- draft/"
+            "RFC text plus its WG's threaded mail (services/local_source_index_service.py), built via "
+            "the Sources tab's \"Build index\" button. No external call at query time; no real Dify "
+            "dataset involved at all."
+        ),
+        "example": (
+            'search_local_source(\n  draft_name="draft-ietf-quic-transport",\n'
+            '  query="stream priority"\n)\n# -> ranked mail threads and draft/RFC text from that '
+            "source's own local index, e.g. the \"HTTP/3 with strict priorities\" thread"
+        ),
+    },
+    "add_local_source": {
+        "resource": (
+            "IETF Datatracker + ietf.org archive + WG mailing list, all live -- registers the source "
+            "(IetfImportService.register_local_source), downloads every revision, its RFC, and its WG's "
+            "mail (raw + threaded), then builds a local BM25 index over all of it. The only tool here "
+            "that writes to disk or costs real time -- everything else is a read-only lookup."
+        ),
+        "example": (
+            'add_local_source(identifier="4035")\n'
+            "# -> resolves RFC4035 to draft-ietf-dnsext-dnssec-protocol, pulls its revisions + RFC + "
+            "dnsext WG mail,\n# indexes all of it, ready for search_local_source in the same turn"
         ),
     },
 }
@@ -184,6 +264,8 @@ def _tool_info() -> list[dict]:
         {
             **t,
             "kind": _TOOL_KIND.get(t["name"], "other"),
+            "group": _TOOL_GROUP.get(t["name"], "capability"),
+            "forced": t["name"] in _TOOL_FORCIBLE,
             "display_name": tool_display_name(t["name"]),
             **_TOOL_DETAILS.get(t["name"], {"resource": "", "example": ""}),
         }
@@ -290,6 +372,14 @@ def main() -> None:
         Read-only: no download, no writing. Each per-corpus lookup is
         wrapped individually so one WG's sidecar hiccup doesn't blank the
         whole table.
+
+        Also merges in locally-tracked sources (see IetfImportService.
+        register_local_source): drafts added from this tab that don't have a
+        Dify dataset yet, so they render as their own unit -- same mail-
+        status/draft-relations facets as a real corpus, resolved live the
+        same way, just flagged `is_local` so the frontend can add the
+        raw-download actions a real corpus doesn't need (it already has an
+        indexed dataset; a local source only has whatever's on disk).
         """
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
         from services.ietf_import_service import IetfImportService
@@ -300,8 +390,24 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+        registered_names = {entry["draft_name"] for entry in catalog}
+        entries = list(catalog)
+        for draft_name in IetfImportService.list_local_source_names():
+            if draft_name in registered_names:
+                continue
+            entries.append(
+                {
+                    "draft_name": draft_name,
+                    "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
+                    "wg": IetfImportService.resolve_wg_for_draft(draft_name),
+                    "evolution_dataset_id": None,
+                    "mailarchive_dataset_id": None,
+                    "is_local": True,
+                }
+            )
+
         corpora = []
-        for entry in catalog:
+        for entry in entries:
             row = dict(entry)
             wg = entry.get("wg")
             if wg:
@@ -315,8 +421,84 @@ def main() -> None:
                     row["draft_relations"] = IetfImportService.get_draft_relations(draft_name)
                 except Exception as exc:
                     row["draft_relations"] = {"error": str(exc)}
+            if entry.get("is_local"):
+                try:
+                    row["local_status"] = IetfImportService.get_local_download_status(
+                        draft_name, wg, entry.get("rfc_number")
+                    )
+                except Exception as exc:
+                    row["local_status"] = {"error": str(exc)}
+                try:
+                    from services.local_source_index_service import LocalSourceIndexService
+
+                    row["index_status"] = LocalSourceIndexService.get_index_status(draft_name)
+                except Exception as exc:
+                    row["index_status"] = {"error": str(exc)}
             corpora.append(row)
         return jsonify({"corpora": corpora})
+
+    @app.route("/api/corpora/rfc-suggestions", methods=["GET"])
+    def api_corpora_rfc_suggestions():
+        """Type-ahead suggestions for "Add a new draft as a source" -- the
+        exact same IetfImportService.get_rfc_suggestions the Studio dataset-
+        creation IETF importer popup already uses for its own RFC/draft
+        search box (see web/app/components/datasets/create/ietf-importer),
+        reused here rather than building a second, parallel lookup. Matches
+        that popup's own debounce/query behavior: an empty query still
+        returns a seed list, narrowing as the caller types a keyword.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        query = (request.args.get("query") or "").strip()
+        try:
+            limit = int(request.args.get("limit", "20"))
+        except ValueError:
+            limit = 20
+        limit = max(1, min(50, limit))
+        try:
+            suggestions = IetfImportService.get_rfc_suggestions(query=query, limit=limit)
+            return jsonify({"suggestions": suggestions})
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/corpora/mailing-lists", methods=["GET"])
+    def api_corpora_mailing_lists():
+        """Every known IETF mailing list name -- the exact same
+        IetfImportService.get_mailing_lists the Studio importer popup uses
+        for its own WG/mailing-list dropdown. A plain list (no per-entry
+        live lookups, unlike rfc-suggestions), so the frontend fetches it
+        once and filters client-side as the caller types -- same as the
+        popup does.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        try:
+            return jsonify({"lists": IetfImportService.get_mailing_lists()})
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/corpora/wg-documents", methods=["GET"])
+    def api_corpora_wg_documents():
+        """Every Internet-Draft (published or not) for one WG -- the exact
+        same IetfImportService.get_wg_documents the Studio importer popup
+        uses for its own "pick a specific draft/RFC in this WG" picker, once
+        a WG is chosen. A single paginated Datatracker document-listing call,
+        not the per-entry-expensive path rfc-suggestions has -- reliable for
+        drilling into a WG's full draft list, including ones never published
+        as an RFC (rfc_number comes back null for those).
+        """
+        from services.ietf_import_service import IetfImportService
+
+        wg = (request.args.get("wg") or "").strip()
+        if not wg:
+            return jsonify({"error": "wg is required"}), 400
+        try:
+            return jsonify({"documents": IetfImportService.get_wg_documents(wg)})
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
 
     @app.route("/api/corpora/mail-sync", methods=["POST"])
     def api_corpora_mail_sync():
@@ -358,6 +540,73 @@ def main() -> None:
                 {"draft_names": [full_name], "format": "txt"}
             )
             return jsonify(result), status_code
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/corpora/draft-download-all", methods=["GET"])
+    def api_corpora_draft_download_all():
+        """Download every existing revision of one draft (plus its published
+        RFC, if any) in a single action -- the bulk counterpart to
+        draft-download above. Streamed via SSE since a well-revised draft can
+        mean 20-30+ sequential archive fetches, worth showing progress for
+        rather than leaving the button looking stuck.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        draft_name = (request.args.get("draft_name") or "").strip()
+        if not draft_name:
+            return jsonify({"error": "draft_name is required"}), 400
+
+        def work(on_event):
+            return IetfImportService.download_all_draft_revisions_to_local(draft_name, on_event=on_event)
+
+        return _sse_stream(app, work)
+
+    @app.route("/api/corpora/local-sync", methods=["GET"])
+    def api_corpora_local_sync():
+        """The single "Sync" action for a local source's own unit card:
+        draft revisions + RFC (idempotent -- only what's missing gets
+        fetched) plus its WG's mail, both raw and threaded, all in one
+        call. Replaces three separate buttons (draft-download-all,
+        mailarchive-download, mailarchive-thread-download) that turned out
+        to be more granularity than useful -- a local source realistically
+        has exactly two things you'd ever want to do with it: get current
+        (this), or make it searchable (local-index below).
+        """
+        from services.ietf_import_service import IetfImportService
+
+        draft_name = (request.args.get("draft_name") or "").strip()
+        if not draft_name:
+            return jsonify({"error": "draft_name is required"}), 400
+
+        def work(on_event):
+            return IetfImportService.sync_local_source(draft_name, on_event=on_event)
+
+        return _sse_stream(app, work)
+
+    @app.route("/api/corpora/local-index", methods=["POST"])
+    def api_corpora_local_index():
+        """Build (or rebuild) a local BM25 index over one source's own
+        downloaded content -- draft/RFC text plus threaded mail, whatever's
+        actually on disk for it. See LocalSourceIndexService; this is a
+        from-scratch rebuild every time (cheap -- a handful of local text
+        files, not a whole corpus), not an incremental update.
+        """
+        from services.ietf_import_service import IetfImportService
+        from services.local_source_index_service import LocalSourceIndexService
+
+        data = request.get_json(silent=True) or {}
+        draft_name = (data.get("draft_name") or "").strip()
+        if not draft_name:
+            return jsonify({"error": "draft_name is required"}), 400
+        try:
+            wg = IetfImportService.resolve_wg_for_draft(draft_name)
+            rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
+            result = LocalSourceIndexService.build_index(draft_name, wg, rfc_number)
+            if result.get("error"):
+                return jsonify(result), 400
+            return jsonify(result)
         except Exception as exc:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
@@ -556,6 +805,98 @@ def main() -> None:
             return {"answer": answer, "trace": trace}
 
         return _sse_stream(app, work)
+
+    @app.route("/api/panorama", methods=["GET"])
+    def api_panorama():
+        """Same agent/tools/endpoint shape as /api/ask and /api/deep-dive,
+        but a separate third tier pointed outward at the wider RFC
+        landscape -- deliberately not a modification of Deep Dive (which
+        stays exactly as it was, verified working for single-RFC depth) so
+        this untested new direction (finding and connecting SEVERAL RFCs)
+        can be iterated on independently.
+        """
+        from scripts.agentic_rag.ask_decision_agent import _PANORAMA_ADDENDUM, _PANORAMA_MAX_ITERATIONS
+        from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
+
+        query = (request.args.get("query") or "").strip()
+        draft = request.args.get("draft") or None
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+
+        def work(on_event):
+            trace: list[dict] = []
+            answer = ask_decision_agent(
+                query=query,
+                draft=draft,
+                trace=trace,
+                on_event=on_event,
+                max_iterations=_PANORAMA_MAX_ITERATIONS,
+                extra_instruction=_PANORAMA_ADDENDUM,
+            )
+            return {"answer": answer, "trace": trace}
+
+        return _sse_stream(app, work)
+
+    def _demo_model_instance():
+        """Same minimal model-instance setup ask() uses when there's no
+        dataset context to derive a tenant from -- this demo never touches
+        a real Dify dataset at all, so it always falls back to the first
+        tenant, same as ask() does in that situation.
+        """
+        from core.model_manager import ModelManager
+        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from extensions.ext_database import db
+        from models.account import Tenant
+
+        tenant_id = db.session.query(Tenant).first().id
+        return ModelManager().get_model_instance(
+            tenant_id=tenant_id,
+            provider="langgenius/openrouter/openrouter",
+            model_type=ModelType.LLM,
+            model="google/gemini-2.5-flash",
+        )
+
+    @app.route("/api/family-search-demo/roots", methods=["GET"])
+    def api_family_search_demo_roots():
+        from services.family_search_demo_service import get_demo_roots
+
+        return jsonify(get_demo_roots())
+
+    @app.route("/api/family-search-demo/check-root", methods=["GET"])
+    def api_family_search_demo_check_root():
+        """First hop: check the root's own (fake) mail archive; if empty,
+        rank its relatives once and hand back the whole queue, so the
+        frontend can walk it one confirmed step at a time without asking
+        the backend to re-rank on every hop.
+        """
+        from services.family_search_demo_service import check_root
+
+        query = (request.args.get("query") or "").strip()
+        root = (request.args.get("root") or "").strip()
+        if not query or not root:
+            return jsonify({"error": "query and root are required"}), 400
+        try:
+            return jsonify(check_root(query, root, _demo_model_instance()))
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+    @app.route("/api/family-search-demo/check-candidate", methods=["GET"])
+    def api_family_search_demo_check_candidate():
+        """One more hop, only ever called after the user confirms
+        continuing -- checks a single already-ranked candidate's (fake)
+        mail archive."""
+        from services.family_search_demo_service import check_candidate
+
+        query = (request.args.get("query") or "").strip()
+        rfc_id = (request.args.get("rfc_id") or "").strip()
+        if not query or not rfc_id:
+            return jsonify({"error": "query and rfc_id are required"}), 400
+        try:
+            return jsonify(check_candidate(query, rfc_id, _demo_model_instance()))
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
 
     @app.route("/api/decision-thread", methods=["GET"])
     def api_decision_thread():
