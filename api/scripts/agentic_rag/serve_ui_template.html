@@ -412,6 +412,26 @@
   .suggestion-wg-header .draft-suggestion-doc::before { content: "▸ "; color: var(--text-dim); }
   .suggestion-wg-header.expanded .draft-suggestion-doc::before { content: "▾ "; }
   .draft-suggestion-item.suggestion-wg-doc { padding-left: 24px; }
+  .topic-discover-results {
+    margin-top: 10px; max-height: 340px; overflow-y: auto; background: var(--panel-2);
+    border: 1px solid var(--border); border-radius: 8px;
+  }
+  .topic-candidate-row {
+    display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px;
+    border-bottom: 1px solid var(--border); cursor: pointer;
+  }
+  .topic-candidate-row:last-child { border-bottom: none; }
+  .topic-candidate-row:hover { background: var(--panel); }
+  .topic-candidate-row input[type=checkbox] { margin-top: 3px; flex-shrink: 0; }
+  .topic-candidate-row .candidate-body { display: flex; flex-direction: column; gap: 1px; }
+  .topic-discover-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .topic-discover-actions button {
+    background: transparent; border: 1px solid var(--border); color: var(--accent);
+    padding: 6px 12px; font-size: 13px; font-weight: 600; border-radius: 6px; cursor: pointer;
+    font-family: var(--sans);
+  }
+  .topic-discover-actions button:hover { border-color: var(--accent); }
+  .topic-discover-actions #topicPullBtn { margin-left: auto; background: var(--accent); color: #0a0e1a; }
 
   .agent-plan { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; }
   .plan-step { display: flex; gap: 10px; align-items: flex-start; }
@@ -676,6 +696,26 @@
       </div>
       <div id="newDraftExistsNote" class="facet-note warn" hidden></div>
       <div id="newDraftResult" class="facet-note" hidden></div>
+    </div>
+    <div class="corpus-row add-source-row">
+      <div class="corpus-head"><span class="name">Discover a topic</span></div>
+      <p class="add-source-subhint">
+        Search the whole RFC corpus for a topic (BM25 + semantic, no LLM for this part). If a
+        roadmap RFC exists for it -- like RFC9364 for DNSSEC -- its own family list and each
+        member's role are shown; otherwise you just get plain topical search results.
+      </p>
+      <div class="corpus-facet">
+        <span class="facet-label">Topic</span>
+        <input id="topicDiscoverInput" type="text" placeholder="e.g. DNSSEC" autocomplete="off" />
+        <button id="topicDiscoverBtn">Search</button>
+      </div>
+      <div id="topicDiscoverResults" class="topic-discover-results" hidden></div>
+      <div id="topicDiscoverActions" class="topic-discover-actions" hidden>
+        <button id="topicSelectAllBtn" type="button">Select all</button>
+        <button id="topicSelectNoneBtn" type="button">Select none</button>
+        <button id="topicPullBtn" type="button">Pull selected</button>
+      </div>
+      <div id="topicPullStatus" class="facet-note" hidden></div>
     </div>
     <div id="corporaList"><div class="loading">Loading…</div></div>
   </section>
@@ -1340,6 +1380,127 @@ document.getElementById('newDraftAddBtn').addEventListener('click', () => {
       }
       finish(summary);
       document.getElementById('newDraftName').value = '';
+    } else if (msg.type === 'error') {
+      finish(`Error: ${msg.message}`);
+    }
+  };
+  source.onerror = () => finish('Connection lost.');
+});
+
+// "Discover a topic" -- a bare topic phrase (e.g. "DNSSEC") searched via
+// BM25 + semantic over the whole RFC corpus (/api/corpora/topic-discover,
+// no LLM for that part), enriched with a roadmap RFC's own family list +
+// per-member roles when one exists for the topic (RFC9364 for DNSSEC is
+// the canonical example) -- see services/rfc_family_roadmap_service.py.
+// Results are checkboxes, not an automatic pull: add_local_source already
+// establishes that a pull is a real, moderately expensive operation, so a
+// *bulk* pull here always goes through an explicit selection step first.
+let topicCandidates = [];
+
+document.getElementById('topicDiscoverBtn').addEventListener('click', async () => {
+  const btn = document.getElementById('topicDiscoverBtn');
+  const query = document.getElementById('topicDiscoverInput').value.trim();
+  if (!query) return;
+  btn.disabled = true;
+  btn.textContent = 'Searching…';
+  const resultsEl = document.getElementById('topicDiscoverResults');
+  const actionsEl = document.getElementById('topicDiscoverActions');
+  resultsEl.hidden = false;
+  resultsEl.innerHTML = '<div class="loading">Searching the RFC corpus…</div>';
+  actionsEl.hidden = true;
+  try {
+    const res = await fetch(`/api/corpora/topic-discover?query=${encodeURIComponent(query)}&top_k=20`);
+    const data = await res.json();
+    if (data.error) {
+      resultsEl.innerHTML = `<div class="error-box">${escapeHtml(data.error)}</div>`;
+    } else {
+      renderTopicDiscoverResults(data);
+    }
+  } catch (err) {
+    resultsEl.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = 'Search';
+});
+
+function renderTopicCandidateRow(idx, rfcLabel, description, alreadyLocal) {
+  const badge = alreadyLocal ? ' <span class="local-badge">already added</span>' : '';
+  const checkedAttr = alreadyLocal ? '' : 'checked';
+  const disabledAttr = alreadyLocal ? 'disabled' : '';
+  return `
+    <label class="topic-candidate-row">
+      <input type="checkbox" data-idx="${idx}" ${checkedAttr} ${disabledAttr} />
+      <span class="candidate-body">
+        <span class="draft-suggestion-doc">${escapeHtml(rfcLabel)}${badge}</span>
+        <span class="draft-suggestion-title">${escapeHtml(description)}</span>
+      </span>
+    </label>`;
+}
+
+function renderTopicDiscoverResults(data) {
+  topicCandidates = [];
+  let html = '';
+  if (data.roadmap && data.roadmap.family.length) {
+    html += `<div class="suggestion-section-label">Family per RFC${escapeHtml(data.roadmap.rfc)}${data.roadmap.title ? ' -- ' + escapeHtml(data.roadmap.title) : ''}</div>`;
+    for (const f of data.roadmap.family) {
+      const idx = topicCandidates.length;
+      topicCandidates.push({ rfc: f.rfc });
+      html += renderTopicCandidateRow(idx, `RFC${f.rfc}`, f.role, f.already_local);
+    }
+  }
+  if (data.other && data.other.length) {
+    html += `<div class="suggestion-section-label">Other topically related RFCs</div>`;
+    for (const o of data.other) {
+      const idx = topicCandidates.length;
+      topicCandidates.push({ rfc: o.rfc });
+      html += renderTopicCandidateRow(idx, `RFC${o.rfc}`, o.title, o.already_local);
+    }
+  }
+  const resultsEl = document.getElementById('topicDiscoverResults');
+  const actionsEl = document.getElementById('topicDiscoverActions');
+  if (!topicCandidates.length) {
+    resultsEl.innerHTML = `<p class="empty-state">No RFCs found for "${escapeHtml(data.topic)}".</p>`;
+    actionsEl.hidden = true;
+    return;
+  }
+  resultsEl.innerHTML = html;
+  actionsEl.hidden = false;
+}
+
+document.getElementById('topicSelectAllBtn').addEventListener('click', () => {
+  document.querySelectorAll('#topicDiscoverResults input[type=checkbox]:not(:disabled)').forEach((cb) => { cb.checked = true; });
+});
+document.getElementById('topicSelectNoneBtn').addEventListener('click', () => {
+  document.querySelectorAll('#topicDiscoverResults input[type=checkbox]').forEach((cb) => { cb.checked = false; });
+});
+
+document.getElementById('topicPullBtn').addEventListener('click', () => {
+  const checked = Array.from(document.querySelectorAll('#topicDiscoverResults input[type=checkbox]:checked'));
+  const rfcNumbers = checked.map((cb) => topicCandidates[parseInt(cb.dataset.idx, 10)].rfc);
+  if (!rfcNumbers.length) return;
+  const btn = document.getElementById('topicPullBtn');
+  const statusEl = document.getElementById('topicPullStatus');
+  btn.disabled = true;
+  statusEl.hidden = false;
+  statusEl.textContent = 'Starting…';
+  const source = new EventSource(`/api/corpora/topic-pull?rfc_numbers=${encodeURIComponent(rfcNumbers.join(','))}`);
+  const finish = (summary) => {
+    statusEl.textContent = summary;
+    source.close();
+    btn.disabled = false;
+    loadCorpora();
+  };
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      statusEl.textContent = msg.message || 'Pulling…';
+    } else if (msg.type === 'result') {
+      const results = msg.data.results || [];
+      const ok = results.filter((r) => r.ok).length;
+      const failed = results.filter((r) => !r.ok);
+      let summary = `Pulled ${ok}/${results.length}.`;
+      if (failed.length) summary += ` Failed: ${failed.map((r) => `RFC${r.rfc} (${r.error})`).join(', ')}`;
+      finish(summary);
     } else if (msg.type === 'error') {
       finish(`Error: ${msg.message}`);
     }

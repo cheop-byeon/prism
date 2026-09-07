@@ -611,6 +611,167 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    @app.route("/api/corpora/topic-discover", methods=["GET"])
+    def api_corpora_topic_discover():
+        """Discover RFCs for a bare topic phrase (e.g. "DNSSEC") -- no LLM
+        needed for the base case: BM25 + semantic search (see
+        RfcCorpusIndexService) over the whole published-RFC corpus, merged
+        and deduped. On top of that, one small, best-effort LLM check asks
+        whether any of the top candidates is itself a roadmap/overview
+        document that names and describes a family of RFCs for this topic
+        (RFC9364 for DNSSEC is the canonical example) -- if so, a second
+        call extracts that family with each member's role, which is far
+        more useful than a bare ranked title list. Both calls degrade
+        silently to the plain merged results on any failure (see
+        services/rfc_family_roadmap_service.py) -- a topic search should
+        never come back empty just because the roadmap-detection step had
+        a bad day.
+        """
+        from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
+        from services.ietf_import_service import IetfImportService
+        from services.rfc_corpus_index_service import RfcCorpusIndexService
+        from services.rfc_family_roadmap_service import detect_roadmap_candidate, extract_family_from_roadmap
+
+        query = (request.args.get("query") or "").strip()
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+        try:
+            top_k = int(request.args.get("top_k", "20"))
+        except ValueError:
+            top_k = 20
+        top_k = max(1, min(50, top_k))
+
+        try:
+            bm25 = RfcCorpusIndexService.search_bm25(query, scope="title_abstract", top_k=top_k)
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+        if bm25.get("error"):
+            return jsonify({"error": bm25["error"]}), 500
+
+        merged: dict[str, dict] = {}
+        for r in bm25.get("results", []):
+            merged[r["rfc"]] = {"rfc": r["rfc"].removeprefix("RFC"), "title": r["title"], "score": r["score"]}
+        try:
+            semantic = RfcCorpusIndexService.search_semantic(query, top_k=top_k)
+            if not semantic.get("error"):
+                for r in semantic.get("results", []):
+                    if r["rfc"] not in merged:
+                        merged[r["rfc"]] = {
+                            "rfc": r["rfc"].removeprefix("RFC"),
+                            "title": r["title"],
+                            "score": r["similarity"],
+                        }
+        except Exception:
+            # the embedding index is a separate, optional one-time build -- BM25 alone is fine without it
+            traceback.print_exc()
+
+        import operator
+
+        ranked = sorted(merged.values(), key=operator.itemgetter("score"), reverse=True)[:top_k]
+
+        # Known RFC numbers this instance already has -- real corpora and
+        # already-added local sources alike -- so the UI can badge/pre-uncheck
+        # them instead of offering to "add" something already tracked.
+        _text, catalog = _list_available_corpora()
+        known_rfc_numbers = {str(entry["rfc_number"]) for entry in catalog if entry.get("rfc_number")}
+        for draft_name in IetfImportService.list_local_source_names():
+            rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
+            if rfc_number:
+                known_rfc_numbers.add(str(rfc_number))
+
+        # The roadmap RFC itself doesn't necessarily rank near the top on
+        # pure keyword score -- confirmed live: RFC9364 ("DNS Security
+        # Extensions (DNSSEC)") ranked 11th for the bare query "DNSSEC",
+        # just outside an earlier top-10 cutoff, since its title/abstract
+        # reads as a general overview rather than packing in the
+        # DNSSEC-specific compound terms narrower specs use. So the whole
+        # ranked set (already capped at top_k) goes to roadmap detection,
+        # not a further-truncated slice of it.
+        title_abstract_corpus = RfcCorpusIndexService.build_title_abstract_corpus()
+        for c in ranked:
+            c["abstract"] = title_abstract_corpus.get(f"RFC{c['rfc']}", {}).get("abstract", "")
+
+        roadmap = None
+        try:
+            model_instance = _demo_model_instance()
+            roadmap_rfc = detect_roadmap_candidate(query, ranked, model_instance)
+            if roadmap_rfc:
+                family = extract_family_from_roadmap(roadmap_rfc, model_instance)
+                if family:
+                    for member in family:
+                        member["already_local"] = member["rfc"] in known_rfc_numbers
+                    roadmap = {
+                        "rfc": roadmap_rfc,
+                        "title": title_abstract_corpus.get(f"RFC{roadmap_rfc}", {}).get("title", ""),
+                        "family": family,
+                    }
+        except Exception:
+            traceback.print_exc()  # best-effort enhancement -- fall through to the plain ranked list
+
+        family_rfcs = {m["rfc"] for m in roadmap["family"]} if roadmap else set()
+        other = [
+            {
+                "rfc": c["rfc"],
+                "title": c["title"],
+                "score": round(c["score"], 3),
+                "already_local": c["rfc"] in known_rfc_numbers,
+            }
+            for c in ranked
+            if c["rfc"] not in family_rfcs and (not roadmap or c["rfc"] != roadmap["rfc"])
+        ]
+
+        return jsonify({"topic": query, "roadmap": roadmap, "other": other})
+
+    @app.route("/api/corpora/topic-pull", methods=["GET"])
+    def api_corpora_topic_pull():
+        """Pull a user-selected list of RFC numbers (from topic-discover)
+        one at a time -- each resolved to its draft name, synced (revisions
+        + RFC + WG mail, raw and threaded), and indexed. The same
+        primitives add_local_source gives the agent, just user-selected via
+        the Sources tab instead of agent-selected in conversation -- a bulk
+        pull should always go through an explicit selection step first,
+        never fire unconfirmed (see add_local_source's own docstring on why
+        each pull is a real, moderately expensive operation).
+        """
+        from services.ietf_import_service import IetfImportService
+        from services.local_source_index_service import LocalSourceIndexService
+
+        rfc_numbers_param = (request.args.get("rfc_numbers") or "").strip()
+        if not rfc_numbers_param:
+            return jsonify({"error": "rfc_numbers is required"}), 400
+        rfc_numbers = [n.strip() for n in rfc_numbers_param.split(",") if n.strip()]
+
+        def work(on_event):
+            results = []
+            for i, rfc_number in enumerate(rfc_numbers, start=1):
+                on_event({"stage": "pulling", "message": f"RFC{rfc_number} ({i}/{len(rfc_numbers)})"})
+                draft_name = IetfImportService.resolve_draft_name_for_rfc(rfc_number)
+                if not draft_name:
+                    results.append({"rfc": rfc_number, "ok": False, "error": "could not resolve a draft name"})
+                    continue
+                sync_result = IetfImportService.sync_local_source(draft_name)
+                if sync_result.get("error"):
+                    results.append(
+                        {"rfc": rfc_number, "draft_name": draft_name, "ok": False, "error": sync_result["error"]}
+                    )
+                    continue
+                wg = sync_result.get("wg")
+                index_result = LocalSourceIndexService.build_index(draft_name, wg, rfc_number)
+                results.append(
+                    {
+                        "rfc": rfc_number,
+                        "draft_name": draft_name,
+                        "ok": True,
+                        "revisions": sum(1 for r in sync_result.get("revisions", []) if r.get("ok")),
+                        "mail_ok": bool((sync_result.get("mail") or {}).get("ok")),
+                        "indexed": index_result.get("total_documents", 0),
+                    }
+                )
+            return {"results": results}
+
+        return _sse_stream(app, work)
+
     # Every non-draft/RFC/mailarchive Datatracker doctype -- shown in the
     # Sources tab's "Add sources" section per WG. Listed here (not derived
     # from IetfImportService) purely for display order/labels; the actual
