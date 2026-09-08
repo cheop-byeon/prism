@@ -1991,7 +1991,21 @@ def ask(
 
     def _get_dataset(dataset_id: str) -> Dataset | None:
         if dataset_id not in dataset_cache:
-            dataset_cache[dataset_id] = db.session.query(Dataset).filter_by(id=dataset_id).first()
+            try:
+                dataset_cache[dataset_id] = db.session.query(Dataset).filter_by(id=dataset_id).first()
+            except Exception:
+                # dataset_id is agent-supplied (an LLM tool-call argument), not
+                # validated input -- confirmed live that a malformed value
+                # (the model had confused a document COUNT it had just seen in
+                # another tool's own output text for a dataset id) reaches
+                # here as a non-UUID string, and the `id` column's UUID cast
+                # raises inside Postgres before SQLAlchemy's .first() ever
+                # returns, aborting the whole request instead of giving the
+                # agent the ordinary "no dataset found" observation below.
+                # Roll back so the aborted transaction doesn't also fail
+                # every subsequent query this request makes.
+                db.session.rollback()
+                dataset_cache[dataset_id] = None
         return dataset_cache[dataset_id]
 
     if evolution_dataset_id and not _get_dataset(evolution_dataset_id):
