@@ -68,6 +68,20 @@
     --radius-pill: 999px;
 
     --focus-ring: 0 0 0 3px rgba(124, 158, 255, 0.35);
+
+    /* Research tier accents -- reuses colors that already exist elsewhere
+       in this file (the RFC Graph's own citation/topic-match line colors),
+       so tier identity threads existing color meaning through rather than
+       inventing a new palette. Ask keeps the plain --accent blue since
+       it's the default/baseline tier, not a fourth new hue. */
+    --tier-ask: var(--accent);
+    --tier-ask-bg: var(--accent-dim);
+    --tier-investigate: #4fd1c5;
+    --tier-investigate-bg: #123331;
+    --tier-deepdive: #b98cf0;
+    --tier-deepdive-bg: #2a2040;
+    --tier-panorama: #e0a94a;
+    --tier-panorama-bg: #3a2f16;
   }
   * { box-sizing: border-box; }
   body {
@@ -81,15 +95,27 @@
   header h1 { font-size: var(--text-lg); margin: 0; font-weight: 600; }
 
   .tabs {
-    display: flex; gap: 4px; padding: 0 var(--gutter-x); border-bottom: 1px solid var(--border);
-    flex-shrink: 0; background: var(--panel);
+    display: flex; align-items: center; gap: 2px; padding: 0 var(--gutter-x); border-bottom: 1px solid var(--border);
+    flex-shrink: 0; background: var(--panel); overflow-x: auto;
   }
+  /* Grouped instead of nine flat equal-weight peers: primary work
+     (Research, Track a Decision) | utility tabs | a visually demoted demo,
+     rather than every tab reading as an equally important destination. */
+  .tab-group { display: flex; gap: 2px; }
+  .tab-divider { width: 1px; align-self: stretch; background: var(--border); margin: 8px 4px; flex-shrink: 0; }
   .tab-btn {
     background: transparent; color: var(--text-dim); border: none; border-bottom: 2px solid transparent;
     border-radius: 0; padding: 12px 14px; font-size: var(--text-md); font-weight: 600; cursor: pointer;
+    display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
   }
   .tab-btn:hover { color: var(--text); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab-btn.demo { color: var(--text-quaternary); }
+  .tab-btn.demo:hover { color: var(--text-tertiary); }
+  .demo-chip {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.05em; border: 1px dashed var(--border);
+    border-radius: 4px; padding: 1px 4px; color: var(--text-quaternary);
+  }
 
   .tab-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .tab-pane {
@@ -97,7 +123,13 @@
     padding: 0 var(--gutter-x);
   }
   .tab-pane.active { display: flex; }
-  #pane-howto.active { display: block; overflow-y: auto; padding: var(--gutter-x); }
+  /* padding: 20px var(--gutter-x), not padding: var(--gutter-x) on all four
+     sides -- --gutter-x grows deliberately on wide viewports to center a
+     capped column horizontally, but reusing that same value for top/bottom
+     padding too meant a near-500px dead gap above this pane's own content
+     on a wide window (confirmed live). Every other pane in this file only
+     ever applies --gutter-x to left/right for exactly this reason. */
+  #pane-howto.active { display: block; overflow-y: auto; padding: 20px var(--gutter-x); }
 
   select, input[type=text] {
     background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
@@ -166,6 +198,41 @@
   }
   .thread-controls .hint { font-size: var(--text-sm); color: var(--text-tertiary); flex-shrink: 0; }
 
+  /* ---- Research tier selector: replaces four near-identical tabs (Ask /
+     Investigate / Deep Dive / Panorama -- same select+input+button+
+     conversation shape, differentiated only by a paragraph of hint text
+     above the input) with one tab and a visible, always-on mode switch, so
+     the tier you're in shows up in the layout itself. ---- */
+  .tier-pane { padding-top: 18px; }
+  .tier-label {
+    font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--text-quaternary); margin: 0 0 10px;
+  }
+  .tier-selector { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+  .tier-card {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md);
+    padding: 10px 12px; cursor: pointer; text-align: left; font-family: var(--sans); color: var(--text);
+    display: flex; flex-direction: column; gap: 5px; position: relative; overflow: hidden;
+    transition: border-color 0.15s ease, background 0.15s ease;
+  }
+  .tier-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+    background: var(--tier-color, var(--border)); opacity: 0.5; transition: opacity 0.15s ease;
+  }
+  .tier-card:hover { border-color: var(--tier-color, var(--border)); }
+  .tier-card.active { border-color: var(--tier-color, var(--accent)); background: var(--tier-bg, var(--panel-2)); }
+  .tier-card.active::before { opacity: 1; }
+  .tier-card .tier-head { display: flex; align-items: center; gap: 7px; }
+  .tier-card .tier-head .icon { color: var(--tier-color, var(--text-dim)); }
+  .tier-card .tier-name { font-size: var(--text-sm); font-weight: 700; }
+  .tier-card .tier-desc { font-size: var(--text-xs); color: var(--text-tertiary); line-height: 1.4; }
+  .mode-badge {
+    display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-2xs); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--tier-color, var(--accent));
+    background: var(--tier-bg, var(--accent-dim)); border-radius: var(--radius-pill); padding: 4px 10px;
+    flex-shrink: 0;
+  }
+
   .conversation, .thread-body-wrap { flex: 1; overflow-y: auto; padding: 20px 0; }
   .empty-state { color: var(--text-dim); font-size: var(--text-md); }
 
@@ -186,11 +253,19 @@
   }
   .family-demo-confirm button.no { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
   .answer {
-    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 16px 18px; font-size: var(--text-lg); line-height: 1.6; white-space: pre-wrap;
-    box-shadow: var(--shadow-sm);
+    background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--turn-color, var(--border));
+    border-radius: var(--radius-md); padding: 16px 18px; font-size: var(--text-lg); line-height: 1.6;
+    white-space: pre-wrap; box-shadow: var(--shadow-sm);
   }
   .answer a { color: var(--accent); }
+  /* Tags which research tier produced this turn -- since all four now share
+     one conversation instead of each having its own tab-scoped history, a
+     mixed scrollback needs this to stay legible turn-by-turn. */
+  .turn-tag {
+    display: flex; align-items: center; gap: 5px; font-size: 10.5px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.04em; color: var(--turn-color, var(--text-dim));
+    margin-bottom: 8px;
+  }
   .trace { margin-top: 10px; }
   .trace summary {
     cursor: pointer; font-size: var(--text-sm); color: var(--text-dim); user-select: none;
@@ -724,71 +799,86 @@
       <path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6" fill="none" stroke="currentColor" stroke-width="2"/>
       <path d="M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/>
     </symbol>
+    <symbol id="icon-bolt" viewBox="0 0 24 24">
+      <path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-layers" viewBox="0 0 24 24">
+      <path d="M12 3L3 8l9 5 9-5-9-5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M3 13l9 5 9-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M3 17.5l9 5 9-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-expand" viewBox="0 0 24 24">
+      <path d="M3 12h18M3 12l5-5M3 12l5 5M21 12l-5-5M21 12l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="icon-research" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path d="M20 20l-4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="icon-track" viewBox="0 0 24 24">
+      <path d="M4 6h16M4 12h10M4 18h6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </symbol>
+    <symbol id="icon-graph" viewBox="0 0 24 24">
+      <circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="18" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/>
+      <circle cx="12" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path d="M8.2 7.2L11 15.8M15.8 7.2L13 15.8M8.5 6h7" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    </symbol>
+    <symbol id="icon-book" viewBox="0 0 24 24">
+      <path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      <path d="M4 19a2.5 2.5 0 012.5-2.5H20" fill="none" stroke="currentColor" stroke-width="2"/>
+    </symbol>
   </defs>
 </svg>
 <header>
   <h1>Decision Rationale Agent</h1>
 </header>
 <div class="tabs">
-  <button class="tab-btn active" data-tab="ask">Ask</button>
-  <button class="tab-btn" data-tab="investigate">Investigate</button>
-  <button class="tab-btn" data-tab="deepdive">Deep Dive</button>
-  <button class="tab-btn" data-tab="panorama">Panorama</button>
-  <button class="tab-btn" data-tab="familydemo">Family Search (Demo)</button>
-  <button class="tab-btn" data-tab="track">Track a Decision</button>
-  <button class="tab-btn" data-tab="howto">How it Works</button>
-  <button class="tab-btn" data-tab="corpora">Sources</button>
-  <button class="tab-btn" data-tab="rfcgraph">RFC Graph</button>
+  <div class="tab-group">
+    <button class="tab-btn active" data-tab="research"><svg class="icon"><use href="#icon-research"/></svg>Research</button>
+    <button class="tab-btn" data-tab="track"><svg class="icon"><use href="#icon-track"/></svg>Track a Decision</button>
+  </div>
+  <div class="tab-divider"></div>
+  <div class="tab-group">
+    <button class="tab-btn" data-tab="corpora"><svg class="icon"><use href="#icon-database"/></svg>Sources</button>
+    <button class="tab-btn" data-tab="rfcgraph"><svg class="icon"><use href="#icon-graph"/></svg>RFC Graph</button>
+    <button class="tab-btn" data-tab="howto"><svg class="icon"><use href="#icon-book"/></svg>How it Works</button>
+  </div>
+  <div class="tab-divider"></div>
+  <button class="tab-btn demo" data-tab="familydemo">Family Search <span class="demo-chip">DEMO</span></button>
 </div>
 <div class="tab-content">
-  <section class="tab-pane active" id="pane-ask">
-    <div class="controls">
-      <select id="draft"><option value="">(let the agent discover)</option></select>
-      <input id="query" type="text" placeholder="Why was INIT_CWND set to 4?" />
-      <button id="ask" class="btn-primary">Ask</button>
+  <section class="tab-pane active" id="pane-research">
+    <div class="tier-pane">
+      <p class="tier-label">Research tier -- pick depth vs. breadth</p>
+      <div class="tier-selector" id="tierSelector">
+        <button class="tier-card active" data-tier="ask" style="--tier-color: var(--tier-ask); --tier-bg: var(--tier-ask-bg);">
+          <span class="tier-head"><svg class="icon"><use href="#icon-bolt"/></svg><span class="tier-name">Ask</span></span>
+          <span class="tier-desc">One quick pass over this draft's own history.</span>
+        </button>
+        <button class="tier-card" data-tier="investigate" style="--tier-color: var(--tier-investigate); --tier-bg: var(--tier-investigate-bg);">
+          <span class="tier-head"><svg class="icon"><use href="#icon-search"/></svg><span class="tier-name">Investigate</span></span>
+          <span class="tier-desc">Same tools and pass as Ask -- a different view of the same run, showing the real path taken instead of a fixed rail.</span>
+        </button>
+        <button class="tier-card" data-tier="deepdive" style="--tier-color: var(--tier-deepdive); --tier-bg: var(--tier-deepdive-bg);">
+          <span class="tier-head"><svg class="icon"><use href="#icon-layers"/></svg><span class="tier-name">Deep Dive</span></span>
+          <span class="tier-desc">More iterations budgeted; verifies against primary sources and tries a 2nd query rather than settle for the first result.</span>
+        </button>
+        <button class="tier-card" data-tier="panorama" style="--tier-color: var(--tier-panorama); --tier-bg: var(--tier-panorama-bg);">
+          <span class="tier-head"><svg class="icon"><use href="#icon-expand"/></svg><span class="tier-name">Panorama</span></span>
+          <span class="tier-desc">Pointed outward at the wider RFC landscape -- other RFCs and working groups, not just this draft's own history.</span>
+        </button>
+      </div>
+      <div class="controls" id="researchControls" style="--tier-color: var(--tier-ask); --tier-bg: var(--tier-ask-bg);">
+        <span class="mode-badge" id="researchModeBadge">
+          <svg class="icon-sm"><use href="#icon-bolt"/></svg>
+          <span id="researchModeBadgeLabel">Ask</span>
+        </span>
+        <select id="researchDraft"><option value="">(let the agent discover)</option></select>
+        <input id="researchQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
+        <button id="researchBtn" class="btn-primary">Ask</button>
+      </div>
     </div>
-    <div class="conversation" id="conversation"></div>
-  </section>
-
-  <section class="tab-pane" id="pane-investigate">
-    <div class="controls">
-      <select id="investigateDraft"><option value="">(let the agent discover)</option></select>
-      <input id="investigateQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
-      <button id="investigateBtn" class="btn-primary">Ask</button>
-    </div>
-    <div class="conversation" id="investigateConversation"></div>
-  </section>
-
-  <section class="tab-pane" id="pane-deepdive">
-    <p class="corpora-hint">
-      Same tools as Ask/Investigate, but a genuinely more thorough pass -- more iterations
-      budgeted, and told to verify against primary sources and try a second query rather than
-      settle for the first result. Slower and more expensive; use it when a quick answer isn't enough.
-    </p>
-    <div class="controls">
-      <select id="deepDiveDraft"><option value="">(let the agent discover)</option></select>
-      <input id="deepDiveQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
-      <button id="deepDiveBtn" class="btn-primary">Ask</button>
-    </div>
-    <div class="conversation" id="deepDiveConversation"></div>
-  </section>
-
-  <section class="tab-pane" id="pane-panorama">
-    <p class="corpora-hint">
-      Same tools as Ask/Investigate/Deep Dive, but pointed outward at the wider RFC landscape
-      instead of one draft's own history -- told to proactively use the whole-corpus search tools
-      (Citation Match, Topic Match/BM25, obsoletes/updates) to find and cite other RFCs connected
-      to the one in question, and explain what changed across that family. A new, separate tier --
-      Deep Dive is unchanged and still the right choice for verifying one RFC's own history deeply.
-      Good for "what's the bigger picture behind X" questions, e.g. "What's the broader RFC family
-      behind RFC 6378's linear protection design, and how was it corrected in later RFCs?"
-    </p>
-    <div class="controls">
-      <select id="panoramaDraft"><option value="">(let the agent discover)</option></select>
-      <input id="panoramaQuery" type="text" placeholder="What's the broader RFC family behind RFC 6378's linear protection design?" />
-      <button id="panoramaBtn" class="btn-primary">Ask</button>
-    </div>
-    <div class="conversation" id="panoramaConversation"></div>
+    <div class="conversation" id="researchConversation"></div>
   </section>
 
   <section class="tab-pane" id="pane-familydemo">
@@ -990,11 +1080,50 @@
   </div>
 </div>
 <script>
-const draftEl = document.getElementById('draft');
-const queryEl = document.getElementById('query');
-const askBtn = document.getElementById('ask');
-const convEl = document.getElementById('conversation');
+const researchDraftEl = document.getElementById('researchDraft');
+const researchQueryEl = document.getElementById('researchQuery');
+const researchBtnEl = document.getElementById('researchBtn');
+const researchConvEl = document.getElementById('researchConversation');
+const researchControlsEl = document.getElementById('researchControls');
+const researchModeBadgeEl = document.getElementById('researchModeBadge');
+const researchModeBadgeLabelEl = document.getElementById('researchModeBadgeLabel');
 const toolsEl = document.getElementById('tools');
+
+// One shared Research tab replaces four near-identical tabs (Ask /
+// Investigate / Deep Dive / Panorama -- same select+input+button+
+// conversation shape, differentiated only by a paragraph of hint text
+// above the input) with one tab and a visible, always-on tier switch. This
+// is the single source of truth for what each tier actually does
+// differently: which backend endpoint it calls, and its icon/placeholder.
+const TIERS = {
+  ask: { name: 'Ask', endpoint: '/api/ask', icon: 'icon-bolt', placeholder: 'Why was INIT_CWND set to 4?' },
+  investigate: {
+    name: 'Investigate', endpoint: '/api/ask', icon: 'icon-search',
+    placeholder: 'Why was INIT_CWND set to 4?',
+  },
+  deepdive: { name: 'Deep Dive', endpoint: '/api/deep-dive', icon: 'icon-layers', placeholder: 'Why was INIT_CWND set to 4?' },
+  panorama: {
+    name: 'Panorama', endpoint: '/api/panorama', icon: 'icon-expand',
+    placeholder: "What's the broader RFC family behind RFC 6378's linear protection design?",
+  },
+};
+let currentTier = 'ask';
+
+function setTier(key) {
+  currentTier = key;
+  const t = TIERS[key];
+  document.querySelectorAll('.tier-card').forEach((c) => c.classList.toggle('active', c.dataset.tier === key));
+  researchControlsEl.style.setProperty('--tier-color', `var(--tier-${key})`);
+  researchControlsEl.style.setProperty('--tier-bg', `var(--tier-${key}-bg)`);
+  researchModeBadgeLabelEl.textContent = t.name;
+  researchModeBadgeEl.querySelector('use').setAttribute('href', `#${t.icon}`);
+  researchQueryEl.placeholder = t.placeholder;
+}
+
+document.getElementById('tierSelector').addEventListener('click', (e) => {
+  const card = e.target.closest('.tier-card');
+  if (card) setTier(card.dataset.tier);
+});
 
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1147,7 +1276,7 @@ document.getElementById('skills').addEventListener('click', (e) => {
 async function loadDrafts() {
   const res = await fetch('/api/corpora');
   const data = await res.json();
-  const draftSelects = [draftEl, investigateDraftEl, deepDiveDraftEl, panoramaDraftEl, trackDraftEl];
+  const draftSelects = [researchDraftEl, trackDraftEl];
   for (const c of data.catalog) {
     const label = c.rfc_number ? `${c.draft_name} (RFC ${c.rfc_number})` : c.draft_name;
     for (const sel of draftSelects) {
@@ -2572,31 +2701,6 @@ function renderTrace(trace) {
   return `<details class="trace"><summary>${trace.length} tool call(s) -- click to inspect</summary>${items}</details>`;
 }
 
-function statusLineForEvent(event) {
-  if (event.stage === 'tool_call') {
-    return `${event.forced ? 'Auto-checking' : 'Using'}: ${toolLabel(event.tool)}…`;
-  }
-  if (event.stage === 'thinking') return event.message || 'Thinking…';
-  if (event.stage === 'reasoning') return 'Thinking…';
-  return event.message || 'Working…';
-}
-
-function reasoningLogHtml(lines) {
-  if (!lines.length) return '';
-  const rendered = lines
-    .map((line, i) => `<div class="reasoning-line${i === lines.length - 1 ? ' latest' : ''}">${escapeHtml(line)}</div>`)
-    .join('');
-  return `<div class="reasoning-log">${rendered}</div>`;
-}
-
-const ASK_STEPS = [
-  { key: 'list_available_ietf_corpora', label: 'Discover drafts' },
-  { key: 'search_ietf_evolution_dataset', label: 'Search decisions' },
-  { key: 'search_ietf_mailarchive_dataset', label: 'Search discussions' },
-  { key: 'verify_answer', label: 'Verify answer' },
-  { key: 'answer', label: 'Answer' },
-];
-
 // Approximates the model's typical path through _INSTRUCTION's own numbered
 // steps -- not a literal execution graph like a Dify workflow has, since the
 // underlying loop is a dynamic, unbounded tool-calling sequence (it can
@@ -2605,7 +2709,9 @@ const ASK_STEPS = [
 // diagram instead of a new node, so the diagram stays a stable illustration
 // of the usual shape rather than a moving target. visitCounts (key -> times
 // fired) makes a real retry visible as a "x2" badge instead of silently
-// re-highlighting the same node as if it only ran once.
+// re-highlighting the same node as if it only ran once. Still used by Track
+// a Decision (TRACK_STEPS below) -- the Research tab's own fixed rail
+// (ASK_STEPS) was retired when Ask merged into the shared runAgentFlow.
 function stepDiagramHtml(steps, activeKey, visitCounts, errored, extraNote) {
   let html = '<div class="step-diagram">';
   steps.forEach((s, i) => {
@@ -2628,89 +2734,13 @@ function stepDiagramHtml(steps, activeKey, visitCounts, errored, extraNote) {
   return html + (extraNote ? `<div class="step-extra">${escapeHtml(extraNote)}</div>` : '');
 }
 
-function ask() {
-  const query = queryEl.value.trim();
-  if (!query) return;
-  askBtn.disabled = true;
-
-  const turn = document.createElement('div');
-  turn.className = 'turn';
-  const draftLabel = draftEl.value ? ` <em>(draft: ${escapeHtml(draftEl.value)})</em>` : '';
-  const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
-
-  const visitCounts = new Map();
-  const markVisited = (key) => visitCounts.set(key, (visitCounts.get(key) || 0) + 1);
-  let activeKey = null;
-  let extraNote = '';
-  let errored = false;
-  const reasoningLines = [];
-
-  const render = (bodyHtml) => {
-    turn.innerHTML = qHtml + stepDiagramHtml(ASK_STEPS, activeKey, visitCounts, errored, extraNote)
-      + reasoningLogHtml(reasoningLines) + bodyHtml;
-  };
-
-  render('<div class="loading">Starting…</div>');
-  convEl.appendChild(turn);
-  turn.scrollIntoView({behavior: 'smooth'});
-
-  const params = new URLSearchParams({query});
-  if (draftEl.value) params.set('draft', draftEl.value);
-  const source = new EventSource(`/api/ask?${params}`);
-  let finished = false;
-
-  const stop = () => {
-    finished = true;
-    source.close();
-    askBtn.disabled = false;
-    queryEl.value = '';
-    turn.scrollIntoView({behavior: 'smooth'});
-  };
-
-  source.onmessage = (ev) => {
-    const msg = JSON.parse(ev.data);
-    if (msg.type === 'progress') {
-      if (msg.stage === 'tool_call') {
-        const known = ASK_STEPS.find(s => s.key === msg.tool);
-        if (known) {
-          activeKey = msg.tool;
-          markVisited(msg.tool);
-          extraNote = '';
-        } else {
-          extraNote = `Also using: ${toolLabel(msg.tool)}`;
-        }
-      } else if (msg.stage === 'reasoning' && msg.message) {
-        reasoningLines.push(msg.message);
-      }
-      render(`<div class="loading">${escapeHtml(statusLineForEvent(msg))}</div>`);
-    } else if (msg.type === 'result') {
-      markVisited('answer');
-      activeKey = null;
-      render(`<div class="answer">${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace));
-      stop();
-    } else if (msg.type === 'error') {
-      errored = true;
-      render(`<div class="error-box">${escapeHtml(msg.message)}</div>`);
-      stop();
-    }
-  };
-  source.onerror = () => {
-    if (finished) return;
-    errored = true;
-    render('<div class="error-box">Connection lost.</div>');
-    stop();
-  };
-}
-
-askBtn.addEventListener('click', ask);
-queryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
-
-// Same /api/ask backend and agent loop as the Ask tab above -- the only
-// difference is presentation. Ask maps the loop onto a fixed 5-node rail
-// (ASK_STEPS) approximating the typical path; this renders the REAL path
-// taken, one entry per actual tool call in the order it happened (including
-// repeats and anything outside the fixed list), each paired with the
-// reasoning that preceded it -- a growing plan instead of a fixed diagram.
+// Renders the real path taken through the agent loop, one entry per actual
+// tool call in the order it happened, each paired with the reasoning that
+// preceded it -- a growing plan rather than a fixed diagram, since the
+// underlying loop is dynamic and unbounded (it can repeat, skip, or call
+// tools outside any fixed set). All four research tiers share this same
+// rendering now; Ask's own fixed 5-node rail (formerly ASK_STEPS) was
+// retired when it merged into the shared runAgentFlow below.
 function renderPlan(steps) {
   if (!steps.length) return '';
   const items = steps.map((s) => {
@@ -2729,21 +2759,24 @@ function renderPlan(steps) {
   return `<div class="agent-plan">${items}</div>`;
 }
 
-// Shared by Investigate and Deep Dive -- both render the same growing plan
-// list, and differ only in which backend endpoint they call (identical
-// agent/tools for Investigate; a more thorough pass with more iterations
-// and a depth-focused system-prompt addendum for Deep Dive -- see
-// /api/deep-dive in serve_ui.py). Not shared with Ask, which keeps its own
-// fixed-rail rendering deliberately unchanged.
-function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl) {
+// Drives all four research tiers now (Ask included, since it merged into
+// this shared flow) -- they differ only in which backend endpoint they call
+// (identical agent/tools for Ask/Investigate; more iterations and a depth-
+// or breadth-focused system-prompt addendum for Deep Dive/Panorama -- see
+// /api/deep-dive and /api/panorama in serve_ui.py) and in tierKey, used only
+// to tag the rendered turn with that tier's name/color so a conversation
+// mixing tiers stays legible when scrolled back through.
+function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) {
   const query = queryEl.value.trim();
   if (!query) return;
   btnEl.disabled = true;
 
+  const tier = TIERS[tierKey];
   const turn = document.createElement('div');
   turn.className = 'turn';
   const draftLabel = draftSelectEl.value ? ` <em>(draft: ${escapeHtml(draftSelectEl.value)})</em>` : '';
   const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
+  const tagHtml = `<span class="turn-tag"><svg class="icon-sm"><use href="#${tier.icon}"/></svg>${escapeHtml(tier.name)}</span>`;
 
   const steps = [];
   let pendingReason = null;
@@ -2782,7 +2815,7 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl) {
       render(steps.length ? '' : '<div class="loading">Starting…</div>');
     } else if (msg.type === 'result') {
       if (steps.length) steps[steps.length - 1].status = 'done';
-      render(`<div class="answer">${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace));
+      render(`<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace));
       stop();
     } else if (msg.type === 'error') {
       if (steps.length) steps[steps.length - 1].status = 'errored';
@@ -2798,31 +2831,9 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl) {
   };
 }
 
-const investigateDraftEl = document.getElementById('investigateDraft');
-const investigateQueryEl = document.getElementById('investigateQuery');
-const investigateBtnEl = document.getElementById('investigateBtn');
-const investigateConvEl = document.getElementById('investigateConversation');
-investigateBtnEl.addEventListener('click', () => runAgentFlow('/api/ask', investigateDraftEl, investigateQueryEl, investigateBtnEl, investigateConvEl));
-investigateQueryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runAgentFlow('/api/ask', investigateDraftEl, investigateQueryEl, investigateBtnEl, investigateConvEl);
-});
-
-const deepDiveDraftEl = document.getElementById('deepDiveDraft');
-const deepDiveQueryEl = document.getElementById('deepDiveQuery');
-const deepDiveBtnEl = document.getElementById('deepDiveBtn');
-const deepDiveConvEl = document.getElementById('deepDiveConversation');
-deepDiveBtnEl.addEventListener('click', () => runAgentFlow('/api/deep-dive', deepDiveDraftEl, deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl));
-deepDiveQueryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runAgentFlow('/api/deep-dive', deepDiveDraftEl, deepDiveQueryEl, deepDiveBtnEl, deepDiveConvEl);
-});
-
-const panoramaDraftEl = document.getElementById('panoramaDraft');
-const panoramaQueryEl = document.getElementById('panoramaQuery');
-const panoramaBtnEl = document.getElementById('panoramaBtn');
-const panoramaConvEl = document.getElementById('panoramaConversation');
-panoramaBtnEl.addEventListener('click', () => runAgentFlow('/api/panorama', panoramaDraftEl, panoramaQueryEl, panoramaBtnEl, panoramaConvEl));
-panoramaQueryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runAgentFlow('/api/panorama', panoramaDraftEl, panoramaQueryEl, panoramaBtnEl, panoramaConvEl);
+researchBtnEl.addEventListener('click', () => runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier));
+researchQueryEl.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier);
 });
 
 // Family Search (Demo) -- prototype-only, entirely fabricated data (see
