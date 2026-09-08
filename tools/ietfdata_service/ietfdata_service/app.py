@@ -709,7 +709,15 @@ def _available_draft_formats(draft_name: str) -> list[FormatInfo]:
 
 
 def _as_sidecar_file(filename: str, markdown: str) -> SidecarFileResponse:
-    content_base64 = base64.b64encode(markdown.encode("utf-8")).decode("ascii")
+    # errors="replace": markdown/JSONL content here can originate from raw
+    # email bodies (via the mailarchive endpoints below), which the email
+    # package decodes with surrogateescape for malformed byte sequences --
+    # those lone surrogates round-trip fine through Python str operations
+    # but raise UnicodeEncodeError on a strict utf-8 encode (confirmed live
+    # against a real dnsop mail archive message). Losing the exact bytes of
+    # one malformed character in an archival text export is an acceptable
+    # trade for not failing the entire import.
+    content_base64 = base64.b64encode(markdown.encode("utf-8", errors="replace")).decode("ascii")
     return SidecarFileResponse(filename=filename, mime_type="text/markdown", content_base64=content_base64)
 
 
@@ -717,7 +725,7 @@ def _as_jsonl_sidecar_file(filename: str, records: list[dict]) -> SidecarFileRes
     """Serialise a list of dicts as newline-delimited JSON and return a SidecarFileResponse."""
     lines = [json.dumps(r, ensure_ascii=False) for r in records]
     content = "\n".join(lines)
-    content_base64 = base64.b64encode(content.encode("utf-8")).decode("ascii")
+    content_base64 = base64.b64encode(content.encode("utf-8", errors="replace")).decode("ascii")
     return SidecarFileResponse(
         filename=filename,
         mime_type="application/x-ndjson",
@@ -1260,7 +1268,7 @@ def import_mailarchive_as_mbox(payload: MailarchiveImportRequest) -> SidecarFile
     response = SidecarFileResponse(
         filename=filename,
         mime_type="application/mbox",
-        content_base64=base64.b64encode(mbox_content.encode("utf-8")).decode("ascii"),
+        content_base64=base64.b64encode(mbox_content.encode("utf-8", errors="replace")).decode("ascii"),
         message_count=message_count,
     )
     return response

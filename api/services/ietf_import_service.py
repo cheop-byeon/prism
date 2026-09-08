@@ -2482,10 +2482,10 @@ class IetfImportService:
             # its absence says nothing about content quality, so older
             # messages fall back to a mid: identity instead of being
             # discarded by the quality filter.
-            archived_at = msg.get("Archived-At", "").strip()
+            archived_at = IetfImportService._decode_header(msg.get("Archived-At", "")).strip()
             url = archived_at.strip("<>").strip()
             if not url:
-                raw_mid = msg.get("Message-ID", "").strip().strip("<>")
+                raw_mid = IetfImportService._decode_header(msg.get("Message-ID", "")).strip().strip("<>")
                 message_id = raw_mid or str(len(accepted))
                 url = f"mid:{message_id}"
             else:
@@ -2498,11 +2498,21 @@ class IetfImportService:
             date = IetfImportService._decode_header(msg.get("Date", ""))
 
             # ---- Threading headers (used by group_into_threads) ----
+            # Every header read here goes through _decode_header first, not just
+            # .strip() -- email.policy's header factory can hand back a legacy
+            # email.header.Header object (not a str) for a header it can't parse
+            # into its own structured type, and Header has no .strip() (confirmed
+            # live against a real dnsop mail archive message). _decode_header
+            # already calls email.header.decode_header(), which explicitly
+            # accepts a Header instance as well as a plain string.
             from_header = IetfImportService._decode_header(msg.get("From", "")).strip()
-            raw_message_id_header = (msg.get("Message-ID") or "").strip()
+            raw_message_id_header = IetfImportService._decode_header(msg.get("Message-ID") or "").strip()
             references_header = " ".join(
                 part
-                for part in ((msg.get("References") or "").strip(), (msg.get("In-Reply-To") or "").strip())
+                for part in (
+                    IetfImportService._decode_header(msg.get("References") or "").strip(),
+                    IetfImportService._decode_header(msg.get("In-Reply-To") or "").strip(),
+                )
                 if part
             )
 
@@ -2757,7 +2767,15 @@ class IetfImportService:
 
     @staticmethod
     def _decode_header(value: str) -> str:
-        """Decode an RFC 2047-encoded header value to plain Unicode."""
+        """Decode an RFC 2047-encoded header value to plain Unicode.
+
+        `value` isn't always already a plain str: Message.get() can hand
+        back a legacy email.header.Header instance for a header it couldn't
+        parse cleanly (confirmed live against a real dnsop mail archive
+        message), and Header has no .strip() -- every caller here chains
+        .strip() straight onto this return value, so returning anything
+        else on the exception path just moves the crash one line later.
+        """
         try:
             parts = email_header_lib.decode_header(value)
             decoded: list[str] = []
@@ -2768,7 +2786,7 @@ class IetfImportService:
                     decoded.append(part)
             return "".join(decoded)
         except Exception:
-            return value
+            return str(value)
 
     @staticmethod
     def _extract_text_body(msg: email_lib.message.Message) -> str | None:
