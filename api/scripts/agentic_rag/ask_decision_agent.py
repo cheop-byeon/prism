@@ -280,7 +280,14 @@ _PANORAMA_ADDENDUM = (
     "question -- not every RFC discovery/search tool returns, since each add_local_source call is a "
     "real, moderately expensive fetch, not a free lookup. After pulling one, search_local_source can "
     "query it immediately in this same conversation, so you can actually read what you just pulled "
-    "before finishing your answer, not just report that you pulled it."
+    "before finishing your answer, not just report that you pulled it. "
+    "search_local_source's mail coverage is scoped per WORKING GROUP, not per draft: once you pull one "
+    "draft, searching it also searches its WG's entire mail archive, not just that one draft's own "
+    "thread. So if the central RFCs you found span more than one WG (each add_local_source/"
+    "list_available_ietf_corpora result names the WG), pull and search at least one representative "
+    "draft from EACH distinct WG before concluding the discussion was narrow -- stopping at the first "
+    "WG that returns a hit, when the question is genuinely cross-WG, understates the very breadth this "
+    "tier exists to find."
 )
 
 _ARCHIVE_BASE = "https://www.ietf.org/archive/id/"
