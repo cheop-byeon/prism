@@ -2,7 +2,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Decision Rationale Agent (standalone)</title>
+<title>Prism — Decision Rationale Agent (standalone)</title>
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
   :root {
@@ -93,6 +93,9 @@
     display: flex; align-items: center; gap: 12px; flex-shrink: 0;
   }
   header h1 { font-size: var(--text-lg); margin: 0; font-weight: 600; }
+  header .brand-mark { width: 30px; height: 22px; flex-shrink: 0; color: var(--text-dim); }
+  header .brand-text { display: flex; flex-direction: column; gap: 1px; line-height: 1.15; }
+  header .brand-sub { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: 400; }
 
   .tabs {
     display: flex; align-items: center; gap: 2px; padding: 0 var(--gutter-x); border-bottom: 1px solid var(--border);
@@ -830,7 +833,21 @@
   </defs>
 </svg>
 <header>
-  <h1>Decision Rationale Agent</h1>
+  <svg class="brand-mark" viewBox="0 0 44 32" role="img" aria-label="Prism logo: a beam entering a prism and splitting into a spectrum">
+    <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+    <polygon points="14,3 14,29 30,16" fill="var(--panel-2)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+    <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+    <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+  </svg>
+  <div class="brand-text">
+    <h1>Prism</h1>
+    <span class="brand-sub">Decision Rationale Agent</span>
+  </div>
 </header>
 <div class="tabs">
   <div class="tab-group">
