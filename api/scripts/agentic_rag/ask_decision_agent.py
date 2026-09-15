@@ -193,6 +193,7 @@ import re
 import sys
 import time
 import uuid
+from decimal import Decimal
 from pathlib import Path
 
 sys.path.insert(0, "/app/api")
@@ -208,17 +209,39 @@ _LLM_RETRIES = 2
 _LLM_RETRY_SECONDS = 8
 
 
-def _invoke_llm_with_retry(model_instance, **kwargs):
+def _invoke_llm_with_retry(model_instance, usage_sink: list | None = None, **kwargs):
     from core.plugin.impl.exc import PluginInvokeError
     from dify_graph.model_runtime.errors.invoke import InvokeError
 
     for attempt in range(_LLM_RETRIES + 1):
         try:
-            return model_instance.invoke_llm(**kwargs)
+            result = model_instance.invoke_llm(**kwargs)
+            if usage_sink is not None:
+                usage_sink.append(result.usage)
+            return result
         except (PluginInvokeError, InvokeError):
             if attempt == _LLM_RETRIES:
                 raise
             time.sleep(_LLM_RETRY_SECONDS)
+
+
+def _summarize_usage(usage_log: list) -> dict:
+    """Collapses every LLMUsage seen across one ask() call (the main loop's
+    iterations plus any verify_answer call) into one dict a caller can store
+    on a single Message row -- Message has no concept of "one turn, several
+    LLM calls", so this is the honest total for that turn.
+    """
+    total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0, "total_price": Decimal(0), "latency": 0.0}
+    currency = "USD"
+    for usage in usage_log:
+        total["prompt_tokens"] += usage.prompt_tokens
+        total["completion_tokens"] += usage.completion_tokens
+        total["total_tokens"] += usage.total_tokens
+        total["total_price"] += usage.total_price
+        total["latency"] += usage.latency
+        currency = usage.currency
+    total["currency"] = currency
+    return total
 
 
 def _load_skill(filename: str) -> str:
@@ -1531,7 +1554,9 @@ def _cite_iddiff_url(draft_name: str, from_revision: str, to_revision: str, quer
     return f"{url}  ({draft_name} rev {from_rev} -> {to_label}, couldn't pinpoint an exact hunk for {query!r})"
 
 
-def _verify_answer(draft_answer: str, evidence_log: list[str], model_instance) -> str:
+def _verify_answer(
+    draft_answer: str, evidence_log: list[str], model_instance, usage_sink: list | None = None
+) -> str:
     from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
 
     if not evidence_log:
@@ -1543,6 +1568,7 @@ def _verify_answer(draft_answer: str, evidence_log: list[str], model_instance) -
     evidence_block = "\n\n".join(f"--- evidence [{i}] ---\n{e}" for i, e in enumerate(evidence_log, start=1))
     result = _invoke_llm_with_retry(
         model_instance,
+        usage_sink=usage_sink,
         prompt_messages=[
             SystemPromptMessage(content=_VERIFY_INSTRUCTION),
             UserPromptMessage(
@@ -1959,6 +1985,7 @@ def ask(
     max_iterations: int | None = None,
     extra_instruction: str | None = None,
     history: list[dict] | None = None,
+    usage: list[dict] | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -1974,6 +2001,13 @@ def ask(
     User/AssistantPromptMessages before the current query so the model sees
     this as a continuing conversation. None (the default, every existing
     caller) omits history entirely and behaves exactly as before.
+
+    usage: optional out-param list (same pattern as `trace`) -- if given, one
+    dict summarizing every LLMUsage seen across this whole ask() call (main
+    loop iterations plus any verify_answer call) is appended to it just
+    before returning, for a caller that wants to persist cost/token totals
+    for the turn (e.g. onto a Message row). None (the default) skips this
+    entirely; every existing caller is unaffected.
 
     trace: optional list to append structured tool-call events to (tool
     name, args, iteration, whether it was self-directed or safety-net
@@ -2116,6 +2150,7 @@ def ask(
     last_evolution_call = None  # (query, observation) -- used to build a forced mailarchive query if needed
     evidence_log: list[str] = []  # every dataset/fetch observation, fed to verify_answer
     evolution_citations: list[tuple[str, str, str, str]] = []  # (header, from_rev, to_rev, url), every hit ever seen
+    usage_log: list = []  # every LLMUsage seen this call (main loop + any verify_answer), summarized in _finish
 
     def _mentions_revision_pair(text: str, from_rev: str, to_rev: str) -> bool:
         def mentions(rev: str) -> bool:
@@ -2165,6 +2200,16 @@ def ask(
                 header, url = match.groups()
                 return f"{content}\n\n---\nLive diff: {url}\n({header})"
         return content
+
+    def _finish(content: str) -> str:
+        """Every return path funnels through here (not just _finalize_answer
+        directly) so the usage summary is appended exactly once regardless
+        of which of the three exit points was taken.
+        """
+        final = _finalize_answer(content)
+        if usage is not None:
+            usage.append(_summarize_usage(usage_log))
+        return final
 
     def _run_tool_call(tool_name: str, args: dict, iteration: int, forced: bool = False) -> str:
         """Thin wrapper around _dispatch_tool_call that records a trace
@@ -2293,7 +2338,7 @@ def ask(
             if verbose:
                 print(f"[iter {iteration}] {tool_name} draft_answer_len={len(draft_answer)}", file=sys.stderr)
             verify_called = True
-            return _verify_answer(draft_answer, evidence_log, model_instance)
+            return _verify_answer(draft_answer, evidence_log, model_instance, usage_sink=usage_log)
 
         if tool_name == minutes_tool_name:
             wg = args.get("wg", "")
@@ -2400,6 +2445,7 @@ def ask(
             on_event({"stage": "thinking"})
         result = _invoke_llm_with_retry(
             model_instance,
+            usage_sink=usage_log,
             prompt_messages=prompt_messages,
             model_parameters={"temperature": 0.3, "top_p": 1},
             tools=[] if is_last else tools,
@@ -2412,7 +2458,7 @@ def ask(
 
         if not message.tool_calls:
             if is_last:
-                return _finalize_answer(content)
+                return _finish(content)
 
             if (
                 not evolution_dataset_id_candidate
@@ -2478,7 +2524,7 @@ def ask(
                 _force_tool_call(verify_tool_name, {"draft_answer": content}, content, iteration)
                 continue
 
-            return _finalize_answer(content)
+            return _finish(content)
 
         # agent_skill.md asks the model for a one-sentence rationale alongside
         # each tool call -- surface it live rather than only the fixed
@@ -2502,7 +2548,7 @@ def ask(
 
     # Ran out of iterations while the model still wanted to call tools; the
     # final iteration above was forced tool-free, so `content` holds its answer.
-    return _finalize_answer(content)
+    return _finish(content)
 
 
 def main() -> None:

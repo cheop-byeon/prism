@@ -335,10 +335,64 @@ def _sse_stream(app, work_fn):
     return Response(generate(), mimetype="text/event-stream", headers={"Cache-Control": "no-cache"})
 
 
+def _authenticate_console_request(request):
+    """Replicates the "console"/"inner_api" branch of
+    extensions.ext_login.load_user_from_request by hand.
+
+    That loader only verifies a token when request.blueprint is "console" or
+    "inner_api" (checked live) -- every route below is registered directly
+    on the bare app with no blueprint at all (this is a small standalone
+    Flask app, not a route bolted onto the real api service -- see this
+    file's module docstring), so request.blueprint is always None here and
+    none of that loader's branches ever fire. @login_required as-is would
+    therefore reject every request regardless of a valid cookie.
+
+    extract_access_token checks a cookie first, header second -- so a
+    browser tab that's already logged into Dify's console sends the same
+    cookie here (same host, just a different port; cookies aren't
+    port-scoped) and this authenticates exactly like the real console does,
+    without needing serve_ui.py's routes to live under that blueprint name.
+
+    Returns the logged-in Account, or None if unauthenticated.
+    """
+    from werkzeug.exceptions import Unauthorized
+
+    from libs.passport import PassportService
+    from libs.token import extract_access_token
+    from services.account_service import AccountService
+
+    auth_token = extract_access_token(request)
+    if not auth_token:
+        return None
+    try:
+        decoded = PassportService().verify(auth_token)
+    except Unauthorized:
+        return None
+    if decoded.get("token_source"):
+        return None
+    user_id = decoded.get("user_id")
+    if not user_id:
+        return None
+    return AccountService.load_logged_in_account(account_id=user_id)
+
+
 def main() -> None:
-    from flask import jsonify, request
+    from flask import g, jsonify, request
 
     app = create_app()
+
+    @app.before_request
+    def _require_console_login():
+        account = _authenticate_console_request(request)
+        if account is None:
+            if request.path == "/":
+                return (
+                    "<p>Log in to Dify's console in another tab, then reload this page.</p>",
+                    401,
+                    {"Content-Type": "text/html"},
+                )
+            return jsonify({"error": "Log in to Dify's console first."}), 401
+        g.account = account
 
     @app.route("/", methods=["GET"])
     def index():
@@ -921,25 +975,33 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    def _make_research_work(*, tier, query, draft, session_id, max_iterations=None, extra_instruction=None):
+    def _make_research_work(*, tier, query, draft, session_id, account, max_iterations=None, extra_instruction=None):
         """Shared body for /api/ask, /api/deep-dive, /api/panorama: resumes
-        (or creates) an AgenticRagSession, splices its prior turns in as
-        history, runs the agent, then persists the new turn -- so any of
-        the three tiers can continue the same saved conversation.
+        (or creates) a Conversation owned by `account`, splices its prior
+        turns in as history, runs the agent, then persists the new turn as
+        a real Message -- so any of the three tiers can continue the same
+        saved conversation, and it's the same account on every message.
+
+        `account` is a plain argument, not read from flask.g inside work()
+        -- flask.g is request-context-scoped, and work() runs in a
+        background thread under a manually-pushed app_context (see
+        _sse_stream) that has no request context at all, so g would be
+        empty there. Capturing it here, before the thread starts, is what
+        makes it available.
         """
-        from models.agentic_rag import AgenticRagTier
         from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
         from services.agentic_rag_session_service import AgenticRagSessionService
 
         def work(on_event):
             nonlocal session_id
-            session = AgenticRagSessionService.get_session(session_id) if session_id else None
+            session = AgenticRagSessionService.get_session(session_id, account=account) if session_id else None
             if session is None:
-                session = AgenticRagSessionService.create_session(title_seed=query)
+                session = AgenticRagSessionService.create_session(title_seed=query, account=account)
                 session_id = session.id
-            history = AgenticRagSessionService.get_history_for_prompt(session_id)
+            history = AgenticRagSessionService.get_history_for_prompt(session_id, account=account)
 
             trace: list[dict] = []
+            usage: list[dict] = []
             answer = ask_decision_agent(
                 query=query,
                 draft=draft,
@@ -948,13 +1010,16 @@ def main() -> None:
                 max_iterations=max_iterations,
                 extra_instruction=extra_instruction,
                 history=[{"query": t["query"], "answer": t["answer"]} for t in history],
+                usage=usage,
             )
             AgenticRagSessionService.append_turn(
                 session_id=session_id,
-                tier=AgenticRagTier(tier),
+                account=account,
+                tier=tier,
                 query=query,
                 answer=answer,
                 trace=trace,
+                usage=usage[0] if usage else None,
             )
             return {"answer": answer, "trace": trace, "session_id": session_id}
 
@@ -974,7 +1039,8 @@ def main() -> None:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        return _sse_stream(app, _make_research_work(tier=tier, query=query, draft=draft, session_id=session_id))
+        work = _make_research_work(tier=tier, query=query, draft=draft, session_id=session_id, account=g.account)
+        return _sse_stream(app, work)
 
     @app.route("/api/deep-dive", methods=["GET"])
     def api_deep_dive():
@@ -992,17 +1058,16 @@ def main() -> None:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        return _sse_stream(
-            app,
-            _make_research_work(
-                tier="deepdive",
-                query=query,
-                draft=draft,
-                session_id=session_id,
-                max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
-                extra_instruction=_DEEP_DIVE_ADDENDUM,
-            ),
+        work = _make_research_work(
+            tier="deepdive",
+            query=query,
+            draft=draft,
+            session_id=session_id,
+            account=g.account,
+            max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
+            extra_instruction=_DEEP_DIVE_ADDENDUM,
         )
+        return _sse_stream(app, work)
 
     @app.route("/api/panorama", methods=["GET"])
     def api_panorama():
@@ -1021,39 +1086,38 @@ def main() -> None:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        return _sse_stream(
-            app,
-            _make_research_work(
-                tier="panorama",
-                query=query,
-                draft=draft,
-                session_id=session_id,
-                max_iterations=_PANORAMA_MAX_ITERATIONS,
-                extra_instruction=_PANORAMA_ADDENDUM,
-            ),
+        work = _make_research_work(
+            tier="panorama",
+            query=query,
+            draft=draft,
+            session_id=session_id,
+            account=g.account,
+            max_iterations=_PANORAMA_MAX_ITERATIONS,
+            extra_instruction=_PANORAMA_ADDENDUM,
         )
+        return _sse_stream(app, work)
 
     @app.route("/api/sessions", methods=["GET"])
     def api_sessions_list():
         from services.agentic_rag_session_service import AgenticRagSessionService
 
-        return jsonify({"sessions": AgenticRagSessionService.list_sessions()})
+        return jsonify({"sessions": AgenticRagSessionService.list_sessions(account=g.account)})
 
     @app.route("/api/sessions/<session_id>", methods=["GET"])
     def api_sessions_get(session_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
 
-        session = AgenticRagSessionService.get_session(session_id)
+        session = AgenticRagSessionService.get_session(session_id, account=g.account)
         if session is None:
             return jsonify({"error": "session not found"}), 404
-        turns = AgenticRagSessionService.get_turns(session_id)
-        return jsonify({"id": session.id, "title": session.title, "turns": turns})
+        turns = AgenticRagSessionService.get_turns(session_id, account=g.account)
+        return jsonify({"id": session.id, "title": session.name, "turns": turns})
 
     @app.route("/api/sessions/<session_id>", methods=["DELETE"])
     def api_sessions_delete(session_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
 
-        if not AgenticRagSessionService.delete_session(session_id):
+        if not AgenticRagSessionService.delete_session(session_id, account=g.account):
             return jsonify({"error": "session not found"}), 404
         return jsonify({"ok": True})
 
