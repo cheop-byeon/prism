@@ -407,11 +407,21 @@ def main() -> None:
         account = _authenticate_console_request(request)
         if account is None:
             if request.path == "/":
-                return (
-                    "<p>Log in to Dify's console in another tab, then reload this page.</p>",
-                    401,
-                    {"Content-Type": "text/html"},
+                from configs import dify_config
+
+                # Prism has no login form of its own -- it rides on the real
+                # console's session cookie (see _authenticate_console_request),
+                # so "log in elsewhere" needs an actual link to that elsewhere.
+                # Confirmed live that CONSOLE_WEB_URL is the same URL Dify's
+                # own frontend uses for this, not a guess at a fixed port.
+                signin_url = f"{dify_config.CONSOLE_WEB_URL}/signin" if dify_config.CONSOLE_WEB_URL else None
+                message = (
+                    f'<p>Log in to Dify\'s console at <a href="{signin_url}">{signin_url}</a>, '
+                    "then reload this page.</p>"
+                    if signin_url
+                    else "<p>Log in to Dify's console in another tab, then reload this page.</p>"
                 )
+                return (message, 401, {"Content-Type": "text/html"})
             return jsonify({"error": "Log in to Dify's console first."}), 401
         g.account = account
 
