@@ -1958,6 +1958,7 @@ def ask(
     on_event=None,
     max_iterations: int | None = None,
     extra_instruction: str | None = None,
+    history: list[dict] | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -1967,6 +1968,12 @@ def ask(
     Deep Dive tab) run a genuinely more thorough pass without a second copy
     of this whole function; every existing caller omits both and is
     unaffected.
+
+    history: prior turns of the same Prism session, oldest first, each
+    {"query": str, "answer": str} -- spliced in as alternating
+    User/AssistantPromptMessages before the current query so the model sees
+    this as a continuing conversation. None (the default, every existing
+    caller) omits history entirely and behaves exactly as before.
 
     trace: optional list to append structured tool-call events to (tool
     name, args, iteration, whether it was self-directed or safety-net
@@ -2081,8 +2088,14 @@ def ask(
     hint_suffix = f"\n\n(Already known: {'; '.join(known_ids)}.)" if known_ids else ""
 
     system_instruction = f"{_INSTRUCTION}\n\n{extra_instruction}" if extra_instruction else _INSTRUCTION
+    history_messages: list = []
+    for turn in history or []:
+        history_messages.append(UserPromptMessage(content=turn["query"]))
+        history_messages.append(AssistantPromptMessage(content=turn["answer"]))
+
     prompt_messages: list = [
         SystemPromptMessage(content=system_instruction),
+        *history_messages,
         UserPromptMessage(content=f"{query}{hint_suffix}"),
     ]
 

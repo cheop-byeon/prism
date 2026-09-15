@@ -921,21 +921,60 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    def _make_research_work(*, tier, query, draft, session_id, max_iterations=None, extra_instruction=None):
+        """Shared body for /api/ask, /api/deep-dive, /api/panorama: resumes
+        (or creates) an AgenticRagSession, splices its prior turns in as
+        history, runs the agent, then persists the new turn -- so any of
+        the three tiers can continue the same saved conversation.
+        """
+        from models.agentic_rag import AgenticRagTier
+        from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        def work(on_event):
+            nonlocal session_id
+            session = AgenticRagSessionService.get_session(session_id) if session_id else None
+            if session is None:
+                session = AgenticRagSessionService.create_session(title_seed=query)
+                session_id = session.id
+            history = AgenticRagSessionService.get_history_for_prompt(session_id)
+
+            trace: list[dict] = []
+            answer = ask_decision_agent(
+                query=query,
+                draft=draft,
+                trace=trace,
+                on_event=on_event,
+                max_iterations=max_iterations,
+                extra_instruction=extra_instruction,
+                history=[{"query": t["query"], "answer": t["answer"]} for t in history],
+            )
+            AgenticRagSessionService.append_turn(
+                session_id=session_id,
+                tier=AgenticRagTier(tier),
+                query=query,
+                answer=answer,
+                trace=trace,
+            )
+            return {"answer": answer, "trace": trace, "session_id": session_id}
+
+        return work
+
     @app.route("/api/ask", methods=["GET"])
     def api_ask():
-        from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
-
         query = (request.args.get("query") or "").strip()
         draft = request.args.get("draft") or None
+        session_id = request.args.get("session_id") or None
+        # Investigate is a different live-reasoning render of this same
+        # endpoint, not a separate route -- the tier tag persisted with the
+        # turn still needs to tell the two apart, so the caller passes it.
+        tier = request.args.get("tier") or "ask"
+        if tier not in ("ask", "investigate"):
+            tier = "ask"
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        def work(on_event):
-            trace: list[dict] = []
-            answer = ask_decision_agent(query=query, draft=draft, trace=trace, on_event=on_event)
-            return {"answer": answer, "trace": trace}
-
-        return _sse_stream(app, work)
+        return _sse_stream(app, _make_research_work(tier=tier, query=query, draft=draft, session_id=session_id))
 
     @app.route("/api/deep-dive", methods=["GET"])
     def api_deep_dive():
@@ -946,26 +985,24 @@ def main() -> None:
         render of the same events (that's what Investigate already is).
         """
         from scripts.agentic_rag.ask_decision_agent import _DEEP_DIVE_ADDENDUM, _DEEP_DIVE_MAX_ITERATIONS
-        from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
 
         query = (request.args.get("query") or "").strip()
         draft = request.args.get("draft") or None
+        session_id = request.args.get("session_id") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        def work(on_event):
-            trace: list[dict] = []
-            answer = ask_decision_agent(
+        return _sse_stream(
+            app,
+            _make_research_work(
+                tier="deepdive",
                 query=query,
                 draft=draft,
-                trace=trace,
-                on_event=on_event,
+                session_id=session_id,
                 max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
                 extra_instruction=_DEEP_DIVE_ADDENDUM,
-            )
-            return {"answer": answer, "trace": trace}
-
-        return _sse_stream(app, work)
+            ),
+        )
 
     @app.route("/api/panorama", methods=["GET"])
     def api_panorama():
@@ -977,26 +1014,48 @@ def main() -> None:
         can be iterated on independently.
         """
         from scripts.agentic_rag.ask_decision_agent import _PANORAMA_ADDENDUM, _PANORAMA_MAX_ITERATIONS
-        from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
 
         query = (request.args.get("query") or "").strip()
         draft = request.args.get("draft") or None
+        session_id = request.args.get("session_id") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        def work(on_event):
-            trace: list[dict] = []
-            answer = ask_decision_agent(
+        return _sse_stream(
+            app,
+            _make_research_work(
+                tier="panorama",
                 query=query,
                 draft=draft,
-                trace=trace,
-                on_event=on_event,
+                session_id=session_id,
                 max_iterations=_PANORAMA_MAX_ITERATIONS,
                 extra_instruction=_PANORAMA_ADDENDUM,
-            )
-            return {"answer": answer, "trace": trace}
+            ),
+        )
 
-        return _sse_stream(app, work)
+    @app.route("/api/sessions", methods=["GET"])
+    def api_sessions_list():
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        return jsonify({"sessions": AgenticRagSessionService.list_sessions()})
+
+    @app.route("/api/sessions/<session_id>", methods=["GET"])
+    def api_sessions_get(session_id):
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        session = AgenticRagSessionService.get_session(session_id)
+        if session is None:
+            return jsonify({"error": "session not found"}), 404
+        turns = AgenticRagSessionService.get_turns(session_id)
+        return jsonify({"id": session.id, "title": session.title, "turns": turns})
+
+    @app.route("/api/sessions/<session_id>", methods=["DELETE"])
+    def api_sessions_delete(session_id):
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        if not AgenticRagSessionService.delete_session(session_id):
+            return jsonify({"error": "session not found"}), 404
+        return jsonify({"ok": True})
 
     def _demo_model_instance():
         """Same minimal model-instance setup ask() uses when there's no
