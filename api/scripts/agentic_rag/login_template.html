@@ -1,0 +1,156 @@
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in — Prism</title>
+<style>
+  /* Same token set as serve_ui_template.html -- kept in sync by hand since
+     this is a separate small page, not because the values should diverge. */
+  :root {
+    --bg: #0f1117; --panel: #171a23; --panel-2: #1e2230; --border: #2a2f3f;
+    --text: #e7e9ee; --text-dim: #b8c0d0; --accent: #7c9eff; --accent-dim: #3a4a7a;
+    --error: #e0645a; --error-bg: #3a2220;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --text-xs: 12px; --text-sm: 13px; --text-md: 14px; --text-lg: 20px;
+    --text-tertiary: #8b93a8; --text-quaternary: #565c70;
+    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 12px;
+    --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.4);
+    --focus-ring: 0 0 0 3px rgba(124, 158, 255, 0.35);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
+    height: 100vh; display: flex; align-items: center; justify-content: center;
+  }
+  .card {
+    width: 340px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg); padding: 32px 28px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .brand-mark { width: 30px; height: 22px; flex-shrink: 0; color: var(--text-dim); }
+  .brand h1 { font-size: var(--text-lg); margin: 0; font-weight: 600; }
+  .brand-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin: 2px 0 24px; }
+  label { display: block; font-size: var(--text-sm); color: var(--text-dim); margin: 14px 0 6px; }
+  input[type=email], input[type=password] {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-sm); padding: 9px 10px; font-size: var(--text-md); font-family: var(--sans);
+  }
+  input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+  button {
+    width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    border-radius: var(--radius-sm); padding: 10px; font-size: var(--text-md); font-weight: 600;
+    font-family: var(--sans); cursor: pointer; border: 1px solid transparent;
+  }
+  .btn-primary { background: var(--accent); color: #0a0e1a; margin-top: 20px; }
+  .btn-primary:disabled { background: var(--accent-dim); color: var(--text-quaternary); cursor: default; }
+  .btn-primary:not(:disabled):hover { filter: brightness(1.08); }
+  .btn-google {
+    background: transparent; color: var(--text); border-color: var(--border); margin-top: 10px;
+    text-decoration: none;
+  }
+  .btn-google:hover { border-color: var(--text-quaternary); }
+  .btn-google svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .divider {
+    display: flex; align-items: center; gap: 10px; margin: 18px 0 4px;
+    color: var(--text-quaternary); font-size: var(--text-xs);
+  }
+  .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  .error-box {
+    display: none; background: var(--error-bg); border: 1px solid var(--error); color: var(--error);
+    border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); margin-top: 14px;
+  }
+  .error-box.visible { display: block; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 44 32" role="img" aria-label="Prism logo">
+      <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+      <polygon points="14,3 14,29 30,16" fill="var(--panel-2)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+      <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+    </svg>
+    <h1>Prism</h1>
+  </div>
+  <p class="brand-sub">Sign in to continue</p>
+
+  __GOOGLE_BUTTON__
+
+  <form id="loginForm">
+    <label for="email">Email</label>
+    <input id="email" type="email" autocomplete="email" required>
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" required>
+    <button type="submit" class="btn-primary" id="submitBtn">Sign in</button>
+  </form>
+  <div class="error-box" id="errorBox"></div>
+</div>
+<script>
+// Prism has no account system of its own -- this form authenticates
+// against Dify's real console login (POST /console/api/login on the api
+// service itself, not this standalone page's own server), the same
+// endpoint Dify's own web app uses. A successful response sets the exact
+// access/refresh/csrf cookies this page's own auth check
+// (_authenticate_console_request in serve_ui.py) already reads, so
+// redirecting back to "/" afterward just works -- no token handling here.
+//
+// The password field is base64-encoded, not encrypted -- that's genuinely
+// all Dify's own decrypt_password_field decorator expects
+// (libs/encryption.py: FieldEncryption.decrypt_field is a plain base64
+// decode), so this matches the real contract rather than looking insecure
+// by comparison to a strength this endpoint was never designed to have.
+// Real protection here is HTTPS in a real deployment, exactly as it is
+// for Dify's own login form.
+const API_BASE = "__API_BASE__";
+
+const form = document.getElementById('loginForm');
+const errorBox = document.getElementById('errorBox');
+const submitBtn = document.getElementById('submitBtn');
+
+function showError(message) {
+  errorBox.textContent = message;
+  errorBox.classList.add('visible');
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  errorBox.classList.remove('visible');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Signing in…';
+
+  const email = document.getElementById('email').value.trim();
+  const password = document.getElementById('password').value;
+
+  try {
+    const res = await fetch(`${API_BASE}/console/api/login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        email,
+        password: btoa(password),
+        remember_me: true,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.result === 'success') {
+      window.location.href = '/';
+      return;
+    }
+    showError(data.data || data.message || 'Sign in failed -- check your email and password.');
+  } catch {
+    showError(`Couldn't reach the login service at ${API_BASE}. Is the api container running?`);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Sign in';
+  }
+});
+</script>
+</body>
+</html>

@@ -295,6 +295,52 @@ def _tool_info() -> list[dict]:
 
 
 _PAGE_HTML = (Path(__file__).parent / "serve_ui_template.html").read_text(encoding="utf-8")
+_LOGIN_PAGE_TEMPLATE = (Path(__file__).parent / "login_template.html").read_text(encoding="utf-8")
+
+# Standard 4-color Google "G" mark -- used on the login page's OAuth button.
+_GOOGLE_ICON_SVG = (
+    '<svg viewBox="0 0 24 24">'
+    '<path fill="#4285F4" d="M23.52 12.27c0-.85-.08-1.67-.22-2.45H12v4.63h6.46c-.28 1.5-1.13 2.77-2.4 3.62v3h3.88'
+    'c2.27-2.09 3.58-5.17 3.58-8.8z"/>'
+    '<path fill="#34A853" d="M12 24c3.24 0 5.96-1.07 7.95-2.9l-3.88-3c-1.08.72-2.45 1.15-4.07 1.15-3.13 0-5.78-2.11'
+    '-6.73-4.96H1.27v3.1C3.25 21.3 7.31 24 12 24z"/>'
+    '<path fill="#FBBC05" d="M5.27 14.29A7.2 7.2 0 0 1 4.86 12c0-.79.14-1.56.4-2.29v-3.1H1.27A11.99 11.99 0 0 0 0 12'
+    'c0 1.94.46 3.77 1.27 5.39l4-3.1z"/>'
+    '<path fill="#EA4335" d="M12 4.75c1.77 0 3.35.61 4.6 1.8l3.45-3.45C17.95 1.19 15.24 0 12 0 7.31 0 3.25 2.7 1.27'
+    ' 6.61l4 3.1C6.22 6.86 8.87 4.75 12 4.75z"/>'
+    "</svg>"
+)
+
+
+def _render_login_page() -> str:
+    """Fills in login_template.html's two placeholders:
+
+    __API_BASE__: the real Dify api service's own base URL (NOT this
+    standalone page's own server) -- CONSOLE_API_URL is meant to hold this
+    but is unset in this dev environment (confirmed live), which would also
+    break Google OAuth's own redirect_uri construction independent of
+    Prism, so the fallback matters beyond just this page. Falls back to
+    localhost:5001, the api container's actual published port (confirmed
+    live via `docker port`).
+
+    __GOOGLE_BUTTON__: only rendered when Google OAuth is actually
+    configured (GOOGLE_CLIENT_ID/SECRET set) -- reuses Dify's real,
+    already-working /console/api/oauth/login/google flow as-is; nothing
+    OAuth-related is reimplemented here.
+    """
+    from configs import dify_config
+
+    api_base = dify_config.CONSOLE_API_URL or "http://localhost:5001"
+    google_configured = bool(dify_config.GOOGLE_CLIENT_ID and dify_config.GOOGLE_CLIENT_SECRET)
+    google_html = (
+        f'<a class="btn-google" href="{api_base}/console/api/oauth/login/google">'
+        f"{_GOOGLE_ICON_SVG}Sign in with Google</a>"
+        '<div class="divider">or</div>'
+        if google_configured
+        else ""
+    )
+    return _LOGIN_PAGE_TEMPLATE.replace("__API_BASE__", api_base).replace("__GOOGLE_BUTTON__", google_html)
+
 
 # The whole-corpus obsoletes/updates graph takes ~2 minutes to build (a few
 # dozen paginated relation fetches plus ~80 batched metadata lookups) but
@@ -398,32 +444,27 @@ def _authenticate_console_request(request):
 
 
 def main() -> None:
-    from flask import g, jsonify, request
+    from flask import g, jsonify, redirect, request
 
     app = create_app()
 
     @app.before_request
     def _require_console_login():
+        # Must stay reachable while logged out, or nobody could ever reach
+        # the form that logs them in -- everything else in this app is
+        # gated, this route is the one deliberate exception.
+        if request.path == "/login":
+            return None
         account = _authenticate_console_request(request)
         if account is None:
             if request.path == "/":
-                from configs import dify_config
-
-                # Prism has no login form of its own -- it rides on the real
-                # console's session cookie (see _authenticate_console_request),
-                # so "log in elsewhere" needs an actual link to that elsewhere.
-                # Confirmed live that CONSOLE_WEB_URL is the same URL Dify's
-                # own frontend uses for this, not a guess at a fixed port.
-                signin_url = f"{dify_config.CONSOLE_WEB_URL}/signin" if dify_config.CONSOLE_WEB_URL else None
-                message = (
-                    f'<p>Log in to Dify\'s console at <a href="{signin_url}">{signin_url}</a>, '
-                    "then reload this page.</p>"
-                    if signin_url
-                    else "<p>Log in to Dify's console in another tab, then reload this page.</p>"
-                )
-                return (message, 401, {"Content-Type": "text/html"})
+                return redirect("/login")
             return jsonify({"error": "Log in to Dify's console first."}), 401
         g.account = account
+
+    @app.route("/login", methods=["GET"])
+    def login_page():
+        return _render_login_page()
 
     @app.route("/", methods=["GET"])
     def index():
