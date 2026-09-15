@@ -7,36 +7,43 @@ set -euo pipefail
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 cd "${SCRIPT_DIR}/../docker"
 
+COMPOSE_FILES=(-f docker-compose.yaml -f docker-compose.override.yaml)
+SERVICES=(api worker worker_beat ietfdata_service)
+
+# docker-compose.ietf-ui.yaml (Prism's ietf_decision_agent_ui) is a local,
+# gitignored override -- present on this dev machine but not guaranteed to
+# exist for every clone/environment, so it's included conditionally rather
+# than hardcoded: referencing a missing -f file would abort this whole
+# script (set -euo pipefail) and break rebuilding api/worker/etc too, not
+# just skip the one service that doesn't apply elsewhere.
+if [ -f docker-compose.ietf-ui.yaml ]; then
+  COMPOSE_FILES+=(-f docker-compose.ietf-ui.yaml)
+  SERVICES+=(ietf_decision_agent_ui)
+fi
+
 echo "==> Removing old dify-local-api:dev image, dangling images, and build cache..."
 docker rmi dify-local-api:dev 2>/dev/null || true
 docker image prune -f
 docker builder prune -f
 
 echo "==> Building dify-local-api:dev and ietfdata_service images..."
-docker compose \
-  -f docker-compose.yaml \
-  -f docker-compose.override.yaml \
-  build api ietfdata_service
+docker compose "${COMPOSE_FILES[@]}" build api ietfdata_service
 
 echo "==> Recreating backend containers with new images..."
-docker compose \
-  -f docker-compose.yaml \
-  -f docker-compose.override.yaml \
-  up -d --force-recreate --no-deps \
-  api worker worker_beat ietfdata_service || true
+# ietf_decision_agent_ui (Prism) runs off the same dify-local-api:dev image
+# tag as api, but is a separate container -- previously untouched by this
+# script, so it kept running its old image indefinitely (confirmed live: it
+# silently sat 2+ hours stale across several rebuilds until force-recreated
+# by hand). Included in SERVICES above so a rebuild actually reaches every
+# container on that tag, not just api/worker/worker_beat/ietfdata_service.
+docker compose "${COMPOSE_FILES[@]}" up -d --force-recreate --no-deps "${SERVICES[@]}" || true
 
 # If containers were only Created (not Started) due to init_permissions dep ordering, start them.
-docker compose \
-  -f docker-compose.yaml \
-  -f docker-compose.override.yaml \
-  start api worker worker_beat ietfdata_service 2>/dev/null || true
+docker compose "${COMPOSE_FILES[@]}" start "${SERVICES[@]}" 2>/dev/null || true
 
 echo "==> Waiting for api to be healthy..."
 for i in $(seq 1 30); do
-  if docker compose \
-      -f docker-compose.yaml \
-      -f docker-compose.override.yaml \
-      exec -T api flask --version >/dev/null 2>&1; then
+  if docker compose "${COMPOSE_FILES[@]}" exec -T api flask --version >/dev/null 2>&1; then
     echo "    api is up."
     break
   fi
@@ -44,13 +51,12 @@ for i in $(seq 1 30); do
 done
 
 echo "==> Recent api logs:"
-docker compose \
-  -f docker-compose.yaml \
-  -f docker-compose.override.yaml \
-  logs --tail=20 api
+docker compose "${COMPOSE_FILES[@]}" logs --tail=20 api
 
 echo "==> Recent ietfdata_service logs:"
-docker compose \
-  -f docker-compose.yaml \
-  -f docker-compose.override.yaml \
-  logs --tail=10 ietfdata_service
+docker compose "${COMPOSE_FILES[@]}" logs --tail=10 ietfdata_service
+
+if [ -f docker-compose.ietf-ui.yaml ]; then
+  echo "==> Recent ietf_decision_agent_ui (Prism) logs:"
+  docker compose "${COMPOSE_FILES[@]}" logs --tail=10 ietf_decision_agent_ui
+fi
