@@ -43,6 +43,16 @@ from pathlib import Path
 sys.path.insert(0, "/app/api")
 
 from app_factory import create_app
+from libs.helper import RateLimiter
+
+# Deep Dive/Panorama are the expensive tiers -- multi-iteration agent loops,
+# each iteration a real LLM call -- unlike Ask/Investigate's single-pass
+# budget. Reuses Dify's own generic Redis sliding-window limiter (already
+# used for things like password-reset throttling) rather than hand-rolling
+# one; keyed per-account now that these routes require real login. 20/hour
+# is a starting guess for a small-team internal tool, not a measured number.
+_DEEP_DIVE_RATE_LIMITER = RateLimiter(prefix="prism_deepdive", max_attempts=20, time_window=3600)
+_PANORAMA_RATE_LIMITER = RateLimiter(prefix="prism_panorama", max_attempts=20, time_window=3600)
 
 # Purely a visual grouping -- unlike the old uniform "custom" badge, this
 # actually varies per tool. Descriptions themselves come from
@@ -397,6 +407,31 @@ def main() -> None:
     @app.route("/", methods=["GET"])
     def index():
         return _PAGE_HTML
+
+    @app.route("/api/models", methods=["GET"])
+    def api_models():
+        """Lists this tenant's actually-configured, active LLMs via the same
+        ProviderManager ask() itself uses -- so the Research controls can
+        offer a real choice instead of every request being silently pinned
+        to ask()'s hardcoded default (google/gemini-2.5-flash via
+        openrouter), with no way to try a stronger model on a hard question.
+        """
+        from core.provider_manager import ProviderManager
+        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from extensions.ext_database import db
+        from models.account import Tenant
+
+        tenant_id = db.session.query(Tenant).first().id
+        configurations = ProviderManager().get_configurations(tenant_id)
+        models = configurations.get_models(model_type=ModelType.LLM, only_active=True)
+        return jsonify(
+            {
+                "models": [
+                    {"provider": m.provider.provider, "model": m.model, "label": m.label.en_US}
+                    for m in models
+                ]
+            }
+        )
 
     @app.route("/api/tools", methods=["GET"])
     def api_tools():
@@ -975,7 +1010,18 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    def _make_research_work(*, tier, query, draft, session_id, account, max_iterations=None, extra_instruction=None):
+    def _make_research_work(
+        *,
+        tier,
+        query,
+        draft,
+        session_id,
+        account,
+        max_iterations=None,
+        extra_instruction=None,
+        model_provider=None,
+        model_name=None,
+    ):
         """Shared body for /api/ask, /api/deep-dive, /api/panorama: resumes
         (or creates) a Conversation owned by `account`, splices its prior
         turns in as history, runs the agent, then persists the new turn as
@@ -1000,6 +1046,14 @@ def main() -> None:
                 session_id = session.id
             history = AgenticRagSessionService.get_history_for_prompt(session_id, account=account)
 
+            # Only overrides ask()'s own hardcoded default (google/gemini-2.5-flash
+            # via openrouter) when the Research controls' model picker actually sent
+            # one -- omitting the kwargs entirely (not passing None through) keeps
+            # every other caller (CLI, battery scripts) exactly as it was.
+            model_kwargs = {}
+            if model_provider and model_name:
+                model_kwargs = {"model_provider": model_provider, "model_name": model_name}
+
             trace: list[dict] = []
             usage: list[dict] = []
             answer = ask_decision_agent(
@@ -1011,8 +1065,9 @@ def main() -> None:
                 extra_instruction=extra_instruction,
                 history=[{"query": t["query"], "answer": t["answer"]} for t in history],
                 usage=usage,
+                **model_kwargs,
             )
-            AgenticRagSessionService.append_turn(
+            message_id = AgenticRagSessionService.append_turn(
                 session_id=session_id,
                 account=account,
                 tier=tier,
@@ -1021,7 +1076,7 @@ def main() -> None:
                 trace=trace,
                 usage=usage[0] if usage else None,
             )
-            return {"answer": answer, "trace": trace, "session_id": session_id}
+            return {"answer": answer, "trace": trace, "session_id": session_id, "message_id": message_id}
 
         return work
 
@@ -1039,7 +1094,15 @@ def main() -> None:
         if not query:
             return jsonify({"error": "query is required"}), 400
 
-        work = _make_research_work(tier=tier, query=query, draft=draft, session_id=session_id, account=g.account)
+        work = _make_research_work(
+            tier=tier,
+            query=query,
+            draft=draft,
+            session_id=session_id,
+            account=g.account,
+            model_provider=request.args.get("model_provider") or None,
+            model_name=request.args.get("model_name") or None,
+        )
         return _sse_stream(app, work)
 
     @app.route("/api/deep-dive", methods=["GET"])
@@ -1057,6 +1120,9 @@ def main() -> None:
         session_id = request.args.get("session_id") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
+        if _DEEP_DIVE_RATE_LIMITER.is_rate_limited(g.account.id):
+            return jsonify({"error": "Deep Dive rate limit reached -- try again later."}), 429
+        _DEEP_DIVE_RATE_LIMITER.increment_rate_limit(g.account.id)
 
         work = _make_research_work(
             tier="deepdive",
@@ -1066,6 +1132,8 @@ def main() -> None:
             account=g.account,
             max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
             extra_instruction=_DEEP_DIVE_ADDENDUM,
+            model_provider=request.args.get("model_provider") or None,
+            model_name=request.args.get("model_name") or None,
         )
         return _sse_stream(app, work)
 
@@ -1085,6 +1153,9 @@ def main() -> None:
         session_id = request.args.get("session_id") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
+        if _PANORAMA_RATE_LIMITER.is_rate_limited(g.account.id):
+            return jsonify({"error": "Panorama rate limit reached -- try again later."}), 429
+        _PANORAMA_RATE_LIMITER.increment_rate_limit(g.account.id)
 
         work = _make_research_work(
             tier="panorama",
@@ -1094,6 +1165,8 @@ def main() -> None:
             account=g.account,
             max_iterations=_PANORAMA_MAX_ITERATIONS,
             extra_instruction=_PANORAMA_ADDENDUM,
+            model_provider=request.args.get("model_provider") or None,
+            model_name=request.args.get("model_name") or None,
         )
         return _sse_stream(app, work)
 
@@ -1120,6 +1193,23 @@ def main() -> None:
         if not AgenticRagSessionService.delete_session(session_id, account=g.account):
             return jsonify({"error": "session not found"}), 404
         return jsonify({"ok": True})
+
+    @app.route("/api/messages/<message_id>/feedback", methods=["POST"])
+    def api_message_feedback(message_id):
+        from services.agentic_rag_session_service import AgenticRagSessionService
+        from services.errors.message import MessageNotExistsError
+
+        body = request.get_json(silent=True) or {}
+        rating = body.get("rating")
+        if rating not in ("like", "dislike", None):
+            return jsonify({"error": "rating must be 'like', 'dislike', or null"}), 400
+        try:
+            result = AgenticRagSessionService.set_feedback(
+                message_id=message_id, account=g.account, rating=rating, content=body.get("content")
+            )
+        except (MessageNotExistsError, ValueError) as exc:
+            return jsonify({"error": str(exc) or "message not found"}), 404
+        return jsonify(result)
 
     def _demo_model_instance():
         """Same minimal model-instance setup ask() uses when there's no

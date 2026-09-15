@@ -5,10 +5,11 @@ from decimal import Decimal
 from extensions.ext_database import db
 from libs.datetime_utils import naive_utc_now
 from models import Account, Tenant
-from models.enums import ConversationFromSource
-from models.model import App, AppMode, Conversation, Message
+from models.enums import ConversationFromSource, CreatorUserRole, FeedbackRating
+from models.model import App, AppMode, Conversation, Message, MessageAgentThought, MessageFeedback
 from services.conversation_service import ConversationService
 from services.errors.conversation import ConversationNotExistsError
+from services.message_service import MessageService
 
 # Not a real `apps` row -- Conversation/Message.app_id has no DB-level FK
 # constraint (confirmed in models/model.py), and ask_decision_agent.py's own
@@ -121,13 +122,40 @@ class AgenticRagSessionService:
         turns = []
         for row in rows:
             meta = json.loads(row.message_metadata) if row.message_metadata else {}
+            # Not Message.admin_feedback -- that property matches on
+            # from_source alone (at most one "admin" in a normal Dify app),
+            # which would show one Prism user another's feedback on a
+            # shared message. Scoped to this account explicitly instead.
+            feedback_row = (
+                db.session.query(MessageFeedback)
+                .filter(MessageFeedback.message_id == row.id, MessageFeedback.from_account_id == account.id)
+                .first()
+            )
+            thought_rows = (
+                db.session.query(MessageAgentThought)
+                .filter(MessageAgentThought.message_id == row.id)
+                .order_by(MessageAgentThought.position.asc())
+                .all()
+            )
+            trace = [
+                {
+                    "tool": thought.tool,
+                    "args": json.loads(thought.tool_input) if thought.tool_input else {},
+                    "iteration": thought.position,
+                    "forced": json.loads(thought.tool_meta_str or "{}").get("forced", False),
+                    "observation_preview": thought.observation,
+                }
+                for thought in thought_rows
+            ]
             turns.append(
                 {
+                    "message_id": row.id,
                     "tier": meta.get("tier", "ask"),
                     "query": row.query,
                     "answer": row.answer,
-                    "trace": meta.get("trace"),
+                    "trace": trace,
                     "created_at": row.created_at.isoformat(),
+                    "feedback": feedback_row.rating.value if feedback_row else None,
                 }
             )
         return turns
@@ -146,7 +174,7 @@ class AgenticRagSessionService:
         answer: str,
         trace: list | None,
         usage: dict | None,
-    ) -> None:
+    ) -> str:
         usage = usage or {}
         message = Message(
             app_id=_PRISM_APP_ID,
@@ -168,9 +196,29 @@ class AgenticRagSessionService:
             from_end_user_id=None,
             from_account_id=account.id,
             app_mode=AppMode.AGENT_CHAT,
-            message_metadata=json.dumps({"tier": tier, "trace": trace}),
+            message_metadata=json.dumps({"tier": tier}),
         )
         db.session.add(message)
+        db.session.flush()  # populate message.id before the thoughts below reference it
+
+        # One real MessageAgentThought row per tool call, not a JSON blob in
+        # message_metadata -- tool/tool_input/observation map directly onto
+        # what ask_decision_agent.py's trace entries already carry, and this
+        # is the same table/shape Dify's own message_fields.py already knows
+        # how to serialize for agent-thought rendering elsewhere.
+        for position, entry in enumerate(trace or []):
+            db.session.add(
+                MessageAgentThought(
+                    message_id=message.id,
+                    position=position,
+                    created_by_role=CreatorUserRole.ACCOUNT,
+                    created_by=account.id,
+                    tool=entry.get("tool"),
+                    tool_input=json.dumps(entry.get("args") or {}),
+                    observation=entry.get("observation_preview"),
+                    tool_meta_str=json.dumps({"forced": entry.get("forced", False)}),
+                )
+            )
 
         conversation = db.session.query(Conversation).filter(Conversation.id == session_id).first()
         is_first_turn = False
@@ -187,3 +235,25 @@ class AgenticRagSessionService:
             tenant_id = db.session.query(Tenant).first().id
             with contextlib.suppress(Exception):
                 ConversationService.auto_generate_name(_prism_app(tenant_id), conversation)
+
+        return message.id
+
+    @staticmethod
+    def set_feedback(*, message_id: str, account: Account, rating: str | None, content: str | None = None) -> dict:
+        """Thumbs up/down on one answer -- reuses MessageService.create_feedback
+        as-is (it toggles/clears/updates a MessageFeedback row by itself);
+        rating=None clears existing feedback, matching that method's own
+        contract. Real per-answer quality signal to query later, where Prism
+        previously had none at all.
+        """
+        parsed_rating = FeedbackRating(rating) if rating else None
+        feedback = MessageService.create_feedback(
+            app_model=_prism_app(),
+            message_id=message_id,
+            user=account,
+            rating=parsed_rating,
+            content=content,
+        )
+        if parsed_rating is None or feedback is None:
+            return {"rating": None, "content": None}
+        return {"rating": feedback.rating.value, "content": feedback.content}

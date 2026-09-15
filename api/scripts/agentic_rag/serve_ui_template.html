@@ -298,6 +298,13 @@
     text-transform: uppercase; letter-spacing: 0.04em; color: var(--turn-color, var(--text-dim));
     margin-bottom: 8px;
   }
+  .feedback-row { display: flex; gap: 4px; margin-top: 10px; }
+  .feedback-btn {
+    background: transparent; border: 1px solid var(--border); color: var(--text-quaternary);
+    padding: 4px 8px; font-size: var(--text-sm); border-radius: var(--radius-sm);
+  }
+  .feedback-btn:hover { color: var(--text-dim); border-color: var(--text-quaternary); }
+  .feedback-btn.active { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
   .trace { margin-top: 10px; }
   .trace summary {
     cursor: pointer; font-size: var(--text-sm); color: var(--text-dim); user-select: none;
@@ -929,6 +936,7 @@
               <span id="researchModeBadgeLabel">Ask</span>
             </span>
             <select id="researchDraft"><option value="">(let the agent discover)</option></select>
+            <select id="researchModel"><option value="">(default model)</option></select>
             <input id="researchQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
             <button id="researchBtn" class="btn-primary">Ask</button>
           </div>
@@ -1138,6 +1146,7 @@
 </div>
 <script>
 const researchDraftEl = document.getElementById('researchDraft');
+const researchModelEl = document.getElementById('researchModel');
 const researchQueryEl = document.getElementById('researchQuery');
 const researchBtnEl = document.getElementById('researchBtn');
 const researchConvEl = document.getElementById('researchConversation');
@@ -1345,6 +1354,23 @@ async function loadDrafts() {
       opt.textContent = label;
       sel.appendChild(opt);
     }
+  }
+}
+
+// Populates the model picker from this tenant's actually-configured, active
+// LLMs (GET /api/models, backed by the same ProviderManager ask() itself
+// uses) -- previously every request was silently pinned to ask()'s
+// hardcoded default with no way to try a stronger model on a hard question.
+// Encodes provider+model into one option value (a delimiter unlikely to
+// appear in either) rather than a second parallel <select>.
+async function loadModels() {
+  const res = await fetch('/api/models');
+  const data = await res.json();
+  for (const m of data.models || []) {
+    const opt = document.createElement('option');
+    opt.value = `${m.provider}|||${m.model}`;
+    opt.textContent = m.label;
+    researchModelEl.appendChild(opt);
   }
 }
 
@@ -2852,6 +2878,11 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
   const params = new URLSearchParams({query, tier: tierKey});
   if (draftSelectEl.value) params.set('draft', draftSelectEl.value);
   if (currentSessionId) params.set('session_id', currentSessionId);
+  if (researchModelEl.value) {
+    const [modelProvider, modelName] = researchModelEl.value.split('|||');
+    params.set('model_provider', modelProvider);
+    params.set('model_name', modelName);
+  }
   const source = new EventSource(`${endpoint}?${params}`);
   let finished = false;
 
@@ -2876,7 +2907,11 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
       render(steps.length ? '' : '<div class="loading">Starting…</div>');
     } else if (msg.type === 'result') {
       if (steps.length) steps[steps.length - 1].status = 'done';
-      render(`<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${linkify(msg.data.answer)}</div>` + renderTrace(msg.data.trace));
+      render(
+        `<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${linkify(msg.data.answer)}</div>`
+        + renderTrace(msg.data.trace)
+        + renderFeedback(msg.data.message_id, null)
+      );
       if (msg.data.session_id) {
         // Every tier can create/continue the same saved session -- refresh
         // the sidebar so a brand-new session appears (and recency reorders).
@@ -2914,9 +2949,48 @@ function renderStaticTurn(t) {
   const tagHtml = `<span class="turn-tag"><svg class="icon-sm"><use href="#${tier.icon}"/></svg>${escapeHtml(tier.name)}</span>`;
   turn.innerHTML = qHtml
     + `<div class="answer" style="--turn-color: var(--tier-${t.tier});">${tagHtml}${linkify(t.answer)}</div>`
-    + renderTrace(t.trace || []);
+    + renderTrace(t.trace || [])
+    + renderFeedback(t.message_id, t.feedback || null);
   return turn;
 }
+
+// Thumbs up/down on one answer -- backed by Dify's real MessageFeedback
+// table (see AgenticRagSessionService.set_feedback), not a bespoke one.
+// Clicking an already-active button clears feedback rather than toggling
+// to the opposite rating, matching how MessageService.create_feedback
+// itself treats rating=null (clear) vs a rating (set/replace).
+function renderFeedback(messageId, rating) {
+  if (!messageId) return '';
+  const likeActive = rating === 'like' ? ' active' : '';
+  const dislikeActive = rating === 'dislike' ? ' active' : '';
+  return `
+    <div class="feedback-row" data-message-id="${messageId}">
+      <button class="feedback-btn${likeActive}" data-rating="like" title="Good answer">&#128077;</button>
+      <button class="feedback-btn${dislikeActive}" data-rating="dislike" title="Not good">&#128078;</button>
+    </div>`;
+}
+
+researchConvEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.feedback-btn');
+  if (!btn) return;
+  const row = btn.closest('.feedback-row');
+  const messageId = row.dataset.messageId;
+  const clearing = btn.classList.contains('active');
+  const rating = clearing ? null : btn.dataset.rating;
+  fetch(`/api/messages/${messageId}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      row.querySelectorAll('.feedback-btn').forEach((b) => b.classList.remove('active'));
+      if (result.rating) {
+        const activeBtn = row.querySelector(`.feedback-btn[data-rating="${result.rating}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
+      }
+    });
+});
 
 function renderSessionList(sessions) {
   if (!sessions.length) {
@@ -3303,6 +3377,7 @@ threadQueryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') trackD
 loadTools();
 loadSkills();
 loadDrafts();
+loadModels();
 loadCorpora();
 loadResourceTypes();
 loadMailingLists();
