@@ -309,12 +309,13 @@
     margin-bottom: 8px;
   }
   .feedback-row { display: flex; gap: 4px; margin-top: 10px; }
-  .feedback-btn {
+  .feedback-btn, .copy-btn {
     background: transparent; border: 1px solid var(--border); color: var(--text-quaternary);
     padding: 4px 8px; font-size: var(--text-sm); border-radius: var(--radius-sm);
   }
-  .feedback-btn:hover { color: var(--text-dim); border-color: var(--text-quaternary); }
+  .feedback-btn:hover, .copy-btn:hover { color: var(--text-dim); border-color: var(--text-quaternary); }
   .feedback-btn.active { color: var(--text); border-color: var(--accent); background: var(--accent-dim); }
+  .retry-btn { margin-top: 8px; }
   .trace { margin-top: 10px; }
   .trace summary {
     cursor: pointer; font-size: var(--text-sm); color: var(--text-dim); user-select: none;
@@ -1210,6 +1211,23 @@ function escapeHtml(s) {
 
 function linkify(text) {
   return escapeHtml(text).replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+}
+
+// Lightweight inline markdown for Research answers -- **bold**, *italic*,
+// `code`, and a few common list/heading markers were previously rendering
+// as literal asterisks/dashes. Not a full markdown parser (no nested
+// structure, no block-level lists) since .answer already has
+// white-space:pre-wrap so line breaks and indentation already render
+// correctly without one -- just the inline emphasis markers that plain
+// linkify() left untouched. Escapes first, same as linkify, so this can
+// never introduce unescaped HTML from the model's own output.
+function renderMarkdown(text) {
+  let html = escapeHtml(text);
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(^|[\s(])\*([^*\n]+?)\*(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
+  html = html.replace(/^#{1,6} (.+)$/gm, '<strong>$1</strong>');
+  return html.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
@@ -2868,10 +2886,15 @@ function renderPlan(steps) {
 // /api/deep-dive and /api/panorama in serve_ui.py) and in tierKey, used only
 // to tag the rendered turn with that tier's name/color so a conversation
 // mixing tiers stays legible when scrolled back through.
+// Holds the current run's own stop() trigger, or null if none is active --
+// lets the (single, static) button click handler below decide whether a
+// click means "start" or "stop" without runAgentFlow needing to know about
+// the button's own click listener.
+let activeResearchStop = null;
+
 function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) {
   const query = queryEl.value.trim();
   if (!query) return;
-  btnEl.disabled = true;
 
   const tier = TIERS[tierKey];
   const turn = document.createElement('div');
@@ -2882,6 +2905,7 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
 
   const steps = [];
   let pendingReason = null;
+  let requestId = null;
 
   const render = (bodyHtml) => {
     turn.innerHTML = qHtml + renderPlan(steps) + bodyHtml;
@@ -2902,18 +2926,50 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
   const source = new EventSource(`${endpoint}?${params}`);
   let finished = false;
 
+  // Restored verbatim in stop() below -- this button's label doesn't
+  // actually vary by tier today (it's always "Ask" in the markup
+  // regardless of currentTier), so restoring tier.name here instead of
+  // whatever it actually said would be an unrelated behavior change.
+  const originalBtnText = btnEl.textContent;
+  btnEl.textContent = 'Stop';
+  // Actually cancels ask()'s background loop server-side (see ask()'s
+  // cancel_event) -- not instant, since the LLM call already in flight has
+  // to finish first, so this just requests it and waits for the normal
+  // "result" event (whatever _finish produced) to arrive as usual.
+  activeResearchStop = () => {
+    if (!requestId) return;
+    btnEl.disabled = true;
+    btnEl.textContent = 'Stopping…';
+    fetch(`/api/research/${requestId}/cancel`, { method: 'POST' }).catch(() => {});
+  };
+
   const stop = () => {
     finished = true;
     source.close();
+    activeResearchStop = null;
     btnEl.disabled = false;
+    btnEl.textContent = originalBtnText;
     queryEl.value = '';
     turn.scrollIntoView({behavior: 'smooth'});
+  };
+
+  const retryButtonHtml = '<button class="retry-btn btn-secondary">Retry</button>';
+  const wireRetryButton = () => {
+    const retryBtn = turn.querySelector('.retry-btn');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        queryEl.value = query;
+        runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey);
+      });
+    }
   };
 
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
-      if (msg.stage === 'reasoning' && msg.message) {
+      if (msg.stage === 'started' && msg.request_id) {
+        requestId = msg.request_id;
+      } else if (msg.stage === 'reasoning' && msg.message) {
         pendingReason = msg.message;
       } else if (msg.stage === 'tool_call') {
         if (steps.length) steps[steps.length - 1].status = 'done';
@@ -2924,9 +2980,9 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
     } else if (msg.type === 'result') {
       if (steps.length) steps[steps.length - 1].status = 'done';
       render(
-        `<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${linkify(msg.data.answer)}</div>`
+        `<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${renderMarkdown(msg.data.answer)}</div>`
         + renderTrace(msg.data.trace)
-        + renderFeedback(msg.data.message_id, null)
+        + renderFeedback(msg.data.message_id, null, msg.data.answer)
       );
       if (msg.data.session_id) {
         // Every tier can create/continue the same saved session -- refresh
@@ -2937,21 +2993,28 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
       stop();
     } else if (msg.type === 'error') {
       if (steps.length) steps[steps.length - 1].status = 'errored';
-      render(`<div class="error-box">${escapeHtml(msg.message)}</div>`);
+      render(`<div class="error-box">${escapeHtml(msg.message)}</div>${retryButtonHtml}`);
+      wireRetryButton();
       stop();
     }
   };
   source.onerror = () => {
     if (finished) return;
     if (steps.length) steps[steps.length - 1].status = 'errored';
-    render('<div class="error-box">Connection lost.</div>');
+    render(`<div class="error-box">Connection lost.</div>${retryButtonHtml}`);
+    wireRetryButton();
     stop();
   };
 }
 
-researchBtnEl.addEventListener('click', () => runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier));
+researchBtnEl.addEventListener('click', () => {
+  if (activeResearchStop) { activeResearchStop(); return; }
+  runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier);
+});
 researchQueryEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier);
+  if (e.key === 'Enter' && !activeResearchStop) {
+    runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier);
+  }
 });
 
 // Renders one turn loaded back from a saved session (GET /api/sessions/<id>)
@@ -2964,9 +3027,9 @@ function renderStaticTurn(t) {
   const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(t.query)}</div>`;
   const tagHtml = `<span class="turn-tag"><svg class="icon-sm"><use href="#${tier.icon}"/></svg>${escapeHtml(tier.name)}</span>`;
   turn.innerHTML = qHtml
-    + `<div class="answer" style="--turn-color: var(--tier-${t.tier});">${tagHtml}${linkify(t.answer)}</div>`
+    + `<div class="answer" style="--turn-color: var(--tier-${t.tier});">${tagHtml}${renderMarkdown(t.answer)}</div>`
     + renderTrace(t.trace || [])
-    + renderFeedback(t.message_id, t.feedback || null);
+    + renderFeedback(t.message_id, t.feedback || null, t.answer);
   return turn;
 }
 
@@ -2974,8 +3037,11 @@ function renderStaticTurn(t) {
 // table (see AgenticRagSessionService.set_feedback), not a bespoke one.
 // Clicking an already-active button clears feedback rather than toggling
 // to the opposite rating, matching how MessageService.create_feedback
-// itself treats rating=null (clear) vs a rating (set/replace).
-function renderFeedback(messageId, rating) {
+// itself treats rating=null (clear) vs a rating (set/replace). Also a copy
+// button -- answerText goes into a data attribute (the browser decodes the
+// HTML-escaping automatically via .dataset) rather than needing the raw
+// string held anywhere in JS state.
+function renderFeedback(messageId, rating, answerText) {
   if (!messageId) return '';
   const likeActive = rating === 'like' ? ' active' : '';
   const dislikeActive = rating === 'dislike' ? ' active' : '';
@@ -2983,10 +3049,22 @@ function renderFeedback(messageId, rating) {
     <div class="feedback-row" data-message-id="${messageId}">
       <button class="feedback-btn${likeActive}" data-rating="like" title="Good answer">&#128077;</button>
       <button class="feedback-btn${dislikeActive}" data-rating="dislike" title="Not good">&#128078;</button>
+      <button class="copy-btn" data-copy-text="${escapeHtml(answerText || '')}" title="Copy answer">&#128203;</button>
     </div>`;
 }
 
 researchConvEl.addEventListener('click', (e) => {
+  const copyBtn = e.target.closest('.copy-btn');
+  if (copyBtn) {
+    const original = copyBtn.innerHTML;
+    navigator.clipboard.writeText(copyBtn.dataset.copyText)
+      .then(() => {
+        copyBtn.innerHTML = '&#10003;';
+        setTimeout(() => { copyBtn.innerHTML = original; }, 1200);
+      })
+      .catch(() => {});
+    return;
+  }
   const btn = e.target.closest('.feedback-btn');
   if (!btn) return;
   const row = btn.closest('.feedback-row');

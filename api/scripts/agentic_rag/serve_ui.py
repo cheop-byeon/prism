@@ -37,13 +37,24 @@ Then open http://localhost:8765/ (or whatever port is mapped).
 # ruff: noqa: T201 -- stdout output is the point of a CLI tool
 
 import sys
+import threading
 import traceback
+import uuid
 from pathlib import Path
 
 sys.path.insert(0, "/app/api")
 
 from app_factory import create_app
 from libs.helper import RateLimiter
+
+# Keyed by a per-request id handed to the client as the first SSE event (see
+# _make_research_work) so a Stop button can actually halt the background
+# thread ask() runs in -- not just close the client's own connection, which
+# does nothing server-side (see ask()'s cancel_event docstring). Scoped to
+# only the three research routes on purpose: _sse_stream is shared by many
+# other routes in this file (mail sync, RFC graph, topic-pull, ...) that
+# this change doesn't touch at all.
+_ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
 
 # Deep Dive/Panorama are the expensive tiers -- multi-iteration agent loops,
 # each iteration a real LLM call -- unlike Ask/Investigate's single-pass
@@ -1038,47 +1049,59 @@ def main() -> None:
         from scripts.agentic_rag.ask_decision_agent import ask as ask_decision_agent
         from services.agentic_rag_session_service import AgenticRagSessionService
 
+        request_id = str(uuid.uuid4())
+        cancel_event = threading.Event()
+        _ACTIVE_CANCEL_EVENTS[request_id] = cancel_event
+
         def work(on_event):
             nonlocal session_id
-            session = AgenticRagSessionService.get_session(session_id, account=account) if session_id else None
-            if session is None:
-                session = AgenticRagSessionService.create_session(title_seed=query, account=account)
-                session_id = session.id
-            history = AgenticRagSessionService.get_history_for_prompt(session_id, account=account)
+            try:
+                # Sent before anything else so a Stop button has the id to
+                # cancel against even during the very first LLM call.
+                on_event({"stage": "started", "request_id": request_id})
 
-            # Only overrides ask()'s own hardcoded default (google/gemini-2.5-flash
-            # via openrouter) when the Research controls' model picker actually sent
-            # one -- omitting the kwargs entirely (not passing None through) keeps
-            # every other caller (CLI, battery scripts) exactly as it was.
-            model_kwargs = {}
-            if model_provider and model_name:
-                model_kwargs = {"model_provider": model_provider, "model_name": model_name}
+                session = AgenticRagSessionService.get_session(session_id, account=account) if session_id else None
+                if session is None:
+                    session = AgenticRagSessionService.create_session(title_seed=query, account=account)
+                    session_id = session.id
+                history = AgenticRagSessionService.get_history_for_prompt(session_id, account=account)
 
-            trace: list[dict] = []
-            usage: list[dict] = []
-            answer = ask_decision_agent(
-                query=query,
-                draft=draft,
-                trace=trace,
-                on_event=on_event,
-                max_iterations=max_iterations,
-                extra_instruction=extra_instruction,
-                history=[{"query": t["query"], "answer": t["answer"]} for t in history],
-                usage=usage,
-                **model_kwargs,
-            )
-            message_id = AgenticRagSessionService.append_turn(
-                session_id=session_id,
-                account=account,
-                tier=tier,
-                query=query,
-                answer=answer,
-                trace=trace,
-                usage=usage[0] if usage else None,
-                model_provider=model_provider,
-                model_name=model_name,
-            )
-            return {"answer": answer, "trace": trace, "session_id": session_id, "message_id": message_id}
+                # Only overrides ask()'s own hardcoded default (google/gemini-2.5-flash
+                # via openrouter) when the Research controls' model picker actually sent
+                # one -- omitting the kwargs entirely (not passing None through) keeps
+                # every other caller (CLI, battery scripts) exactly as it was.
+                model_kwargs = {}
+                if model_provider and model_name:
+                    model_kwargs = {"model_provider": model_provider, "model_name": model_name}
+
+                trace: list[dict] = []
+                usage: list[dict] = []
+                answer = ask_decision_agent(
+                    query=query,
+                    draft=draft,
+                    trace=trace,
+                    on_event=on_event,
+                    max_iterations=max_iterations,
+                    extra_instruction=extra_instruction,
+                    history=[{"query": t["query"], "answer": t["answer"]} for t in history],
+                    usage=usage,
+                    cancel_event=cancel_event,
+                    **model_kwargs,
+                )
+                message_id = AgenticRagSessionService.append_turn(
+                    session_id=session_id,
+                    account=account,
+                    tier=tier,
+                    query=query,
+                    answer=answer,
+                    trace=trace,
+                    usage=usage[0] if usage else None,
+                    model_provider=model_provider,
+                    model_name=model_name,
+                )
+                return {"answer": answer, "trace": trace, "session_id": session_id, "message_id": message_id}
+            finally:
+                _ACTIVE_CANCEL_EVENTS.pop(request_id, None)
 
         return work
 
@@ -1239,6 +1262,19 @@ def main() -> None:
         except (MessageNotExistsError, ValueError) as exc:
             return jsonify({"error": str(exc) or "message not found"}), 404
         return jsonify(result)
+
+    @app.route("/api/research/<request_id>/cancel", methods=["POST"])
+    def api_research_cancel(request_id):
+        """Sets the cancel_event a Deep Dive/Panorama/Ask run is already
+        checking (see ask()'s cancel_event param) -- a real stop, not just
+        the client closing its own SSE connection, which doesn't touch the
+        background thread the agent loop actually runs in.
+        """
+        cancel_event = _ACTIVE_CANCEL_EVENTS.get(request_id)
+        if cancel_event is None:
+            return jsonify({"error": "not found or already finished"}), 404
+        cancel_event.set()
+        return jsonify({"ok": True})
 
     def _demo_model_instance():
         """Same minimal model-instance setup ask() uses when there's no

@@ -1987,6 +1987,7 @@ def ask(
     extra_instruction: str | None = None,
     history: list[dict] | None = None,
     usage: list[dict] | None = None,
+    cancel_event=None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -2009,6 +2010,16 @@ def ask(
     before returning, for a caller that wants to persist cost/token totals
     for the turn (e.g. onto a Message row). None (the default) skips this
     entirely; every existing caller is unaffected.
+
+    cancel_event: optional threading.Event -- checked once at the top of
+    each main-loop iteration; if set, the loop stops immediately and
+    returns early (through _finish, so trace/usage still reflect whatever
+    was actually done) instead of running to completion or to
+    max_iterations. This is real, not a UI-only illusion: the SSE
+    connection closing client-side does NOT stop the loop running
+    server-side, since it's a genuinely separate background thread (see
+    serve_ui.py's _sse_stream) -- a caller that wants a working Stop button
+    needs this. None (the default, every existing caller) never checks it.
 
     trace: optional list to append structured tool-call events to (tool
     name, args, iteration, whether it was self-directed or safety-net
@@ -2470,6 +2481,8 @@ def ask(
         # all floors are satisfied, or once the model does everything on its
         # own, tool-free rounds are forced to guarantee termination.
         is_last = iteration == effective_max_iterations
+        if cancel_event is not None and cancel_event.is_set():
+            return _finish(f"Cancelled by user after {iteration - 1} step(s).")
         if on_event:
             on_event({"stage": "thinking"})
         result = _invoke_llm_with_retry(
