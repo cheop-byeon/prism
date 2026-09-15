@@ -1075,6 +1075,8 @@ def main() -> None:
                 answer=answer,
                 trace=trace,
                 usage=usage[0] if usage else None,
+                model_provider=model_provider,
+                model_name=model_name,
             )
             return {"answer": answer, "trace": trace, "session_id": session_id, "message_id": message_id}
 
@@ -1173,8 +1175,13 @@ def main() -> None:
     @app.route("/api/sessions", methods=["GET"])
     def api_sessions_list():
         from services.agentic_rag_session_service import AgenticRagSessionService
+        from services.errors.conversation import LastConversationNotExistsError
 
-        return jsonify({"sessions": AgenticRagSessionService.list_sessions(account=g.account)})
+        last_id = request.args.get("last_id") or None
+        try:
+            return jsonify(AgenticRagSessionService.list_sessions(account=g.account, last_id=last_id))
+        except LastConversationNotExistsError:
+            return jsonify({"error": "last_id not found"}), 400
 
     @app.route("/api/sessions/<session_id>", methods=["GET"])
     def api_sessions_get(session_id):
@@ -1184,7 +1191,29 @@ def main() -> None:
         if session is None:
             return jsonify({"error": "session not found"}), 404
         turns = AgenticRagSessionService.get_turns(session_id, account=g.account)
-        return jsonify({"id": session.id, "title": session.name, "turns": turns})
+        return jsonify(
+            {
+                "id": session.id,
+                "title": session.name,
+                "turns": turns,
+                "model_provider": session.model_provider,
+                "model_id": session.model_id,
+            }
+        )
+
+    @app.route("/api/sessions/<session_id>", methods=["PATCH"])
+    def api_sessions_rename(session_id):
+        from services.agentic_rag_session_service import AgenticRagSessionService
+        from services.errors.conversation import ConversationNotExistsError
+
+        name = ((request.get_json(silent=True) or {}).get("name") or "").strip()
+        if not name:
+            return jsonify({"error": "name is required"}), 400
+        try:
+            session = AgenticRagSessionService.rename_session(session_id, account=g.account, name=name[:200])
+        except ConversationNotExistsError:
+            return jsonify({"error": "session not found"}), 404
+        return jsonify({"id": session.id, "title": session.name})
 
     @app.route("/api/sessions/<session_id>", methods=["DELETE"])
     def api_sessions_delete(session_id):

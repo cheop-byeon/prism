@@ -192,6 +192,7 @@ import operator
 import re
 import sys
 import time
+import traceback
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -2216,10 +2217,37 @@ def ask(
         entry when the caller asked for one (see ask()'s trace param) --
         kept separate from dispatch itself so every call path (model-
         initiated and safety-net forced) is traced uniformly in one place.
+
+        Also the one seam every tool call funnels through, so it's the one
+        place to catch a tool's own failure (a network timeout, a malformed
+        upstream response, a subprocess error) and turn it into an
+        observation the model can react to -- try something else, or note
+        in the final answer that this couldn't be verified -- instead of an
+        uncaught exception aborting the whole ask() call and losing
+        everything already found this turn. Two specific instances of
+        exactly this were already fixed one call site at a time (a
+        malformed mail message, a bad agent-supplied dataset_id); this
+        generalizes that same fix to every tool instead of waiting to hit
+        the next one. db.session.rollback() mirrors the dataset_id fix's
+        own reasoning: an aborted DB-level exception otherwise poisons
+        every subsequent query in the same request, not just this one.
         """
         if on_event:
             on_event({"stage": "tool_call", "tool": tool_name, "forced": forced})
-        observation = _dispatch_tool_call(tool_name, args, iteration)
+        errored = False
+        try:
+            observation = _dispatch_tool_call(tool_name, args, iteration)
+        except Exception as exc:
+            from extensions.ext_database import db
+
+            db.session.rollback()
+            errored = True
+            observation = (
+                f"{tool_name} failed: {type(exc).__name__}: {exc}. "
+                "Try a different tool or approach, or note in the final answer that this couldn't be verified."
+            )
+            if verbose:
+                traceback.print_exc()
         if trace is not None:
             trace.append(
                 {
@@ -2227,6 +2255,7 @@ def ask(
                     "args": args,
                     "iteration": iteration,
                     "forced": forced,
+                    "errored": errored,
                     "observation_preview": (observation[:400] + " …") if len(observation) > 400 else observation,
                 }
             )

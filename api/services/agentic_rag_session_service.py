@@ -2,14 +2,24 @@ import contextlib
 import json
 from decimal import Decimal
 
+from core.app.entities.app_invoke_entities import InvokeFrom
 from extensions.ext_database import db
 from libs.datetime_utils import naive_utc_now
+from libs.infinite_scroll_pagination import InfiniteScrollPagination
 from models import Account, Tenant
 from models.enums import ConversationFromSource, CreatorUserRole, FeedbackRating
 from models.model import App, AppMode, Conversation, Message, MessageAgentThought, MessageFeedback
 from services.conversation_service import ConversationService
 from services.errors.conversation import ConversationNotExistsError
 from services.message_service import MessageService
+
+# Prism has no real per-invocation surface of its own (WEB_APP/SERVICE_API
+# don't apply -- it's neither Dify's web app nor an API caller); DEBUGGER is
+# the closest fit for "an internal console tool", and since every Prism
+# Conversation leaves invoke_from unset (None), pagination_by_last_id's own
+# `Conversation.invoke_from.is_(None) OR == invoke_from` filter matches
+# regardless of which value is passed here -- this is mostly documentation.
+_INVOKE_FROM = InvokeFrom.DEBUGGER
 
 # Not a real `apps` row -- Conversation/Message.app_id has no DB-level FK
 # constraint (confirmed in models/model.py), and ask_decision_agent.py's own
@@ -85,20 +95,32 @@ class AgenticRagSessionService:
             return None
 
     @staticmethod
-    def list_sessions(*, account: Account, limit: int = 200) -> list[dict]:
-        rows = (
-            db.session.query(Conversation)
-            .filter(
-                Conversation.app_id == _PRISM_APP_ID,
-                Conversation.from_source == ConversationFromSource.CONSOLE,
-                Conversation.from_account_id == account.id,
-                Conversation.is_deleted.is_(False),
-            )
-            .order_by(Conversation.updated_at.desc())
-            .limit(limit)
-            .all()
+    def list_sessions(*, account: Account, last_id: str | None = None, limit: int = 30) -> dict:
+        """Real cursor pagination via ConversationService.pagination_by_last_id
+        (the same method a normal Dify app's conversation list uses) instead
+        of a flat limit=200 query that silently dropped anything older.
+        """
+        pagination: InfiniteScrollPagination = ConversationService.pagination_by_last_id(
+            session=db.session,
+            app_model=_prism_app(),
+            user=account,
+            last_id=last_id,
+            limit=limit,
+            invoke_from=_INVOKE_FROM,
         )
-        return [{"id": row.id, "title": row.name, "updated_at": row.updated_at.isoformat()} for row in rows]
+        return {
+            "sessions": [
+                {
+                    "id": row.id,
+                    "title": row.name,
+                    "updated_at": row.updated_at.isoformat(),
+                    "model_provider": row.model_provider,
+                    "model_id": row.model_id,
+                }
+                for row in pagination.data
+            ],
+            "has_more": pagination.has_more,
+        }
 
     @staticmethod
     def delete_session(session_id: str, *, account: Account) -> bool:
@@ -174,6 +196,8 @@ class AgenticRagSessionService:
         answer: str,
         trace: list | None,
         usage: dict | None,
+        model_provider: str | None = None,
+        model_name: str | None = None,
     ) -> str:
         usage = usage or {}
         message = Message(
@@ -226,6 +250,14 @@ class AgenticRagSessionService:
             conversation.updated_at = naive_utc_now()
             conversation.dialogue_count = (conversation.dialogue_count or 0) + 1
             is_first_turn = conversation.dialogue_count == 1
+            # Conversation.model_provider/model_id are real, otherwise-unused
+            # columns on this same row -- remembers whichever model a
+            # session last actually used, so reopening it can pre-select the
+            # same one instead of every session silently reverting to
+            # ask()'s hardcoded default.
+            if model_provider and model_name:
+                conversation.model_provider = model_provider
+                conversation.model_id = model_name
         db.session.commit()
 
         if is_first_turn and conversation is not None:
@@ -257,3 +289,11 @@ class AgenticRagSessionService:
         if parsed_rating is None or feedback is None:
             return {"rating": None, "content": None}
         return {"rating": feedback.rating.value, "content": feedback.content}
+
+    @staticmethod
+    def rename_session(session_id: str, *, account: Account, name: str) -> Conversation:
+        """Reuses ConversationService.rename as-is -- it already handles
+        looking the conversation up scoped to this account (raises
+        ConversationNotExistsError otherwise) and committing the change.
+        """
+        return ConversationService.rename(_prism_app(), session_id, account, name, auto_generate=False)
