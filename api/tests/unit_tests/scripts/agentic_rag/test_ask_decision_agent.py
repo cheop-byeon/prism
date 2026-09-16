@@ -3,12 +3,17 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.agentic_rag.ask_decision_agent import (
+    _TOOL_DISPLAY_NAMES,
+    _build_tools,
     _extract_message_links,
+    _filter_primary_source_text,
     _format_evolution_hits,
     _format_hits,
     _iddiff_page_url,
     _parse_evolution_body,
+    _resolve_draft_hint,
     _summarize_usage,
+    tool_display_name,
 )
 
 
@@ -170,3 +175,115 @@ class TestIddiffPageUrl:
             "https://author-tools.ietf.org/iddiff"
             "?url1=draft-ietf-example-thing-05&url2=draft-ietf-example-thing-06&difftype=--html"
         )
+
+
+class TestResolveDraftHint:
+    _catalog = [
+        {"draft_name": "draft-ietf-quic-transport", "wg": "quic", "rfc_number": "9000"},
+        {"draft_name": "draft-ietf-ledbat-congestion", "wg": "ledbat", "rfc_number": None},
+    ]
+
+    def test_matches_exact_draft_name(self):
+        result = _resolve_draft_hint("draft-ietf-quic-transport", self._catalog)
+
+        assert result is self._catalog[0]
+
+    def test_matches_wg_case_insensitively(self):
+        result = _resolve_draft_hint("QUIC", self._catalog)
+
+        assert result is self._catalog[0]
+
+    def test_matches_bare_rfc_number(self):
+        assert _resolve_draft_hint("9000", self._catalog) is self._catalog[0]
+
+    def test_matches_rfc_number_with_prefix_and_whitespace(self):
+        # needle_rfc strips a leading "rfc" (plus any following whitespace)
+        # before comparing against the catalog's bare number -- "RFC 9000"
+        # and "rfc9000" must both resolve the same as "9000" alone.
+        assert _resolve_draft_hint("RFC 9000", self._catalog) is self._catalog[0]
+        assert _resolve_draft_hint("rfc9000", self._catalog) is self._catalog[0]
+
+    def test_no_match_returns_none(self):
+        assert _resolve_draft_hint("nonexistent", self._catalog) is None
+
+    def test_ambiguous_match_returns_none_rather_than_guessing(self):
+        # Two entries sharing the same WG acronym -- resolving to either
+        # one silently would risk showing the wrong draft's history.
+        ambiguous_catalog = [
+            {"draft_name": "draft-a", "wg": "quic", "rfc_number": None},
+            {"draft_name": "draft-b", "wg": "quic", "rfc_number": None},
+        ]
+
+        assert _resolve_draft_hint("quic", ambiguous_catalog) is None
+
+
+class TestFilterPrimarySourceText:
+    _text = "Para one about INIT_CWND.\n\nPara two about congestion.\n\nAnother INIT_CWND paragraph here."
+
+    def test_no_query_returns_full_text_under_cap(self):
+        result = _filter_primary_source_text(self._text, None, "draft-x-01", max_chars=6000)
+
+        assert result == f"[draft-x-01, full text]\n\n{self._text}"
+
+    def test_no_query_truncates_over_cap(self):
+        result = _filter_primary_source_text("a" * 20, None, "draft-x-01", max_chars=10)
+
+        assert result == (
+            "[draft-x-01, showing first 10 of 20 chars -- "
+            "pass a `query` to search for a specific phrase instead]\n\n" + "a" * 10
+        )
+
+    def test_query_matches_only_containing_paragraphs_case_insensitively(self):
+        result = _filter_primary_source_text(self._text, "init_cwnd", "draft-x-01")
+
+        assert result == (
+            "[draft-x-01, 2 paragraph(s) matching 'init_cwnd']\n\n"
+            "Para one about INIT_CWND.\n\n---\n\nAnother INIT_CWND paragraph here."
+        )
+
+    def test_query_no_match_says_so_explicitly(self):
+        result = _filter_primary_source_text(self._text, "nomatch", "draft-x-01")
+
+        assert result == "[draft-x-01] No paragraph containing 'nomatch' was found in this document."
+
+    def test_query_match_truncates_over_cap(self):
+        result = _filter_primary_source_text("X" * 20 + " INIT_CWND", "INIT_CWND", "draft-x-01", max_chars=10)
+
+        assert result == "[draft-x-01, 1 paragraph(s) matching 'INIT_CWND']\n\n" + "X" * 10 + "\n\n[truncated]"
+
+
+class TestBuildTools:
+    """Guards against exactly the kind of drift the tool-name constants
+    exist to prevent (see EVOLUTION_TOOL_NAME et al.'s own comment) --
+    _build_tools() and _TOOL_DISPLAY_NAMES are two separate hand-maintained
+    lists of the same tool names, so nothing stops them silently diverging
+    when a tool is added, renamed, or removed in only one of them.
+    """
+
+    def test_every_tool_has_a_display_name_and_vice_versa(self):
+        tool_names = {t.name for t in _build_tools()}
+
+        assert tool_names == set(_TOOL_DISPLAY_NAMES.keys())
+
+    def test_no_duplicate_tool_names(self):
+        tools = _build_tools()
+
+        assert len({t.name for t in tools}) == len(tools)
+
+    def test_every_tool_has_a_non_empty_description(self):
+        for t in _build_tools():
+            assert t.description, f"{t.name} has no description"
+
+    def test_required_parameters_are_a_subset_of_declared_properties(self):
+        for t in _build_tools():
+            properties = set(t.parameters.get("properties", {}).keys())
+            required = set(t.parameters.get("required", []))
+            assert required <= properties, f"{t.name} requires undeclared parameter(s)"
+
+
+class TestToolDisplayName:
+    def test_known_tool_returns_its_display_name(self):
+        assert tool_display_name("search_ietf_evolution_dataset") == "Search decisions"
+
+    def test_unknown_tool_falls_back_to_the_raw_name(self):
+        assert tool_display_name("totally_unknown_tool") == "totally_unknown_tool"
