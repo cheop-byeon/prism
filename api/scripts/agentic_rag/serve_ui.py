@@ -447,6 +447,58 @@ def _authenticate_console_request(request):
     return AccountService.load_logged_in_account(account_id=user_id)
 
 
+# Mutating data-sync/download actions -- restricted to real members of the
+# tenant that owns the actual IETF datasets (see _is_data_admin), not just
+# anyone logged into Prism. Without this, every self-service sign-up could
+# independently trigger a full mailarchive IMAP sync, draft download, BM25
+# rebuild, or bulk RFC pull -- all hitting the same shared data one person
+# already maintains, not per-user data each visitor is supposed to own.
+# Read-only browsing of what's already synced (GET /api/corpora,
+# /api/sources/<wg>/<doc_type>, topic-discover, ...) stays open to everyone,
+# same as Research/Sessions/Feedback -- only the actions that write/fetch
+# new data are gated here.
+_DATA_ADMIN_ONLY_EXACT_PATHS = {
+    "/api/corpora/mail-sync",
+    "/api/corpora/draft-download",
+    "/api/corpora/draft-download-all",
+    "/api/corpora/local-sync",
+    "/api/corpora/local-index",
+    "/api/corpora/topic-pull",
+}
+
+
+def _is_data_admin_route(path: str) -> bool:
+    if path in _DATA_ADMIN_ONLY_EXACT_PATHS:
+        return True
+    return path.startswith("/api/sources/") and path.endswith("/download")
+
+
+def _is_data_admin(account) -> bool:
+    """Whether `account` is a genuine member of the tenant that owns the
+    real IETF datasets -- NOT the account's own personal tenant, which
+    every self-service sign-up gets automatically and which Prism's own
+    agent loop never actually uses (ask_decision_agent.py always resolves
+    tenant_id from a dataset's real owner or the first tenant in the DB,
+    never from the logged-in account). Self-service sign-ups are never
+    added as members of this tenant, so this check excludes them by
+    construction -- only accounts someone deliberately invited to the real
+    workspace pass.
+    """
+    from extensions.ext_database import db
+    from models.account import Tenant, TenantAccountJoin
+
+    admin_tenant_id = db.session.query(Tenant).first().id
+    return (
+        db.session.query(TenantAccountJoin)
+        .filter(
+            TenantAccountJoin.tenant_id == admin_tenant_id,
+            TenantAccountJoin.account_id == account.id,
+        )
+        .first()
+        is not None
+    )
+
+
 def main() -> None:
     from flask import g, jsonify, redirect, request
 
@@ -466,6 +518,8 @@ def main() -> None:
                 return redirect("/login")
             return jsonify({"error": "Log in to Dify's console first."}), 401
         g.account = account
+        if _is_data_admin_route(request.path) and not _is_data_admin(account):
+            return jsonify({"error": "This action is restricted to data maintainers."}), 403
 
     @app.route("/login", methods=["GET"])
     def login_page():
