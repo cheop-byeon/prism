@@ -493,6 +493,23 @@
     flex-shrink: 0;
   }
   .modal-box.modal-wide { width: min(760px, 100%); }
+  .cred-modal-body { padding: 16px 18px; overflow-y: auto; }
+  .cred-provider-card {
+    border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 12px 14px; margin-bottom: 12px;
+  }
+  .cred-provider-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .cred-provider-label { font-weight: 600; color: var(--text); }
+  .cred-status { font-size: var(--text-xs); color: var(--text-dim); }
+  .cred-status-on { color: var(--accent); }
+  .cred-fields { display: flex; flex-direction: column; gap: 8px; }
+  .cred-field-label { font-size: var(--text-xs); color: var(--text-dim); }
+  .cred-fields input {
+    width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-sm); padding: 6px 8px; font-size: var(--text-sm); font-family: var(--sans);
+  }
+  .cred-provider-actions { display: flex; gap: 8px; margin-top: 10px; }
+  .cred-provider-msg { font-size: var(--text-xs); margin-top: 6px; }
+  .cred-provider-msg-error { color: var(--error); }
   .modal-tabs { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .modal-tab {
     background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-dim);
@@ -971,8 +988,27 @@
             </span>
             <select id="researchDraft"><option value="">(let the agent discover)</option></select>
             <select id="researchModel"><option value="">(default model)</option></select>
+            <button id="myLlmKeysBtn" type="button" class="btn-ghost" title="Use your own API key for a provider">My keys</button>
             <input id="researchQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
             <button id="researchBtn" class="btn-primary">Ask</button>
+          </div>
+        </div>
+
+        <div class="modal-overlay" id="myLlmKeysModal" hidden>
+          <div class="modal-box modal-wide">
+            <div class="modal-head">
+              <span class="modal-title">My API keys</span>
+              <button class="modal-close" id="myLlmKeysModalClose"><svg class="icon"><use href="#icon-close"/></svg></button>
+            </div>
+            <div class="cred-modal-body">
+              <p class="add-source-subhint">
+                Bring your own key for a provider and your Research/Deep Dive/Panorama requests
+                bill to it instead of the shared org key. Leave a provider unconfigured to keep
+                using the shared key as before. If your key fails, you'll see a clear error -- it
+                never silently falls back to the shared key.
+              </p>
+              <div id="myLlmKeysContent"><div class="loading">Loading…</div></div>
+            </div>
           </div>
         </div>
         <div class="session-usage-bar" id="sessionUsageBar"></div>
@@ -1434,13 +1470,19 @@ async function loadDrafts() {
 // Encodes provider+model into one option value (a delimiter unlikely to
 // appear in either) rather than a second parallel <select>.
 async function loadModels() {
+  // Re-callable (not just once at page load) -- saving or clearing a BYOK
+  // credential in the "My keys" modal can add or remove which models are
+  // selectable, so every option past the first "(default model)" one is
+  // dropped and rebuilt rather than appended onto, which would duplicate
+  // on a second call.
+  while (researchModelEl.options.length > 1) researchModelEl.remove(1);
   try {
     const res = await fetch('/api/models');
     const data = await res.json();
     for (const m of data.models || []) {
       const opt = document.createElement('option');
       opt.value = `${m.provider}|||${m.model}`;
-      opt.textContent = m.label;
+      opt.textContent = m.byok ? `${m.label} (your key)` : m.label;
       researchModelEl.appendChild(opt);
     }
   } catch {
@@ -1449,6 +1491,128 @@ async function loadModels() {
     // than blocking the page.
   }
 }
+
+// "My keys" modal -- account-scoped bring-your-own-key credentials, one
+// card per predefined-model provider this deployment's plugins support
+// (see services/agentic_rag_credential_service.py). The provider list and
+// its exact field set come from the API, generated from each provider's
+// own credential schema -- nothing here is hardcoded to OpenAI/OpenRouter
+// by name, so a newly installed provider plugin needs no frontend change.
+const myLlmKeysModal = document.getElementById('myLlmKeysModal');
+const myLlmKeysContentEl = document.getElementById('myLlmKeysContent');
+
+function openMyLlmKeysModal() {
+  myLlmKeysModal.hidden = false;
+  loadMyLlmKeys();
+}
+function closeMyLlmKeysModal() { myLlmKeysModal.hidden = true; }
+
+document.getElementById('myLlmKeysBtn').addEventListener('click', openMyLlmKeysModal);
+document.getElementById('myLlmKeysModalClose').addEventListener('click', closeMyLlmKeysModal);
+myLlmKeysModal.addEventListener('click', (e) => { if (e.target === myLlmKeysModal) closeMyLlmKeysModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !myLlmKeysModal.hidden) closeMyLlmKeysModal(); });
+
+function renderCredentialField(providerId, field, savedValue) {
+  const fieldId = `cred-${providerId}-${field.variable}`;
+  const inputType = field.secret ? 'password' : 'text';
+  // Secret fields never get their real value back from the API (only a
+  // "...last4" hint) -- shown as the placeholder so the box looks
+  // pre-filled without the field actually holding a usable secret client
+  // side. Leaving it blank on Save means "keep the existing value".
+  const placeholder = field.secret
+    ? (savedValue ? `Saved (${savedValue}) -- leave blank to keep` : (field.placeholder || ''))
+    : (field.placeholder || '');
+  const value = field.secret ? '' : escapeHtml(savedValue || '');
+  // Chrome ignores autocomplete="off" on type="password" fields and
+  // autofills an unrelated saved login password instead (confirmed live:
+  // it silently filled this exact field with a saved password from
+  // another site on the same browser profile) -- "new-password" is the
+  // documented workaround Chrome actually respects, telling it this is a
+  // new/distinct credential rather than a login to autofill.
+  const autocomplete = field.secret ? 'new-password' : 'off';
+  return `
+    <label class="cred-field-label" for="${fieldId}">${escapeHtml(field.label)}${field.required ? ' *' : ''}</label>
+    <input id="${fieldId}" type="${inputType}" data-variable="${field.variable}"
+           placeholder="${escapeHtml(placeholder)}" value="${value}" autocomplete="${autocomplete}" />`;
+}
+
+function renderMyLlmKeysProvider(p) {
+  const fieldsHtml = p.fields.map((f) => renderCredentialField(p.provider, f, p.saved_fields[f.variable])).join('');
+  const statusHtml = p.configured
+    ? '<span class="cred-status cred-status-on">Using your key</span>'
+    : '<span class="cred-status">Using the shared org key</span>';
+  const clearBtn = p.configured
+    ? `<button type="button" class="btn-secondary cred-clear-btn" data-provider="${escapeHtml(p.provider)}">Clear</button>`
+    : '';
+  return `
+    <div class="cred-provider-card" data-provider="${escapeHtml(p.provider)}">
+      <div class="cred-provider-head">
+        <span class="cred-provider-label">${escapeHtml(p.label)}</span>
+        ${statusHtml}
+      </div>
+      <div class="cred-fields">${fieldsHtml}</div>
+      <div class="cred-provider-actions">
+        <button type="button" class="btn-primary cred-save-btn" data-provider="${escapeHtml(p.provider)}">Save</button>
+        ${clearBtn}
+      </div>
+      <div class="cred-provider-msg" hidden></div>
+    </div>`;
+}
+
+function loadMyLlmKeys() {
+  myLlmKeysContentEl.innerHTML = '<div class="loading">Loading…</div>';
+  fetch('/api/my-llm-credentials')
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) throw new Error(data.error);
+      myLlmKeysContentEl.innerHTML = (data.providers || []).map(renderMyLlmKeysProvider).join('');
+    })
+    .catch(() => {
+      myLlmKeysContentEl.innerHTML = '<div class="error-box">Couldn’t load your API key settings.</div>';
+    });
+}
+
+myLlmKeysContentEl.addEventListener('click', (e) => {
+  const card = e.target.closest('.cred-provider-card');
+  if (!card) return;
+  const provider = card.dataset.provider;
+  const msgEl = card.querySelector('.cred-provider-msg');
+
+  if (e.target.closest('.cred-save-btn')) {
+    const fields = {};
+    card.querySelectorAll('input[data-variable]').forEach((input) => {
+      if (input.value) fields[input.dataset.variable] = input.value;
+    });
+    fetch(`/api/my-llm-credentials/${provider}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fields }),
+    })
+      .then((r) => r.json())
+      .then((result) => {
+        if (result.error) throw new Error(result.error);
+        loadMyLlmKeys();
+        loadModels();
+      })
+      .catch((err) => {
+        msgEl.hidden = false;
+        msgEl.className = 'cred-provider-msg cred-provider-msg-error';
+        msgEl.textContent = err.message || 'Could not save.';
+      });
+  } else if (e.target.closest('.cred-clear-btn')) {
+    fetch(`/api/my-llm-credentials/${provider}`, { method: 'DELETE' })
+      .then((r) => r.json())
+      .then(() => {
+        loadMyLlmKeys();
+        loadModels();
+      })
+      .catch(() => {
+        msgEl.hidden = false;
+        msgEl.className = 'cred-provider-msg cred-provider-msg-error';
+        msgEl.textContent = 'Could not clear.';
+      });
+  }
+});
 
 let corporaData = [];
 // Which source rows are currently expanded -- tracked separately from the

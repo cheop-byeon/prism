@@ -8,6 +8,7 @@ from .account import (
     TenantAccountRole,
     TenantStatus,
 )
+from .agentic_rag import PrismUserLlmCredential
 from .api_based_extension import APIBasedExtension, APIBasedExtensionPoint
 from .dataset import (
     AppDatasetJoin,
@@ -174,6 +175,7 @@ __all__ = [
     "MessageFile",
     "OperationLog",
     "PinnedConversation",
+    "PrismUserLlmCredential",
     "Provider",
     "ProviderModel",
     "ProviderModelSetting",

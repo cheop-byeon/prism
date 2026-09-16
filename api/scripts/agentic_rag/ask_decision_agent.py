@@ -1988,6 +1988,7 @@ def ask(
     history: list[dict] | None = None,
     usage: list[dict] | None = None,
     cancel_event=None,
+    credentials_override: dict[str, str] | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -2034,6 +2035,16 @@ def ask(
     block silently until the whole answer is ready. trace still records
     the same tool calls after the fact for the collapsible inspector;
     on_event is for showing it as it happens.
+
+    credentials_override: when given, this exact credentials dict is used
+    instead of the tenant's own shared Provider configuration for
+    model_provider -- a caller's bring-your-own-key path (see
+    services.agentic_rag_credential_service). Works even for a provider
+    the tenant has never configured at all (verified live: constructing a
+    normal model instance for such a provider raises
+    ProviderTokenNotInitError before this function ever runs). None (the
+    default, every existing caller) is unaffected -- the tenant's own
+    credentials are used exactly as before.
     """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import (
@@ -2145,13 +2156,17 @@ def ask(
         UserPromptMessage(content=f"{query}{hint_suffix}"),
     ]
 
-    model_manager = ModelManager()
-    model_instance = model_manager.get_model_instance(
-        tenant_id=tenant_id,
-        provider=model_provider,
-        model_type=ModelType.LLM,
-        model=model_name,
-    )
+    if credentials_override:
+        from services.agentic_rag_credential_service import build_model_instance
+
+        model_instance = build_model_instance(tenant_id, model_provider, model_name, credentials_override)
+    else:
+        model_instance = ModelManager().get_model_instance(
+            tenant_id=tenant_id,
+            provider=model_provider,
+            model_type=ModelType.LLM,
+            model=model_name,
+        )
 
     mailarchive_called = False
     mailarchive_forced = False

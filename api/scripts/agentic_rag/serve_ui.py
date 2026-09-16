@@ -545,23 +545,100 @@ def main() -> None:
         offer a real choice instead of every request being silently pinned
         to ask()'s hardcoded default (google/gemini-2.5-flash via
         openrouter), with no way to try a stronger model on a hard question.
+
+        Also includes every model of a provider this account has its own
+        bring-your-own-key credentials for, even one the tenant has never
+        configured at all -- otherwise a user could save an OpenAI key and
+        never see a single OpenAI model to pick. Each entry says which
+        credential it would actually run on: "shared" (the tenant's own),
+        "byok" (this account's key), or both when the tenant also has the
+        provider active -- the frontend prefers byok for the picker's label
+        but either works with either credential ask() would resolve.
         """
         from core.provider_manager import ProviderManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
         from extensions.ext_database import db
         from models.account import Tenant
+        from services.agentic_rag_credential_service import get_credential_status
 
         tenant_id = db.session.query(Tenant).first().id
         configurations = ProviderManager().get_configurations(tenant_id)
-        models = configurations.get_models(model_type=ModelType.LLM, only_active=True)
-        return jsonify(
-            {
-                "models": [
-                    {"provider": m.provider.provider, "model": m.model, "label": m.label.en_US}
-                    for m in models
-                ]
+        active_models = configurations.get_models(model_type=ModelType.LLM, only_active=True)
+        byok_providers = set(get_credential_status(g.account, tenant_id).keys())
+
+        entries: dict[tuple[str, str], dict] = {
+            (m.provider.provider, m.model): {
+                "provider": m.provider.provider,
+                "model": m.model,
+                "label": m.label.en_US,
+                "shared": True,
+                "byok": False,
             }
-        )
+            for m in active_models
+        }
+        if byok_providers:
+            all_models = configurations.get_models(model_type=ModelType.LLM, only_active=False)
+            for m in all_models:
+                if m.provider.provider not in byok_providers:
+                    continue
+                key = (m.provider.provider, m.model)
+                if key in entries:
+                    entries[key]["byok"] = True
+                else:
+                    entries[key] = {
+                        "provider": m.provider.provider,
+                        "model": m.model,
+                        "label": m.label.en_US,
+                        "shared": False,
+                        "byok": True,
+                    }
+
+        return jsonify({"models": list(entries.values())})
+
+    @app.route("/api/my-llm-credentials", methods=["GET"])
+    def api_my_llm_credentials_list():
+        """Every predefined-model provider this deployment supports BYOK
+        for, with this account's own saved (redacted) status -- enough for
+        the frontend to render one form per provider and show which are
+        already configured, without ever exposing a usable secret back out.
+        """
+        from extensions.ext_database import db
+        from models.account import Tenant
+        from services.agentic_rag_credential_service import get_credential_status, list_supported_providers
+
+        tenant_id = db.session.query(Tenant).first().id
+        providers = list_supported_providers(tenant_id)
+        status = get_credential_status(g.account, tenant_id)
+        for p in providers:
+            saved = status.get(p["provider"])
+            p["configured"] = saved is not None
+            p["saved_fields"] = saved["fields"] if saved else {}
+        return jsonify({"providers": providers})
+
+    @app.route("/api/my-llm-credentials/<path:provider>", methods=["POST"])
+    def api_my_llm_credentials_save(provider):
+        from extensions.ext_database import db
+        from models.account import Tenant
+        from services.agentic_rag_credential_service import save_credential
+
+        body = request.get_json(silent=True) or {}
+        fields = body.get("fields")
+        if not isinstance(fields, dict):
+            return jsonify({"error": "fields must be an object"}), 400
+
+        tenant_id = db.session.query(Tenant).first().id
+        try:
+            save_credential(g.account, tenant_id, provider, fields)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"saved": True})
+
+    @app.route("/api/my-llm-credentials/<path:provider>", methods=["DELETE"])
+    def api_my_llm_credentials_clear(provider):
+        from services.agentic_rag_credential_service import clear_credential
+
+        clear_credential(g.account, provider)
+        return jsonify({"cleared": True})
 
     @app.route("/api/tools", methods=["GET"])
     def api_tools():
@@ -1193,6 +1270,22 @@ def main() -> None:
                 if model_provider and model_name:
                     model_kwargs = {"model_provider": model_provider, "model_name": model_name}
 
+                # This account's own bring-your-own-key credentials for this
+                # provider, if they've set any -- None (the common case)
+                # leaves ask() on the tenant's own shared credential exactly
+                # as before. Deliberately no fallback if BYOK creds are set
+                # but wrong: the exception below propagates as a real error
+                # (see _sse_stream), not a silent switch back to the shared
+                # key -- that would spend the org's money without saying so.
+                credentials_override = None
+                if model_provider:
+                    from extensions.ext_database import db
+                    from models.account import Tenant
+                    from services.agentic_rag_credential_service import resolve_credentials_override
+
+                    tenant_id = db.session.query(Tenant).first().id
+                    credentials_override = resolve_credentials_override(account, tenant_id, model_provider)
+
                 trace: list[dict] = []
                 usage: list[dict] = []
                 answer = ask_decision_agent(
@@ -1205,6 +1298,7 @@ def main() -> None:
                     history=[{"query": t["query"], "answer": t["answer"]} for t in history],
                     usage=usage,
                     cancel_event=cancel_event,
+                    credentials_override=credentials_override,
                     **model_kwargs,
                 )
                 usage_summary = usage[0] if usage else None
