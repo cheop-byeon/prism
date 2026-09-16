@@ -723,6 +723,105 @@ def main() -> None:
         service.remove_provider_credential(tenant_id=owned_tenant_id, provider=provider, credential_id=credential_id)
         return jsonify({"cleared": True})
 
+    @app.route("/api/my-llm-plugins/search", methods=["GET"])
+    def api_my_llm_plugins_search():
+        """Real Dify Marketplace search (marketplace.dify.ai/api/v1/plugins/
+        search/advanced -- the exact endpoint the real web console's own
+        plugin marketplace UI calls, confirmed live), scoped to model-type
+        plugins -- the other half of "install a provider, then configure a
+        key for it", which credential management alone doesn't cover: a
+        fresh personal tenant starts with zero plugins installed at all
+        (confirmed live), and there's no other marketplace UI in this
+        deployment for a self-service account to reach.
+        """
+        import httpx
+
+        from services.agentic_rag_session_service import get_owned_tenant_id
+
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if not owned_tenant_id:
+            return jsonify({"error": "You need your own personal workspace to install a plugin."}), 400
+
+        query = (request.args.get("q") or "").strip()
+        try:
+            resp = httpx.post(
+                "https://marketplace.dify.ai/api/v1/plugins/search/advanced",
+                json={
+                    "page": 1,
+                    "page_size": 20,
+                    "query": query,
+                    "sort_by": "install_count",
+                    "sort_order": "DESC",
+                    "category": "model",
+                    "tags": [],
+                    "exclude": [],
+                    "type": "plugin",
+                },
+                timeout=15.0,
+            )
+            resp.raise_for_status()
+            plugins = resp.json().get("data", {}).get("plugins", [])
+        except httpx.HTTPError as exc:
+            return jsonify({"error": f"Could not reach the plugin marketplace: {exc}"}), 502
+
+        from core.plugin.impl.plugin import PluginInstaller
+
+        installed_ids = {p.plugin_id for p in PluginInstaller().list_plugins(owned_tenant_id)}
+        return jsonify(
+            {
+                "plugins": [
+                    {
+                        "plugin_id": p["plugin_id"],
+                        "label": p.get("label", {}).get("en_US", p["plugin_id"]),
+                        "brief": p.get("brief", {}).get("en_US", ""),
+                        "identifier": p["latest_package_identifier"],
+                        "installed": p["plugin_id"] in installed_ids,
+                    }
+                    for p in plugins
+                ]
+            }
+        )
+
+    @app.route("/api/my-llm-plugins/install", methods=["POST"])
+    def api_my_llm_plugins_install():
+        from services.agentic_rag_session_service import get_owned_tenant_id
+        from services.plugin.plugin_service import PluginService
+
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if not owned_tenant_id:
+            return jsonify({"error": "You need your own personal workspace to install a plugin."}), 400
+
+        body = request.get_json(silent=True) or {}
+        identifier = body.get("identifier")
+        if not identifier:
+            return jsonify({"error": "identifier is required"}), 400
+
+        try:
+            result = PluginService.install_from_marketplace_pkg(owned_tenant_id, [identifier])
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"task_id": result.task_id, "all_installed": result.all_installed})
+
+    @app.route("/api/my-llm-plugins/install-status/<task_id>", methods=["GET"])
+    def api_my_llm_plugins_install_status(task_id):
+        from core.plugin.impl.plugin import PluginInstaller
+        from services.agentic_rag_session_service import get_owned_tenant_id
+
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if not owned_tenant_id:
+            return jsonify({"error": "You need your own personal workspace to install a plugin."}), 400
+
+        try:
+            task = PluginInstaller().fetch_plugin_installation_task(owned_tenant_id, task_id)
+        except Exception as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(
+            {
+                "status": task.status.value,
+                "plugins": [{"status": p.status.value, "message": p.message} for p in task.plugins],
+            }
+        )
+
     @app.route("/api/tools", methods=["GET"])
     def api_tools():
         return jsonify(_tool_info())

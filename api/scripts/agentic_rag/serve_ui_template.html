@@ -1009,6 +1009,20 @@
                 never silently falls back to the shared key.
               </p>
               <div id="myLlmKeysContent"><div class="loading">Loading…</div></div>
+
+              <div id="myLlmPluginsSection" hidden>
+                <p class="tier-label">Install a provider</p>
+                <p class="corpora-hint">
+                  Every account's personal workspace starts empty -- install a provider plugin
+                  from Dify's real marketplace into your own workspace first, then a key field for
+                  it appears above.
+                </p>
+                <div class="corpus-facet">
+                  <input id="myLlmPluginSearchInput" type="text" placeholder="e.g. openai, anthropic, gemini" autocomplete="off" />
+                  <button id="myLlmPluginSearchBtn" type="button" class="btn-secondary">Search</button>
+                </div>
+                <div id="myLlmPluginResults"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -1568,8 +1582,13 @@ function renderMyLlmKeysProvider(p) {
     </div>`;
 }
 
+const myLlmPluginsSectionEl = document.getElementById('myLlmPluginsSection');
+const myLlmPluginResultsEl = document.getElementById('myLlmPluginResults');
+const myLlmPluginSearchInputEl = document.getElementById('myLlmPluginSearchInput');
+
 function loadMyLlmKeys() {
   myLlmKeysContentEl.innerHTML = '<div class="loading">Loading…</div>';
+  myLlmPluginsSectionEl.hidden = true;
   fetch('/api/my-llm-credentials')
     .then((r) => r.json())
     .then((data) => {
@@ -1582,22 +1601,17 @@ function loadMyLlmKeys() {
         );
         return;
       }
+      // Every personal workspace starts with zero plugins installed at
+      // all (confirmed live against a real fresh self-service tenant) --
+      // the search/install section below is how one gets there, reusing
+      // Dify's own real marketplace and install pipeline (see
+      // /api/my-llm-plugins/*), the same as configuring a key reuses its
+      // real Settings/Model Provider service.
+      myLlmPluginsSectionEl.hidden = false;
       const providers = data.providers || [];
-      if (!providers.length) {
-        // A real, if empty, personal workspace -- plugins are installed
-        // per-tenant in Dify, and a fresh self-service tenant starts with
-        // none at all (confirmed live: not even OpenAI/OpenRouter). There
-        // is no marketplace UI in this deployment to install one from
-        // (Prism is the only surface, by design), so this is a real,
-        // stated limitation rather than a silently empty panel.
-        myLlmKeysContentEl.innerHTML = (
-          '<p class="corpora-hint">Your personal workspace has no model provider plugins installed '
-          + 'yet, so there\'s nothing to configure a key for. Ask whoever manages this deployment to '
-          + 'install one (OpenAI, Anthropic, etc.) into your workspace.</p>'
-        );
-        return;
-      }
-      myLlmKeysContentEl.innerHTML = providers.map(renderMyLlmKeysProvider).join('');
+      myLlmKeysContentEl.innerHTML = providers.length
+        ? providers.map(renderMyLlmKeysProvider).join('')
+        : '<p class="corpora-hint">No provider plugins installed yet -- search below to add one.</p>';
     })
     .catch(() => {
       myLlmKeysContentEl.innerHTML = '<div class="error-box">Couldn’t load your API key settings.</div>';
@@ -1644,6 +1658,106 @@ myLlmKeysContentEl.addEventListener('click', (e) => {
         msgEl.textContent = 'Could not clear.';
       });
   }
+});
+
+// Plugin search/install -- the other half of "install a provider, then
+// add a token": reuses Dify's own real Marketplace search API
+// (marketplace.dify.ai) and its real, already-built async install
+// pipeline (PluginService.install_from_marketplace_pkg), the same one
+// Dify's own web console's Marketplace tab uses. Not a bespoke plugin
+// registry -- there isn't one to build, the real one is just not
+// normally reachable from a deployment with no web console running.
+function renderPluginSearchResult(p) {
+  const installBtn = p.installed
+    ? '<span class="cred-status cred-status-on">Installed</span>'
+    : `<button type="button" class="btn-primary plugin-install-btn" data-identifier="${escapeHtml(p.identifier)}" data-plugin-id="${escapeHtml(p.plugin_id)}">Install</button>`;
+  return `
+    <div class="cred-provider-card" data-plugin-id="${escapeHtml(p.plugin_id)}">
+      <div class="cred-provider-head">
+        <span class="cred-provider-label">${escapeHtml(p.label)}</span>
+        ${installBtn}
+      </div>
+      <p class="corpora-hint" style="margin:4px 0 0;">${escapeHtml(p.brief)}</p>
+      <div class="cred-provider-msg" hidden></div>
+    </div>`;
+}
+
+function searchMyLlmPlugins() {
+  const q = myLlmPluginSearchInputEl.value.trim();
+  myLlmPluginResultsEl.innerHTML = '<div class="loading">Searching…</div>';
+  fetch(`/api/my-llm-plugins/search?q=${encodeURIComponent(q)}`)
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) throw new Error(data.error);
+      const plugins = data.plugins || [];
+      myLlmPluginResultsEl.innerHTML = plugins.length
+        ? plugins.map(renderPluginSearchResult).join('')
+        : '<p class="corpora-hint">No matching provider plugins found.</p>';
+    })
+    .catch((err) => {
+      myLlmPluginResultsEl.innerHTML = `<div class="error-box">${escapeHtml(err.message || 'Search failed.')}</div>`;
+    });
+}
+
+document.getElementById('myLlmPluginSearchBtn').addEventListener('click', searchMyLlmPlugins);
+myLlmPluginSearchInputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchMyLlmPlugins(); });
+
+function pollPluginInstall(taskId, card, msgEl) {
+  fetch(`/api/my-llm-plugins/install-status/${taskId}`)
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) throw new Error(data.error);
+      if (data.status === 'success') {
+        msgEl.hidden = false;
+        msgEl.className = 'cred-provider-msg';
+        msgEl.textContent = 'Installed -- refreshing…';
+        loadMyLlmKeys();
+      } else if (data.status === 'failed') {
+        const reason = (data.plugins.find((p) => p.status === 'failed') || {}).message || 'Install failed.';
+        msgEl.hidden = false;
+        msgEl.className = 'cred-provider-msg cred-provider-msg-error';
+        msgEl.textContent = reason;
+      } else {
+        setTimeout(() => pollPluginInstall(taskId, card, msgEl), 1500);
+      }
+    })
+    .catch((err) => {
+      msgEl.hidden = false;
+      msgEl.className = 'cred-provider-msg cred-provider-msg-error';
+      msgEl.textContent = err.message || 'Could not check install status.';
+    });
+}
+
+myLlmPluginResultsEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('.plugin-install-btn');
+  if (!btn) return;
+  const card = btn.closest('.cred-provider-card');
+  const msgEl = card.querySelector('.cred-provider-msg');
+  btn.disabled = true;
+  btn.textContent = 'Installing…';
+  fetch('/api/my-llm-plugins/install', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: btn.dataset.identifier }),
+  })
+    .then((r) => r.json())
+    .then((data) => {
+      if (data.error) throw new Error(data.error);
+      if (data.all_installed) {
+        msgEl.hidden = false;
+        msgEl.textContent = 'Installed -- refreshing…';
+        loadMyLlmKeys();
+        return;
+      }
+      pollPluginInstall(data.task_id, card, msgEl);
+    })
+    .catch((err) => {
+      btn.disabled = false;
+      btn.textContent = 'Install';
+      msgEl.hidden = false;
+      msgEl.className = 'cred-provider-msg cred-provider-msg-error';
+      msgEl.textContent = err.message || 'Could not start install.';
+    });
 });
 
 let corporaData = [];
