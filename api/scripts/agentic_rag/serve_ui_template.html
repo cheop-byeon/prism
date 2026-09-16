@@ -521,6 +521,19 @@
   .source-row { cursor: pointer; }
   .source-row:hover { background: var(--panel-2); }
   .source-row td { vertical-align: middle; }
+
+  .observability-section { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); }
+  .observability-header { display: flex; align-items: center; gap: 10px; }
+  .observability-header select { margin-left: auto; }
+  .observability-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
+  .observability-stat {
+    background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px 14px; min-width: 110px;
+  }
+  .observability-stat .stat-value { font-size: var(--text-lg); font-weight: 700; color: var(--text); display: block; }
+  .observability-stat .stat-label { font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+  .observability-tables { display: flex; gap: 24px; flex-wrap: wrap; margin-top: 16px; }
+  .observability-tables > div { flex: 1; min-width: 280px; }
   .source-name-cell .name { font-family: var(--mono); font-weight: 600; }
   .source-summary { color: var(--text-dim); font-size: var(--text-xs); }
   .source-expand-icon { display: inline-block; color: var(--text-dim); transition: transform 0.15s ease; }
@@ -1074,6 +1087,23 @@
           <div id="topicPullStatus" class="facet-note" hidden></div>
         </div>
       </div>
+    </div>
+
+    <div class="observability-section">
+      <div class="observability-header">
+        <span class="tier-label" style="margin:0;">Usage &amp; cost</span>
+        <select id="observabilityRange">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+        <button id="observabilityRefreshBtn" type="button" class="btn-secondary">Refresh</button>
+      </div>
+      <p class="corpora-hint">
+        Org-wide across every Prism account, not just yours -- data maintainers only. Nothing
+        here is fetched until you click Refresh.
+      </p>
+      <div id="observabilityContent"></div>
     </div>
   </section>
 
@@ -2063,6 +2093,75 @@ document.getElementById('addSourceOpenBtn').addEventListener('click', openAddSou
 document.getElementById('addSourceModalClose').addEventListener('click', closeAddSourceModal);
 addSourceModal.addEventListener('click', (e) => { if (e.target === addSourceModal) closeAddSourceModal(); });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !addSourceModal.hidden) closeAddSourceModal(); });
+
+// Data-maintainer-only, so nothing here is fetched on page load the way
+// loadCorpora() is -- a non-admin account would just get a 403 on every
+// visit for a panel it can never use. Loaded only when Refresh is clicked.
+const observabilityContentEl = document.getElementById('observabilityContent');
+const observabilityRangeEl = document.getElementById('observabilityRange');
+
+function loadObservability() {
+  observabilityContentEl.innerHTML = '<div class="loading">Loading…</div>';
+  fetch(`/api/observability?days=${observabilityRangeEl.value}`)
+    .then((r) => {
+      if (r.status === 403) throw new Error('Data maintainers only.');
+      return r.json();
+    })
+    .then((data) => {
+      if (data.error) throw new Error(data.error);
+      renderObservability(data);
+    })
+    .catch((err) => {
+      observabilityContentEl.innerHTML = `<div class="error-box">${escapeHtml(err.message || String(err))}</div>`;
+    });
+}
+
+function renderObservability(data) {
+  const t = data.totals;
+  const stats = [
+    ['Turns', t.turns.toLocaleString()],
+    ['Tokens', t.tokens.toLocaleString()],
+    ['Cost', `$${t.cost.toFixed(4)}`],
+    ['Avg latency', `${t.avg_latency.toFixed(1)}s`],
+    ['Satisfaction', `${t.satisfaction_pct.toFixed(0)}%`],
+    ['Sessions', t.sessions.toLocaleString()],
+    ['Accounts', t.accounts.toLocaleString()],
+  ];
+  const statsHtml = stats.map(([label, value]) =>
+    `<div class="observability-stat"><span class="stat-value">${value}</span><span class="stat-label">${label}</span></div>`
+  ).join('');
+
+  const dailyRowsHtml = (data.daily || []).slice().reverse().map((d) => `
+    <tr>
+      <td>${escapeHtml(d.date)}</td>
+      <td>${d.turns}</td>
+      <td>${d.tokens.toLocaleString()}</td>
+      <td>$${d.cost.toFixed(4)}</td>
+      <td>${d.avg_latency.toFixed(1)}s</td>
+      <td>${d.satisfaction_pct.toFixed(0)}%</td>
+    </tr>`).join('');
+  const dailyHtml = dailyRowsHtml
+    ? `<table class="sources-table"><thead><tr>
+         <th>Date</th><th>Turns</th><th>Tokens</th><th>Cost</th><th>Avg latency</th><th>Satisfaction</th>
+       </tr></thead><tbody>${dailyRowsHtml}</tbody></table>`
+    : '<p class="corpora-hint">No turns in this range.</p>';
+
+  const toolRowsHtml = (data.tool_usage || []).map((tu) => `
+    <tr><td>${escapeHtml(tu.tool)}</td><td>${tu.calls.toLocaleString()}</td></tr>`).join('');
+  const toolHtml = toolRowsHtml
+    ? `<table class="sources-table"><thead><tr><th>Tool</th><th>Calls</th></tr></thead><tbody>${toolRowsHtml}</tbody></table>`
+    : '<p class="corpora-hint">No tool calls in this range.</p>';
+
+  observabilityContentEl.innerHTML = `
+    <div class="observability-stats">${statsHtml}</div>
+    <div class="observability-tables">
+      <div><p class="tier-label">By day</p>${dailyHtml}</div>
+      <div><p class="tier-label">By tool</p>${toolHtml}</div>
+    </div>`;
+}
+
+document.getElementById('observabilityRefreshBtn').addEventListener('click', loadObservability);
+observabilityRangeEl.addEventListener('change', loadObservability);
 
 document.querySelectorAll('.modal-tab').forEach((tab) => {
   tab.addEventListener('click', () => {

@@ -1,8 +1,10 @@
 import contextlib
 import json
+from datetime import timedelta
 from decimal import Decimal
 
 from sqlalchemy import or_
+from sqlalchemy import text as sa_text
 
 from core.app.entities.app_invoke_entities import InvokeFrom
 from extensions.ext_database import db
@@ -362,3 +364,132 @@ class AgenticRagSessionService:
         ConversationNotExistsError otherwise) and committing the change.
         """
         return ConversationService.rename(_prism_app(), session_id, account, name, auto_generate=False)
+
+    @staticmethod
+    def get_observability_stats(*, days: int = 30) -> dict:
+        """Org-wide usage/cost/quality trends across every Prism account --
+        not one account's own sessions, so this is for the data-admin gate,
+        not every logged-in account.
+
+        Adapted from controllers/console/app/statistic.py's own daily-
+        messages/token-costs/average-response-time/user-satisfaction-rate
+        queries (same tables, same idea: bucket by day, cheap SQL, no
+        external tracing service) rather than reusing those routes
+        directly -- they're wired to a real, persisted App row via
+        @get_app_model, and _PRISM_APP_ID is deliberately a transient one
+        (see _prism_app's docstring). Two deliberate simplifications since
+        Prism has exactly one deployment, not many tenants: dates are
+        grouped in UTC (Dify's version converts to each viewing account's
+        own timezone) and there's no invoke_from filter (Prism never sets
+        it -- there's no "debugger" concept here to exclude).
+
+        Tool-call frequency has no Dify equivalent to adapt -- Dify's own
+        stats don't know Prism's agent makes tool calls at all -- so it's
+        built from scratch from MessageAgentThought, the same table
+        append_turn already writes one row per tool call into.
+        """
+        since = naive_utc_now() - timedelta(days=days)
+
+        daily_metrics = db.session.execute(
+            sa_text("""
+                SELECT
+                    DATE(created_at) AS date,
+                    COUNT(*) AS turns,
+                    COALESCE(SUM(message_tokens) + SUM(answer_tokens), 0) AS tokens,
+                    COALESCE(SUM(total_price), 0) AS cost,
+                    COALESCE(AVG(provider_response_latency), 0) AS avg_latency
+                FROM messages
+                WHERE app_id = :app_id AND created_at >= :since
+                GROUP BY date
+                ORDER BY date
+            """),
+            {"app_id": _PRISM_APP_ID, "since": since},
+        ).mappings().all()
+
+        daily_satisfaction = db.session.execute(
+            sa_text("""
+                SELECT
+                    DATE(m.created_at) AS date,
+                    COUNT(m.id) AS message_count,
+                    COUNT(mf.id) AS like_count
+                FROM messages m
+                LEFT JOIN message_feedbacks mf ON mf.message_id = m.id AND mf.rating = 'like'
+                WHERE m.app_id = :app_id AND m.created_at >= :since
+                GROUP BY date
+                ORDER BY date
+            """),
+            {"app_id": _PRISM_APP_ID, "since": since},
+        ).mappings().all()
+        satisfaction_by_date = {
+            row["date"]: (row["like_count"] / row["message_count"] * 100) if row["message_count"] else 0.0
+            for row in daily_satisfaction
+        }
+
+        daily = [
+            {
+                "date": str(row["date"]),
+                "turns": row["turns"],
+                "tokens": row["tokens"],
+                "cost": float(row["cost"]),
+                "avg_latency": round(float(row["avg_latency"]), 2),
+                "satisfaction_pct": round(satisfaction_by_date.get(row["date"], 0.0), 1),
+            }
+            for row in daily_metrics
+        ]
+
+        tool_usage_rows = db.session.execute(
+            sa_text("""
+                SELECT mat.tool AS tool, COUNT(*) AS calls
+                FROM message_agent_thoughts mat
+                JOIN messages m ON m.id = mat.message_id
+                WHERE m.app_id = :app_id AND m.created_at >= :since AND mat.tool IS NOT NULL AND mat.tool != ''
+                GROUP BY mat.tool
+                ORDER BY calls DESC
+            """),
+            {"app_id": _PRISM_APP_ID, "since": since},
+        ).mappings().all()
+        tool_usage = [{"tool": row["tool"], "calls": row["calls"]} for row in tool_usage_rows]
+
+        totals_row = db.session.execute(
+            sa_text("""
+                SELECT
+                    COUNT(*) AS turns,
+                    COALESCE(SUM(message_tokens) + SUM(answer_tokens), 0) AS tokens,
+                    COALESCE(SUM(total_price), 0) AS cost,
+                    COALESCE(AVG(provider_response_latency), 0) AS avg_latency,
+                    COUNT(DISTINCT conversation_id) AS sessions,
+                    COUNT(DISTINCT from_account_id) AS accounts
+                FROM messages
+                WHERE app_id = :app_id AND created_at >= :since
+            """),
+            {"app_id": _PRISM_APP_ID, "since": since},
+        ).mappings().one()
+        totals_satisfaction_row = db.session.execute(
+            sa_text("""
+                SELECT COUNT(m.id) AS message_count, COUNT(mf.id) AS like_count
+                FROM messages m
+                LEFT JOIN message_feedbacks mf ON mf.message_id = m.id AND mf.rating = 'like'
+                WHERE m.app_id = :app_id AND m.created_at >= :since
+            """),
+            {"app_id": _PRISM_APP_ID, "since": since},
+        ).mappings().one()
+        totals_satisfaction_pct = (
+            (totals_satisfaction_row["like_count"] / totals_satisfaction_row["message_count"] * 100)
+            if totals_satisfaction_row["message_count"]
+            else 0.0
+        )
+
+        return {
+            "days": days,
+            "daily": daily,
+            "tool_usage": tool_usage,
+            "totals": {
+                "turns": totals_row["turns"],
+                "tokens": totals_row["tokens"],
+                "cost": float(totals_row["cost"]),
+                "avg_latency": round(float(totals_row["avg_latency"]), 2),
+                "sessions": totals_row["sessions"],
+                "accounts": totals_row["accounts"],
+                "satisfaction_pct": round(totals_satisfaction_pct, 1),
+            },
+        }

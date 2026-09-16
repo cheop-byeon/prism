@@ -15,9 +15,13 @@ class TestIsDataAdminRoute:
             "/api/corpora/topic-pull",
             "/api/sources/dnsop/agenda/download",
             "/api/sources/ledbat/minutes/download",
+            "/api/observability",
         ],
     )
-    def test_mutating_data_actions_require_admin(self, path):
+    def test_admin_only_actions_require_admin(self, path):
+        # Mostly mutating data-sync actions, plus /api/observability -- a
+        # read-only route still gated the same way since it's org-wide
+        # across every account, not one account's own data.
         assert _is_data_admin_route(path) is True
 
     @pytest.mark.parametrize(

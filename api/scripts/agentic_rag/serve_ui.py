@@ -464,6 +464,11 @@ _DATA_ADMIN_ONLY_EXACT_PATHS = {
     "/api/corpora/local-sync",
     "/api/corpora/local-index",
     "/api/corpora/topic-pull",
+    # Read-only, but org-wide across every account -- not one account's own
+    # data the way Sessions/Research are, so it's gated the same as the
+    # mutating actions above rather than left open to every self-service
+    # sign-up.
+    "/api/observability",
 }
 
 
@@ -1346,6 +1351,21 @@ def main() -> None:
             return jsonify(AgenticRagSessionService.list_sessions(account=g.account, last_id=last_id))
         except LastConversationNotExistsError:
             return jsonify({"error": "last_id not found"}), 400
+
+    @app.route("/api/observability", methods=["GET"])
+    def api_observability():
+        """Org-wide usage/cost/quality trends -- gated to data admins by
+        _require_console_login (see _DATA_ADMIN_ONLY_EXACT_PATHS), same as
+        every other action that reaches beyond one account's own data.
+        """
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        try:
+            days = int(request.args.get("days", 30))
+        except ValueError:
+            days = 30
+        days = max(1, min(90, days))
+        return jsonify(AgenticRagSessionService.get_observability_stats(days=days))
 
     @app.route("/api/sessions/<session_id>", methods=["GET"])
     def api_sessions_get(session_id):
