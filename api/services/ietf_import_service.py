@@ -1180,15 +1180,34 @@ class IetfImportService:
         except httpx.HTTPError as exc:
             return {"error": f"Could not fetch candidate metadata: {exc}"}
 
-        def _keyword_matches(title: str) -> bool:
-            return topic_keyword.lower() in title.lower()
+        def _keyword_matches(meta: dict, title: str) -> bool:
+            # Title-substring alone missed the exact case this method exists
+            # for: RFC 9364's topic_keyword resolves to "DNSSEC", but RFC
+            # 4033/4034/4035's titles spell it out as "DNS Security
+            # (Introduction/Extensions)" -- no literal "DNSSEC" substring --
+            # so all three got silently dropped from RFC 9364's own family
+            # (confirmed live before this fix). Datatracker's per-document
+            # keywords are a curated tag list, not prose, and do carry the
+            # abbreviated form (confirmed live: all three list "dnssec"),
+            # so they're checked first; the title check stays as a fallback
+            # for candidates with no usable keywords, purely additive to
+            # what already matched -- this can only gain true positives,
+            # never lose one that matched by title before.
+            try:
+                candidate_keywords = [k for k in ast.literal_eval(meta.get("keywords") or "[]") if k]
+            except (ValueError, SyntaxError):
+                candidate_keywords = []
+            topic_lower = topic_keyword.lower()
+            if any(topic_lower in kw.lower() for kw in candidate_keywords):
+                return True
+            return topic_lower in title.lower()
 
         family: dict[str, dict] = {}
         for candidate in cited_by_candidates:
             meta = metas.get(candidate, {})
             level = (meta.get("std_level") or "").rstrip("/").split("/")[-1]
             title = meta.get("title") or ""
-            if level in ("bcp", "inf") and _keyword_matches(title):
+            if level in ("bcp", "inf") and _keyword_matches(meta, title):
                 family[candidate] = {
                     "rfc": candidate.upper(),
                     "title": title,
@@ -1200,7 +1219,7 @@ class IetfImportService:
                 continue
             meta = metas.get(candidate, {})
             title = meta.get("title") or ""
-            if _keyword_matches(title):
+            if _keyword_matches(meta, title):
                 family[candidate] = {
                     "rfc": candidate.upper(),
                     "title": title,
