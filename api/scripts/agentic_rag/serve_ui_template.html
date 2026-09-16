@@ -522,7 +522,6 @@
   .source-row:hover { background: var(--panel-2); }
   .source-row td { vertical-align: middle; }
 
-  .observability-section { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border); }
   .observability-header { display: flex; align-items: center; gap: 10px; }
   .observability-header select { margin-left: auto; }
   .observability-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0; }
@@ -926,6 +925,7 @@
   <div class="tab-divider"></div>
   <div class="tab-group">
     <button class="tab-btn" data-tab="corpora"><svg class="icon"><use href="#icon-database"/></svg>Sources</button>
+    <button class="tab-btn" data-tab="usage"><svg class="icon"><use href="#icon-layers"/></svg>Usage</button>
     <button class="tab-btn" data-tab="rfcgraph"><svg class="icon"><use href="#icon-graph"/></svg>RFC Graph</button>
     <button class="tab-btn" data-tab="howto"><svg class="icon"><use href="#icon-book"/></svg>How it Works</button>
   </div>
@@ -1088,23 +1088,22 @@
         </div>
       </div>
     </div>
+  </section>
 
-    <div class="observability-section">
-      <div class="observability-header">
-        <span class="tier-label" style="margin:0;">Usage &amp; cost</span>
-        <select id="observabilityRange">
-          <option value="7">Last 7 days</option>
-          <option value="30" selected>Last 30 days</option>
-          <option value="90">Last 90 days</option>
-        </select>
-        <button id="observabilityRefreshBtn" type="button" class="btn-secondary">Refresh</button>
-      </div>
-      <p class="corpora-hint">
-        Org-wide across every Prism account, not just yours -- data maintainers only. Nothing
-        here is fetched until you click Refresh.
-      </p>
-      <div id="observabilityContent"></div>
+  <section class="tab-pane" id="pane-usage">
+    <p class="corpora-hint">
+      Org-wide across every Prism account, not just yours -- data maintainers only. Nothing here
+      is fetched until you click Refresh.
+    </p>
+    <div class="observability-header">
+      <select id="observabilityRange">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+      <button id="observabilityRefreshBtn" type="button" class="btn-secondary">Refresh</button>
     </div>
+    <div id="observabilityContent"></div>
   </section>
 
   <section class="tab-pane" id="pane-rfcgraph">
