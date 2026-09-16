@@ -213,7 +213,12 @@
   }
   .session-sidebar-header { display: flex; align-items: center; justify-content: space-between; }
   .session-sidebar-header button { padding: 4px 10px; font-size: var(--text-xs); }
-  .session-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; }
+  input[type=text].session-search-input {
+    flex: none; width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    border-radius: var(--radius-sm); padding: 6px 8px; font-size: var(--text-xs); font-family: var(--sans);
+  }
+  .session-search-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+  .session-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; }
   .session-item {
     display: flex; align-items: center; gap: 6px; padding: 8px 8px; border-radius: var(--radius-sm);
     cursor: pointer; color: var(--text-dim); font-size: var(--text-sm);
@@ -918,6 +923,7 @@
           <span class="tier-label" style="margin:0;">Sessions</span>
           <button id="newSessionBtn" class="btn-ghost" title="Start a new session">+ New</button>
         </div>
+        <input id="sessionSearchInput" type="text" class="session-search-input" placeholder="Search sessions…">
         <div class="session-list" id="sessionList"></div>
       </aside>
       <div class="research-main">
@@ -1167,6 +1173,7 @@ const researchModeBadgeLabelEl = document.getElementById('researchModeBadgeLabel
 const toolsEl = document.getElementById('tools');
 const sessionListEl = document.getElementById('sessionList');
 const newSessionBtnEl = document.getElementById('newSessionBtn');
+const sessionSearchInputEl = document.getElementById('sessionSearchInput');
 let currentSessionId = null;
 
 // One shared Research tab replaces four near-identical tabs (Ask /
@@ -3096,9 +3103,11 @@ researchConvEl.addEventListener('click', (e) => {
 // query that silently dropped anything older than the 200th most recent.
 let sessionListCursor = null;
 
-function renderSessionList(sessions, hasMore, append) {
+function renderSessionList(sessions, hasMore, append, isSearch) {
   if (!append && !sessions.length) {
-    sessionListEl.innerHTML = '<div class="session-empty-hint">No saved sessions yet -- ask something to start one.</div>';
+    sessionListEl.innerHTML = isSearch
+      ? '<div class="session-empty-hint">No sessions match your search.</div>'
+      : '<div class="session-empty-hint">No saved sessions yet -- ask something to start one.</div>';
     return;
   }
   const itemsHtml = sessions.map((s) => `
@@ -3121,15 +3130,26 @@ function renderSessionList(sessions, hasMore, append) {
 
 function loadSessionList(opts) {
   opts = opts || {};
+  // Defaults to whatever's currently typed in the search box, not just ''
+  // -- so every existing call site (after delete/rename/new-turn) keeps
+  // respecting an active search instead of silently dropping back to the
+  // unfiltered list out from under the user.
+  const q = opts.q !== undefined ? opts.q : sessionSearchInputEl.value.trim();
   const params = new URLSearchParams();
-  if (opts.lastId) params.set('last_id', opts.lastId);
+  if (q) {
+    params.set('q', q);
+  } else if (opts.lastId) {
+    params.set('last_id', opts.lastId);
+  }
   fetch(`/api/sessions?${params}`)
     .then((r) => r.json())
     .then((data) => {
       if (data.error) throw new Error(data.error);
       const sessions = data.sessions || [];
-      if (sessions.length) sessionListCursor = sessions[sessions.length - 1].id;
-      renderSessionList(sessions, !!data.has_more, !!opts.append);
+      // Search results aren't cursor-paginated -- only track the "Load
+      // more" cursor for the normal unfiltered list.
+      if (!q && sessions.length) sessionListCursor = sessions[sessions.length - 1].id;
+      renderSessionList(sessions, !!data.has_more, !!opts.append, !!q);
     })
     .catch(() => {
       if (!opts.append) {
@@ -3137,6 +3157,14 @@ function loadSessionList(opts) {
       }
     });
 }
+
+let sessionSearchDebounce = null;
+sessionSearchInputEl.addEventListener('input', () => {
+  clearTimeout(sessionSearchDebounce);
+  sessionSearchDebounce = setTimeout(() => {
+    loadSessionList({ q: sessionSearchInputEl.value.trim() });
+  }, 300);
+});
 
 function openSession(id) {
   fetch(`/api/sessions/${id}`)
@@ -3164,7 +3192,8 @@ function openSession(id) {
 newSessionBtnEl.addEventListener('click', () => {
   currentSessionId = null;
   researchConvEl.innerHTML = '';
-  loadSessionList();
+  sessionSearchInputEl.value = '';
+  loadSessionList({ q: '' });
 });
 
 sessionListEl.addEventListener('click', (e) => {

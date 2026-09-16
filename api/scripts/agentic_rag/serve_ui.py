@@ -1314,6 +1314,11 @@ def main() -> None:
         from services.agentic_rag_session_service import AgenticRagSessionService
         from services.errors.conversation import LastConversationNotExistsError
 
+        search_query = request.args.get("q") or None
+        if search_query:
+            sessions = AgenticRagSessionService.search_sessions(account=g.account, query=search_query)
+            return jsonify({"sessions": sessions, "has_more": False})
+
         last_id = request.args.get("last_id") or None
         try:
             return jsonify(AgenticRagSessionService.list_sessions(account=g.account, last_id=last_id))

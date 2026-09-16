@@ -2,6 +2,8 @@ import contextlib
 import json
 from decimal import Decimal
 
+from sqlalchemy import or_
+
 from core.app.entities.app_invoke_entities import InvokeFrom
 from extensions.ext_database import db
 from libs.datetime_utils import naive_utc_now
@@ -121,6 +123,61 @@ class AgenticRagSessionService:
             ],
             "has_more": pagination.has_more,
         }
+
+    @staticmethod
+    def search_sessions(*, account: Account, query: str, limit: int = 30) -> list[dict]:
+        """Searches session titles AND the actual query/answer text of every
+        turn within them -- not just titles, since the point of searching
+        past sessions is finding a conversation by what was actually
+        discussed (a phrase from an answer, a draft name mentioned mid-turn),
+        not just whatever auto-generated title it happened to get. Scoped to
+        this account's own sessions only, same as list_sessions. Not cursor-
+        paginated (unlike list_sessions) -- a capped, most-recent-first list
+        is the right shape for a search result, not something you page
+        through indefinitely.
+        """
+        term = query.strip()
+        if not term:
+            return []
+        like_term = f"%{term}%"
+
+        # Match on conversation id only (not the full Conversation.distinct(),
+        # which Postgres rejects -- it has no equality operator for the
+        # json-typed inputs/override_model_configs columns), then fetch the
+        # full rows in a second pass.
+        matching_ids = (
+            db.session.query(Conversation.id)
+            .outerjoin(Message, Message.conversation_id == Conversation.id)
+            .filter(
+                Conversation.app_id == _PRISM_APP_ID,
+                Conversation.from_source == ConversationFromSource.CONSOLE,
+                Conversation.from_account_id == account.id,
+                Conversation.is_deleted.is_(False),
+                or_(
+                    Conversation.name.ilike(like_term),
+                    Message.query.ilike(like_term),
+                    Message.answer.ilike(like_term),
+                ),
+            )
+            .distinct()
+        )
+        rows = (
+            db.session.query(Conversation)
+            .filter(Conversation.id.in_(matching_ids))
+            .order_by(Conversation.updated_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": row.id,
+                "title": row.name,
+                "updated_at": row.updated_at.isoformat(),
+                "model_provider": row.model_provider,
+                "model_id": row.model_id,
+            }
+            for row in rows
+        ]
 
     @staticmethod
     def delete_session(session_id: str, *, account: Account) -> bool:
