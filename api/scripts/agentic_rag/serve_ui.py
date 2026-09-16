@@ -1202,6 +1202,7 @@ def main() -> None:
                     cancel_event=cancel_event,
                     **model_kwargs,
                 )
+                usage_summary = usage[0] if usage else None
                 message_id = AgenticRagSessionService.append_turn(
                     session_id=session_id,
                     account=account,
@@ -1209,11 +1210,32 @@ def main() -> None:
                     query=query,
                     answer=answer,
                     trace=trace,
-                    usage=usage[0] if usage else None,
+                    usage=usage_summary,
                     model_provider=model_provider,
                     model_name=model_name,
                 )
-                return {"answer": answer, "trace": trace, "session_id": session_id, "message_id": message_id}
+                # _summarize_usage's total_price is a Decimal -- fine for the
+                # DB column above, but the SSE payload below goes through a
+                # plain json.dumps (see _sse_stream), which has no Decimal
+                # support the way Flask's jsonify does, so it's cast to
+                # float here rather than crashing the whole result event.
+                usage_for_client = None
+                if usage_summary:
+                    usage_for_client = {
+                        "prompt_tokens": usage_summary.get("prompt_tokens", 0),
+                        "completion_tokens": usage_summary.get("completion_tokens", 0),
+                        "total_tokens": usage_summary.get("total_tokens", 0),
+                        "total_price": float(usage_summary.get("total_price", 0) or 0),
+                        "currency": usage_summary.get("currency", "USD"),
+                        "latency": usage_summary.get("latency", 0.0),
+                    }
+                return {
+                    "answer": answer,
+                    "trace": trace,
+                    "session_id": session_id,
+                    "message_id": message_id,
+                    "usage": usage_for_client,
+                }
             finally:
                 _ACTIVE_CANCEL_EVENTS.pop(request_id, None)
 

@@ -235,6 +235,14 @@ class AgenticRagSessionService:
                     "trace": trace,
                     "created_at": row.created_at.isoformat(),
                     "feedback": feedback_row.rating.value if feedback_row else None,
+                    "usage": {
+                        "prompt_tokens": row.message_tokens,
+                        "completion_tokens": row.answer_tokens,
+                        "total_tokens": row.message_tokens + row.answer_tokens,
+                        "total_price": float(row.total_price) if row.total_price is not None else 0.0,
+                        "currency": row.currency,
+                        "latency": row.provider_response_latency,
+                    },
                 }
             )
         return turns

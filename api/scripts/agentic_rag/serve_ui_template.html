@@ -218,6 +218,10 @@
     border-radius: var(--radius-sm); padding: 6px 8px; font-size: var(--text-xs); font-family: var(--sans);
   }
   .session-search-input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+  .session-usage-bar {
+    font-size: var(--text-xs); color: var(--text-quaternary); padding: 0 0 6px; min-height: 1em;
+  }
+  .turn-usage { font-size: var(--text-xs); color: var(--text-quaternary); margin-top: 4px; }
   .session-list { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 0; }
   .session-item {
     display: flex; align-items: center; gap: 6px; padding: 8px 8px; border-radius: var(--radius-sm);
@@ -958,6 +962,7 @@
             <button id="researchBtn" class="btn-primary">Ask</button>
           </div>
         </div>
+        <div class="session-usage-bar" id="sessionUsageBar"></div>
         <div class="conversation" id="researchConversation"></div>
       </div>
     </div>
@@ -1167,6 +1172,7 @@ const researchModelEl = document.getElementById('researchModel');
 const researchQueryEl = document.getElementById('researchQuery');
 const researchBtnEl = document.getElementById('researchBtn');
 const researchConvEl = document.getElementById('researchConversation');
+const sessionUsageBarEl = document.getElementById('sessionUsageBar');
 const researchControlsEl = document.getElementById('researchControls');
 const researchModeBadgeEl = document.getElementById('researchModeBadge');
 const researchModeBadgeLabelEl = document.getElementById('researchModeBadgeLabel');
@@ -2990,7 +2996,9 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
         `<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${renderMarkdown(msg.data.answer)}</div>`
         + renderTrace(msg.data.trace)
         + renderFeedback(msg.data.message_id, null, msg.data.answer)
+        + renderUsage(msg.data.usage)
       );
+      updateSessionUsageBar();
       if (msg.data.session_id) {
         // Every tier can create/continue the same saved session -- refresh
         // the sidebar so a brand-new session appears (and recency reorders).
@@ -3036,8 +3044,40 @@ function renderStaticTurn(t) {
   turn.innerHTML = qHtml
     + `<div class="answer" style="--turn-color: var(--tier-${t.tier});">${tagHtml}${renderMarkdown(t.answer)}</div>`
     + renderTrace(t.trace || [])
-    + renderFeedback(t.message_id, t.feedback || null, t.answer);
+    + renderFeedback(t.message_id, t.feedback || null, t.answer)
+    + renderUsage(t.usage);
   return turn;
+}
+
+// Token/cost line under one turn -- backed by the real LLMUsage the agent
+// already collects per LLM call (see ask_decision_agent._summarize_usage)
+// and stores on the Message row; this just surfaces what was already being
+// captured and thrown away. Silent (renders nothing) for turns with no
+// usage recorded -- older rows from before this existed, mainly.
+function renderUsage(usage) {
+  if (!usage || !usage.total_tokens) return '';
+  const price = usage.total_price || 0;
+  const priceStr = price ? ` &middot; $${price.toFixed(4)}` : '';
+  const latencyStr = usage.latency ? ` &middot; ${usage.latency.toFixed(1)}s` : '';
+  return `<div class="turn-usage" data-tokens="${usage.total_tokens}" data-price="${price}">`
+    + `${usage.total_tokens.toLocaleString()} tokens${priceStr}${latencyStr}</div>`;
+}
+
+// Recomputed from whatever .turn-usage nodes are actually in the DOM right
+// now (both reloaded-from-DB turns and ones that just streamed in live)
+// rather than tracked as separate JS state -- one source of truth, and it
+// stays correct through session switches, retries, and page reloads alike.
+function updateSessionUsageBar() {
+  const nodes = researchConvEl.querySelectorAll('.turn-usage[data-tokens]');
+  if (!nodes.length) { sessionUsageBarEl.textContent = ''; return; }
+  let tokens = 0;
+  let price = 0;
+  nodes.forEach((n) => {
+    tokens += Number(n.dataset.tokens) || 0;
+    price += Number(n.dataset.price) || 0;
+  });
+  const priceStr = price ? ` &middot; $${price.toFixed(4)}` : '';
+  sessionUsageBarEl.innerHTML = `Session total: ${tokens.toLocaleString()} tokens${priceStr}`;
 }
 
 // Thumbs up/down on one answer -- backed by Dify's real MessageFeedback
@@ -3182,6 +3222,7 @@ function openSession(id) {
       }
       researchConvEl.innerHTML = '';
       (data.turns || []).forEach((t) => researchConvEl.appendChild(renderStaticTurn(t)));
+      updateSessionUsageBar();
       loadSessionList();
     })
     .catch(() => {
@@ -3192,6 +3233,7 @@ function openSession(id) {
 newSessionBtnEl.addEventListener('click', () => {
   currentSessionId = null;
   researchConvEl.innerHTML = '';
+  sessionUsageBarEl.textContent = '';
   sessionSearchInputEl.value = '';
   loadSessionList({ q: '' });
 });
