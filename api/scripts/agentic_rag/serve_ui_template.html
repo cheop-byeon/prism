@@ -510,6 +510,7 @@
   .cred-provider-actions { display: flex; gap: 8px; margin-top: 10px; }
   .cred-provider-msg { font-size: var(--text-xs); margin-top: 6px; }
   .cred-provider-msg-error { color: var(--error); }
+  .cred-field-hint { font-size: var(--text-2xs); color: var(--text-dim); margin-top: -4px; }
   .modal-tabs { display: flex; gap: 4px; padding: 0 18px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
   .modal-tab {
     background: transparent; border: none; border-bottom: 2px solid transparent; color: var(--text-dim);
@@ -1492,12 +1493,16 @@ async function loadModels() {
   }
 }
 
-// "My keys" modal -- account-scoped bring-your-own-key credentials, one
-// card per predefined-model provider this deployment's plugins support
-// (see services/agentic_rag_credential_service.py). The provider list and
-// its exact field set come from the API, generated from each provider's
-// own credential schema -- nothing here is hardcoded to OpenAI/OpenRouter
-// by name, so a newly installed provider plugin needs no frontend change.
+// "My keys" modal -- lets an account configure a personal model provider
+// credential in their OWN real Dify tenant (every self-service sign-up
+// owns one outright, as its owner) via Dify's actual, already-built
+// ModelProviderService -- the same service Settings/Model Provider
+// itself uses. Real validation, real encrypted storage, any provider this
+// deployment's plugins support (predefined or customizable), not a
+// bespoke Prism-only credential store. The provider list and exact field
+// set per provider come from the API, generated from each provider's own
+// credential schema -- nothing here is hardcoded to a fixed provider set.
+const HIDDEN_CREDENTIAL_VALUE = '[__HIDDEN__]';
 const myLlmKeysModal = document.getElementById('myLlmKeysModal');
 const myLlmKeysContentEl = document.getElementById('myLlmKeysContent');
 
@@ -1515,14 +1520,17 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !myLlmKe
 function renderCredentialField(providerId, field, savedValue) {
   const fieldId = `cred-${providerId}-${field.variable}`;
   const inputType = field.secret ? 'password' : 'text';
-  // Secret fields never get their real value back from the API (only a
-  // "...last4" hint) -- shown as the placeholder so the box looks
-  // pre-filled without the field actually holding a usable secret client
-  // side. Leaving it blank on Save means "keep the existing value".
-  const placeholder = field.secret
-    ? (savedValue ? `Saved (${savedValue}) -- leave blank to keep` : (field.placeholder || ''))
-    : (field.placeholder || '');
-  const value = field.secret ? '' : escapeHtml(savedValue || '');
+  const isSecretSaved = field.secret && savedValue;
+  // A saved secret field defaults to the literal HIDDEN_VALUE sentinel
+  // Dify's own credential validation recognizes as "keep the existing
+  // value" (core/entities/provider_configuration.py) -- typing over it
+  // replaces the key; clearing it to empty makes real validation reject
+  // an empty key rather than silently wiping the saved one. The actual
+  // (obfuscated) value from the API is shown as a hint line instead,
+  // since it never round-trips back through the input itself.
+  const value = field.secret ? (isSecretSaved ? HIDDEN_CREDENTIAL_VALUE : '') : escapeHtml(savedValue || '');
+  const hint = isSecretSaved ? `<div class="cred-field-hint">Currently: ${escapeHtml(savedValue)}</div>` : '';
+  const placeholder = field.placeholder || '';
   // Chrome ignores autocomplete="off" on type="password" fields and
   // autofills an unrelated saved login password instead (confirmed live:
   // it silently filled this exact field with a saved password from
@@ -1533,14 +1541,15 @@ function renderCredentialField(providerId, field, savedValue) {
   return `
     <label class="cred-field-label" for="${fieldId}">${escapeHtml(field.label)}${field.required ? ' *' : ''}</label>
     <input id="${fieldId}" type="${inputType}" data-variable="${field.variable}"
-           placeholder="${escapeHtml(placeholder)}" value="${value}" autocomplete="${autocomplete}" />`;
+           placeholder="${escapeHtml(placeholder)}" value="${value}" autocomplete="${autocomplete}" />
+    ${hint}`;
 }
 
 function renderMyLlmKeysProvider(p) {
   const fieldsHtml = p.fields.map((f) => renderCredentialField(p.provider, f, p.saved_fields[f.variable])).join('');
   const statusHtml = p.configured
     ? '<span class="cred-status cred-status-on">Using your key</span>'
-    : '<span class="cred-status">Using the shared org key</span>';
+    : '<span class="cred-status">Not configured</span>';
   const clearBtn = p.configured
     ? `<button type="button" class="btn-secondary cred-clear-btn" data-provider="${escapeHtml(p.provider)}">Clear</button>`
     : '';
@@ -1565,7 +1574,30 @@ function loadMyLlmKeys() {
     .then((r) => r.json())
     .then((data) => {
       if (data.error) throw new Error(data.error);
-      myLlmKeysContentEl.innerHTML = (data.providers || []).map(renderMyLlmKeysProvider).join('');
+      if (data.has_personal_tenant === false) {
+        myLlmKeysContentEl.innerHTML = (
+          '<p class="corpora-hint">Your account has no personal Dify workspace to attach a key '
+          + 'to (this applies to accounts invited straight into the shared workspace rather than '
+          + 'signed up on their own). Self-register a separate account to use this.</p>'
+        );
+        return;
+      }
+      const providers = data.providers || [];
+      if (!providers.length) {
+        // A real, if empty, personal workspace -- plugins are installed
+        // per-tenant in Dify, and a fresh self-service tenant starts with
+        // none at all (confirmed live: not even OpenAI/OpenRouter). There
+        // is no marketplace UI in this deployment to install one from
+        // (Prism is the only surface, by design), so this is a real,
+        // stated limitation rather than a silently empty panel.
+        myLlmKeysContentEl.innerHTML = (
+          '<p class="corpora-hint">Your personal workspace has no model provider plugins installed '
+          + 'yet, so there\'s nothing to configure a key for. Ask whoever manages this deployment to '
+          + 'install one (OpenAI, Anthropic, etc.) into your workspace.</p>'
+        );
+        return;
+      }
+      myLlmKeysContentEl.innerHTML = providers.map(renderMyLlmKeysProvider).join('');
     })
     .catch(() => {
       myLlmKeysContentEl.innerHTML = '<div class="error-box">Couldn’t load your API key settings.</div>';

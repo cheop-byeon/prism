@@ -481,13 +481,15 @@ def _is_data_admin_route(path: str) -> bool:
 def _is_data_admin(account) -> bool:
     """Whether `account` is a genuine member of the tenant that owns the
     real IETF datasets -- NOT the account's own personal tenant, which
-    every self-service sign-up gets automatically and which Prism's own
-    agent loop never actually uses (ask_decision_agent.py always resolves
-    tenant_id from a dataset's real owner or the first tenant in the DB,
-    never from the logged-in account). Self-service sign-ups are never
-    added as members of this tenant, so this check excludes them by
-    construction -- only accounts someone deliberately invited to the real
-    workspace pass.
+    every self-service sign-up gets automatically. ask_decision_agent.py's
+    default tenant resolution (a dataset's real owner, or the first tenant
+    in the DB) is unrelated to this check and to data-admin status either
+    way; a personal tenant only ever comes into play as an opt-in
+    bring-your-own-key override for model resolution specifically (see
+    get_owned_tenant_id/_tenant_has_custom_credential), never for dataset
+    access. Self-service sign-ups are never added as members of the real
+    workspace, so this check excludes them by construction -- only
+    accounts someone deliberately invited to it pass.
     """
     from extensions.ext_database import db
     from models.account import Tenant, TenantAccountJoin
@@ -502,6 +504,21 @@ def _is_data_admin(account) -> bool:
         .first()
         is not None
     )
+
+
+def _tenant_has_custom_credential(tenant_id: str, provider: str) -> bool:
+    """Whether this tenant has its own real Dify Settings/Model Provider
+    credential saved for `provider` -- the signal that decides whether a
+    Prism request should resolve the model against this tenant (an
+    account's own personal workspace, for bring-your-own-key) instead of
+    the dataset's own tenant. True only once ModelProviderService's own
+    create_provider_credential has actually validated and stored one;
+    never a claim this session invents on its own.
+    """
+    from core.provider_manager import ProviderManager
+
+    configuration = ProviderManager().get_configurations(tenant_id).get(provider)
+    return configuration is not None and configuration.is_custom_configuration_available()
 
 
 def main() -> None:
@@ -540,47 +557,45 @@ def main() -> None:
 
     @app.route("/api/models", methods=["GET"])
     def api_models():
-        """Lists this tenant's actually-configured, active LLMs via the same
-        ProviderManager ask() itself uses -- so the Research controls can
-        offer a real choice instead of every request being silently pinned
-        to ask()'s hardcoded default (google/gemini-2.5-flash via
+        """Lists this deployment's actually-configured, active LLMs via the
+        same ProviderManager ask() itself uses -- so the Research controls
+        can offer a real choice instead of every request being silently
+        pinned to ask()'s hardcoded default (google/gemini-2.5-flash via
         openrouter), with no way to try a stronger model on a hard question.
 
-        Also includes every model of a provider this account has its own
-        bring-your-own-key credentials for, even one the tenant has never
-        configured at all -- otherwise a user could save an OpenAI key and
-        never see a single OpenAI model to pick. Each entry says which
-        credential it would actually run on: "shared" (the tenant's own),
-        "byok" (this account's key), or both when the tenant also has the
-        provider active -- the frontend prefers byok for the picker's label
-        but either works with either credential ask() would resolve.
+        Also includes every active model in this account's OWN tenant (their
+        real, personal Dify workspace -- see get_owned_tenant_id), tagged
+        "byok" -- covers any provider they've configured a personal
+        credential for via Dify's real Settings/Model Provider service
+        (/api/my-llm-credentials below), including ones the shared admin
+        tenant has never configured at all.
         """
         from core.provider_manager import ProviderManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
         from extensions.ext_database import db
         from models.account import Tenant
-        from services.agentic_rag_credential_service import get_credential_status
+        from services.agentic_rag_session_service import get_owned_tenant_id
 
-        tenant_id = db.session.query(Tenant).first().id
-        configurations = ProviderManager().get_configurations(tenant_id)
-        active_models = configurations.get_models(model_type=ModelType.LLM, only_active=True)
-        byok_providers = set(get_credential_status(g.account, tenant_id).keys())
-
+        admin_tenant_id = db.session.query(Tenant).first().id
+        active_models = ProviderManager().get_configurations(admin_tenant_id).get_models(
+            model_type=ModelType.LLM, only_active=True
+        )
         entries: dict[tuple[str, str], dict] = {
             (m.provider.provider, m.model): {
                 "provider": m.provider.provider,
                 "model": m.model,
                 "label": m.label.en_US,
-                "shared": True,
                 "byok": False,
             }
             for m in active_models
         }
-        if byok_providers:
-            all_models = configurations.get_models(model_type=ModelType.LLM, only_active=False)
-            for m in all_models:
-                if m.provider.provider not in byok_providers:
-                    continue
+
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if owned_tenant_id and owned_tenant_id != admin_tenant_id:
+            personal_models = ProviderManager().get_configurations(owned_tenant_id).get_models(
+                model_type=ModelType.LLM, only_active=True
+            )
+            for m in personal_models:
                 key = (m.provider.provider, m.model)
                 if key in entries:
                     entries[key]["byok"] = True
@@ -589,7 +604,6 @@ def main() -> None:
                         "provider": m.provider.provider,
                         "model": m.model,
                         "label": m.label.en_US,
-                        "shared": False,
                         "byok": True,
                     }
 
@@ -597,47 +611,116 @@ def main() -> None:
 
     @app.route("/api/my-llm-credentials", methods=["GET"])
     def api_my_llm_credentials_list():
-        """Every predefined-model provider this deployment supports BYOK
-        for, with this account's own saved (redacted) status -- enough for
-        the frontend to render one form per provider and show which are
-        already configured, without ever exposing a usable secret back out.
+        """Every LLM provider this account's own tenant could configure a
+        personal credential for -- via Dify's real, already-built
+        ModelProviderService, the same one Settings/Model Provider itself
+        uses, not a bespoke provider list or storage scheme. Any provider
+        this deployment's plugins support, predefined or customizable
+        alike -- nothing here is hardcoded to a fixed set.
         """
-        from extensions.ext_database import db
-        from models.account import Tenant
-        from services.agentic_rag_credential_service import get_credential_status, list_supported_providers
+        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from dify_graph.model_runtime.entities.provider_entities import FormType
+        from services.agentic_rag_session_service import get_owned_tenant_id
+        from services.model_provider_service import ModelProviderService
 
-        tenant_id = db.session.query(Tenant).first().id
-        providers = list_supported_providers(tenant_id)
-        status = get_credential_status(g.account, tenant_id)
-        for p in providers:
-            saved = status.get(p["provider"])
-            p["configured"] = saved is not None
-            p["saved_fields"] = saved["fields"] if saved else {}
-        return jsonify({"providers": providers})
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if not owned_tenant_id:
+            return jsonify({"providers": [], "has_personal_tenant": False})
+
+        service = ModelProviderService()
+        provider_list = service.get_provider_list(tenant_id=owned_tenant_id, model_type=ModelType.LLM.value)
+
+        providers = []
+        for p in provider_list:
+            schema = p.provider_credential_schema
+            if not schema:
+                continue
+            configured = p.custom_configuration.status.value == "active"
+            saved_fields = {}
+            if configured:
+                saved_fields = service.get_provider_credential(tenant_id=owned_tenant_id, provider=p.provider) or {}
+            providers.append(
+                {
+                    "provider": p.provider,
+                    "label": p.label.en_US,
+                    "configured": configured,
+                    "saved_fields": saved_fields,
+                    "fields": [
+                        {
+                            "variable": f.variable,
+                            "label": f.label.en_US,
+                            "type": f.type.value,
+                            "required": f.required,
+                            "placeholder": f.placeholder.en_US if f.placeholder else None,
+                            "secret": f.type == FormType.SECRET_INPUT,
+                        }
+                        for f in schema.credential_form_schemas
+                    ],
+                }
+            )
+        return jsonify({"providers": providers, "has_personal_tenant": True})
 
     @app.route("/api/my-llm-credentials/<path:provider>", methods=["POST"])
     def api_my_llm_credentials_save(provider):
-        from extensions.ext_database import db
-        from models.account import Tenant
-        from services.agentic_rag_credential_service import save_credential
+        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from dify_graph.model_runtime.errors.validate import CredentialsValidateFailedError
+        from services.agentic_rag_session_service import get_owned_tenant_id
+        from services.errors.app_model_config import ProviderNotFoundError
+        from services.model_provider_service import ModelProviderService
+
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if not owned_tenant_id:
+            return jsonify({"error": "You need your own personal workspace to set a personal key."}), 400
 
         body = request.get_json(silent=True) or {}
         fields = body.get("fields")
         if not isinstance(fields, dict):
             return jsonify({"error": "fields must be an object"}), 400
 
-        tenant_id = db.session.query(Tenant).first().id
+        service = ModelProviderService()
         try:
-            save_credential(g.account, tenant_id, provider, fields)
-        except ValueError as exc:
+            provider_list = service.get_provider_list(tenant_id=owned_tenant_id, model_type=ModelType.LLM.value)
+            current = next((p for p in provider_list if p.provider == provider), None)
+            if current is None:
+                return jsonify({"error": f"{provider!r} is not a supported provider"}), 400
+
+            credential_id = current.custom_configuration.current_credential_id
+            if credential_id:
+                service.update_provider_credential(
+                    tenant_id=owned_tenant_id,
+                    provider=provider,
+                    credentials=fields,
+                    credential_id=credential_id,
+                    credential_name=None,
+                )
+            else:
+                service.create_provider_credential(
+                    tenant_id=owned_tenant_id, provider=provider, credentials=fields, credential_name=None
+                )
+        except CredentialsValidateFailedError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except ProviderNotFoundError as exc:
             return jsonify({"error": str(exc)}), 400
         return jsonify({"saved": True})
 
     @app.route("/api/my-llm-credentials/<path:provider>", methods=["DELETE"])
     def api_my_llm_credentials_clear(provider):
-        from services.agentic_rag_credential_service import clear_credential
+        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from services.agentic_rag_session_service import get_owned_tenant_id
+        from services.model_provider_service import ModelProviderService
 
-        clear_credential(g.account, provider)
+        owned_tenant_id = get_owned_tenant_id(g.account)
+        if not owned_tenant_id:
+            return jsonify({"cleared": False}), 400
+
+        service = ModelProviderService()
+        provider_list = service.get_provider_list(tenant_id=owned_tenant_id, model_type=ModelType.LLM.value)
+        current = next((p for p in provider_list if p.provider == provider), None)
+        credential_id = current.custom_configuration.current_credential_id if current else None
+        if not credential_id:
+            return jsonify({"cleared": False})
+
+        service.remove_provider_credential(tenant_id=owned_tenant_id, provider=provider, credential_id=credential_id)
         return jsonify({"cleared": True})
 
     @app.route("/api/tools", methods=["GET"])
@@ -1270,21 +1353,22 @@ def main() -> None:
                 if model_provider and model_name:
                     model_kwargs = {"model_provider": model_provider, "model_name": model_name}
 
-                # This account's own bring-your-own-key credentials for this
-                # provider, if they've set any -- None (the common case)
-                # leaves ask() on the tenant's own shared credential exactly
-                # as before. Deliberately no fallback if BYOK creds are set
-                # but wrong: the exception below propagates as a real error
-                # (see _sse_stream), not a silent switch back to the shared
-                # key -- that would spend the org's money without saying so.
-                credentials_override = None
+                # This account's own tenant, if it has its own real Dify
+                # Settings/Model Provider credential configured for this
+                # provider -- None (the common case: no personal tenant, or
+                # one that hasn't configured this provider) leaves ask() on
+                # the dataset's own tenant exactly as before. Deliberately
+                # no fallback when a personal credential IS configured but
+                # fails at call time: the exception propagates as a real
+                # error (see _sse_stream), not a silent switch back to the
+                # shared key -- that would spend the org's money unasked.
+                model_tenant_id = None
                 if model_provider:
-                    from extensions.ext_database import db
-                    from models.account import Tenant
-                    from services.agentic_rag_credential_service import resolve_credentials_override
+                    from services.agentic_rag_session_service import get_owned_tenant_id
 
-                    tenant_id = db.session.query(Tenant).first().id
-                    credentials_override = resolve_credentials_override(account, tenant_id, model_provider)
+                    owned_tenant_id = get_owned_tenant_id(account)
+                    if owned_tenant_id and _tenant_has_custom_credential(owned_tenant_id, model_provider):
+                        model_tenant_id = owned_tenant_id
 
                 trace: list[dict] = []
                 usage: list[dict] = []
@@ -1298,7 +1382,7 @@ def main() -> None:
                     history=[{"query": t["query"], "answer": t["answer"]} for t in history],
                     usage=usage,
                     cancel_event=cancel_event,
-                    credentials_override=credentials_override,
+                    model_tenant_id=model_tenant_id,
                     **model_kwargs,
                 )
                 usage_summary = usage[0] if usage else None

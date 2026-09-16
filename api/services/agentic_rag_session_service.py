@@ -11,6 +11,7 @@ from extensions.ext_database import db
 from libs.datetime_utils import naive_utc_now
 from libs.infinite_scroll_pagination import InfiniteScrollPagination
 from models import Account, Tenant
+from models.account import TenantAccountJoin, TenantAccountRole
 from models.enums import ConversationFromSource, CreatorUserRole, FeedbackRating
 from models.model import App, AppMode, Conversation, Message, MessageAgentThought, MessageFeedback
 from services.conversation_service import ConversationService
@@ -60,6 +61,31 @@ def _prism_app(tenant_id: str = "") -> App:
         enable_site=False,
         enable_api=False,
     )
+
+
+def get_owned_tenant_id(account: Account) -> str | None:
+    """The tenant this account itself owns, if any -- their real, personal
+    Dify workspace (every self-service sign-up gets exactly one, as the
+    owner: see RegisterService.register -> TenantService.create_tenant).
+    None for an account that only ever joined other tenants (e.g. invited
+    into the shared admin tenant as a normal member without ever
+    self-registering their own) -- there's no personal workspace to point
+    bring-your-own-key at in that case.
+
+    Deliberately filters on role == owner, not "any tenant this account
+    belongs to" -- an account can belong to several (their own, plus any
+    they were invited into), and only the one they own is truly theirs to
+    configure model credentials for. The admin account's own tenant (the
+    one with all the real IETF data) is not special-cased here: it comes
+    back the same way, since the admin owns it too, and using their own
+    tenant for BYOK is exactly correct for them as well.
+    """
+    join = (
+        db.session.query(TenantAccountJoin)
+        .filter(TenantAccountJoin.account_id == account.id, TenantAccountJoin.role == TenantAccountRole.OWNER)
+        .first()
+    )
+    return join.tenant_id if join else None
 
 
 class AgenticRagSessionService:

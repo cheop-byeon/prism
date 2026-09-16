@@ -1988,7 +1988,7 @@ def ask(
     history: list[dict] | None = None,
     usage: list[dict] | None = None,
     cancel_event=None,
-    credentials_override: dict[str, str] | None = None,
+    model_tenant_id: str | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -2036,15 +2036,16 @@ def ask(
     the same tool calls after the fact for the collapsible inspector;
     on_event is for showing it as it happens.
 
-    credentials_override: when given, this exact credentials dict is used
-    instead of the tenant's own shared Provider configuration for
-    model_provider -- a caller's bring-your-own-key path (see
-    services.agentic_rag_credential_service). Works even for a provider
-    the tenant has never configured at all (verified live: constructing a
-    normal model instance for such a provider raises
-    ProviderTokenNotInitError before this function ever runs). None (the
-    default, every existing caller) is unaffected -- the tenant's own
-    credentials are used exactly as before.
+    model_tenant_id: resolve the model against THIS tenant's own Dify
+    Settings/Model Provider configuration instead of the dataset-derived
+    tenant above -- a caller's bring-your-own-key path: every Prism
+    account that self-registered owns exactly one real Dify tenant (see
+    services.agentic_rag_session_service.get_owned_tenant_id), and if
+    they've configured a provider credential there themselves (via Dify's
+    own real, already-built Settings/Model Provider infrastructure --
+    nothing bespoke), that's what gets used, billed to their own key.
+    None (the default, every existing caller) leaves model resolution
+    exactly as before, against the dataset's own tenant.
     """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import (
@@ -2156,17 +2157,18 @@ def ask(
         UserPromptMessage(content=f"{query}{hint_suffix}"),
     ]
 
-    if credentials_override:
-        from services.agentic_rag_credential_service import build_model_instance
-
-        model_instance = build_model_instance(tenant_id, model_provider, model_name, credentials_override)
-    else:
-        model_instance = ModelManager().get_model_instance(
-            tenant_id=tenant_id,
-            provider=model_provider,
-            model_type=ModelType.LLM,
-            model=model_name,
-        )
+    # model_tenant_id (an account's own owned tenant, when they have BYOK
+    # credentials configured there for model_provider) takes priority over
+    # the dataset-derived tenant_id above -- ModelManager needs no special
+    # handling for this at all, since it resolves whatever that tenant
+    # itself has configured via Dify's own real Settings/Model Provider
+    # storage. None (every existing caller) leaves this exactly as before.
+    model_instance = ModelManager().get_model_instance(
+        tenant_id=model_tenant_id or tenant_id,
+        provider=model_provider,
+        model_type=ModelType.LLM,
+        model=model_name,
+    )
 
     mailarchive_called = False
     mailarchive_forced = False
