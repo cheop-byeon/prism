@@ -13,23 +13,62 @@
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --text-xs: 12px; --text-sm: 13px; --text-md: 14px; --text-lg: 20px;
     --text-tertiary: #8b93a8; --text-quaternary: #565c70;
-    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 12px;
+    --radius-sm: 6px; --radius-md: 10px; --radius-lg: 16px;
     --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.4);
     --focus-ring: 0 0 0 3px rgba(124, 158, 255, 0.35);
   }
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
-    height: 100vh; display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px;
   }
-  .card {
-    width: 340px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg);
-    box-shadow: var(--shadow-lg); padding: 32px 28px;
+
+  /* ---- Split-screen layout, modeled on socialork.com/login: a full-bleed
+     brand/hero panel on one side, the actual form centered on the other --
+     replaces the earlier plain centered card. ---- */
+  .split { display: flex; gap: 20px; width: 100%; max-width: 1180px; height: min(720px, 90vh); }
+
+  .hero-panel {
+    flex: 1 1 52%; position: relative; border-radius: var(--radius-lg); overflow: hidden;
+    background-image: url('/login-hero.jpg'); background-size: cover; background-position: 30% center;
+    display: flex; flex-direction: column; justify-content: space-between; padding: 32px;
   }
-  .brand { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
-  .brand-mark { width: 30px; height: 22px; flex-shrink: 0; color: var(--text-dim); }
-  .brand h1 { font-size: var(--text-lg); margin: 0; font-weight: 600; }
-  .brand-sub { font-size: var(--text-xs); color: var(--text-tertiary); margin: 2px 0 24px; }
+  /* Darkens the top/right (where the image is already busy) just enough to
+     guarantee the overlaid text stays legible everywhere, without a flat
+     scrim across the whole image -- the source image's own bottom-left is
+     already near-black, so the gradient barely has to work there. */
+  .hero-panel::before {
+    content: ''; position: absolute; inset: 0;
+    background: linear-gradient(200deg, rgba(10, 12, 18, 0.1) 0%, rgba(10, 12, 18, 0.55) 55%, rgba(10, 12, 18, 0.88) 100%);
+  }
+  .hero-brand, .hero-copy, .hero-tagline { position: relative; z-index: 1; }
+  .hero-brand { display: flex; align-items: center; gap: 9px; font-weight: 700; font-size: var(--text-lg); }
+  .hero-brand svg { width: 28px; height: 21px; color: var(--text); flex-shrink: 0; }
+
+  .hero-copy h1 { font-size: 38px; line-height: 1.15; margin: 0 0 18px; font-weight: 800; letter-spacing: -0.01em; }
+  .hero-copy h1 .accent { color: var(--accent); }
+  .hero-quote {
+    max-width: 380px; border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0;
+    background: rgba(15, 17, 23, 0.4); padding: 10px 16px;
+  }
+  .hero-quote p { margin: 0; font-size: var(--text-md); color: var(--text-dim); line-height: 1.55; }
+
+  .hero-tagline {
+    display: flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--text-tertiary);
+  }
+  .hero-tagline svg { width: 14px; height: 14px; flex-shrink: 0; }
+
+  .form-panel { flex: 1 1 48%; display: flex; align-items: center; justify-content: center; }
+  .form-card { width: 100%; max-width: 340px; }
+  .form-logo {
+    width: 46px; height: 46px; border-radius: var(--radius-md); background: var(--panel-2);
+    border: 1px solid var(--border); display: flex; align-items: center; justify-content: center;
+    margin: 0 auto 18px;
+  }
+  .form-logo svg { width: 24px; height: 18px; }
+  .form-card h2 { text-align: center; font-size: 22px; margin: 0 0 4px; font-weight: 700; }
+  .form-sub { text-align: center; color: var(--text-tertiary); font-size: var(--text-sm); margin: 0 0 22px; }
+
   label { display: block; font-size: var(--text-sm); color: var(--text-dim); margin: 14px 0 6px; }
   input[type=email], input[type=password] {
     width: 100%; background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
@@ -45,8 +84,7 @@
   .btn-primary:disabled { background: var(--accent-dim); color: var(--text-quaternary); cursor: default; }
   .btn-primary:not(:disabled):hover { filter: brightness(1.08); }
   .btn-google {
-    background: transparent; color: var(--text); border-color: var(--border); margin-top: 10px;
-    text-decoration: none;
+    background: transparent; color: var(--text); border-color: var(--border); text-decoration: none;
   }
   .btn-google:hover { border-color: var(--text-quaternary); }
   .btn-google svg { width: 16px; height: 16px; flex-shrink: 0; }
@@ -60,36 +98,81 @@
     border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); margin-top: 14px;
   }
   .error-box.visible { display: block; }
+  .form-footnote { text-align: center; font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 18px; }
+
+  /* Below this, the hero panel adds more weight than it earns on a phone-
+     width screen -- collapse to just the form, same breakpoint spirit as
+     the reference site. */
+  @media (max-width: 860px) {
+    .hero-panel { display: none; }
+    .split { height: auto; }
+    .form-panel { padding: 20px 0; }
+  }
 </style>
 </head>
 <body>
-<div class="card">
-  <div class="brand">
-    <svg class="brand-mark" viewBox="0 0 44 32" role="img" aria-label="Prism logo">
-      <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-      <polygon points="14,3 14,29 30,16" fill="var(--panel-2)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-      <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
-      <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
-      <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
-      <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
-      <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
-      <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
-      <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
-    </svg>
-    <h1>Prism</h1>
+<div class="split">
+  <div class="hero-panel">
+    <div class="hero-brand">
+      <svg viewBox="0 0 44 32" role="img" aria-label="Prism logo">
+        <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <polygon points="14,3 14,29 30,16" fill="var(--panel-2)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      Prism
+    </div>
+    <div class="hero-copy">
+      <h1>Threads become<br><span class="accent">answers.</span></h1>
+      <div class="hero-quote">
+        <p>Every RFC, mailing-list thread, and draft revision -- searched, cross-checked, and cited, so you know exactly why a decision was made.</p>
+      </div>
+    </div>
+    <div class="hero-tagline">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M12 2l8 3v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V5l8-3z"/>
+        <path d="M9 12l2 2 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      Every claim, traced to its source.
+    </div>
   </div>
-  <p class="brand-sub">Sign in to continue</p>
 
-  __GOOGLE_BUTTON__
+  <div class="form-panel">
+    <div class="form-card">
+      <div class="form-logo">
+        <svg viewBox="0 0 44 32" role="img" aria-label="Prism logo">
+          <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+          <polygon points="14,3 14,29 30,16" fill="var(--bg)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+          <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+        </svg>
+      </div>
+      <h2>Welcome back</h2>
+      <p class="form-sub">Sign in to continue to Prism</p>
 
-  <form id="loginForm">
-    <label for="email">Email</label>
-    <input id="email" type="email" autocomplete="email" required>
-    <label for="password">Password</label>
-    <input id="password" type="password" autocomplete="current-password" required>
-    <button type="submit" class="btn-primary" id="submitBtn">Sign in</button>
-  </form>
-  <div class="error-box" id="errorBox"></div>
+      __GOOGLE_BUTTON__
+
+      <form id="loginForm">
+        <label for="email">Email</label>
+        <input id="email" type="email" autocomplete="email" required>
+        <label for="password">Password</label>
+        <input id="password" type="password" autocomplete="current-password" required>
+        <button type="submit" class="btn-primary" id="submitBtn">Sign in</button>
+      </form>
+      <div class="error-box" id="errorBox"></div>
+      <p class="form-footnote">New here? Use "Sign in with Google" above -- it creates your account automatically.</p>
+    </div>
+  </div>
 </div>
 <script>
 // Prism has no account system of its own -- this form authenticates

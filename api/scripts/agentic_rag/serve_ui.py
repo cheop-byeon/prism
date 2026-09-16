@@ -296,6 +296,10 @@ def _tool_info() -> list[dict]:
 
 _PAGE_HTML = (Path(__file__).parent / "serve_ui_template.html").read_text(encoding="utf-8")
 _LOGIN_PAGE_TEMPLATE = (Path(__file__).parent / "login_template.html").read_text(encoding="utf-8")
+# Resized/re-encoded from the original (1122x1402, 1.7MB) down to ~95KB --
+# this loads on every visit to the login page, unauthenticated, so size
+# matters here in a way it doesn't for the rest of this app.
+_LOGIN_HERO_JPEG = (Path(__file__).parent / "prism_hero.jpg").read_bytes()
 
 # Standard 4-color Google "G" mark -- used on the login page's OAuth button.
 _GOOGLE_ICON_SVG = (
@@ -451,9 +455,10 @@ def main() -> None:
     @app.before_request
     def _require_console_login():
         # Must stay reachable while logged out, or nobody could ever reach
-        # the form that logs them in -- everything else in this app is
-        # gated, this route is the one deliberate exception.
-        if request.path == "/login":
+        # the form that logs them in (or the hero image it displays) --
+        # everything else in this app is gated, these two routes are the
+        # deliberate exception.
+        if request.path in ("/login", "/login-hero.jpg"):
             return None
         account = _authenticate_console_request(request)
         if account is None:
@@ -465,6 +470,10 @@ def main() -> None:
     @app.route("/login", methods=["GET"])
     def login_page():
         return _render_login_page()
+
+    @app.route("/login-hero.jpg", methods=["GET"])
+    def login_hero():
+        return _LOGIN_HERO_JPEG, 200, {"Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400"}
 
     @app.route("/", methods=["GET"])
     def index():
