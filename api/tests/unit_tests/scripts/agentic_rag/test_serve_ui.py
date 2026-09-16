@@ -40,11 +40,6 @@ class TestIsDataAdminRoute:
             "/api/panorama",
             "/api/sessions",
             "/api/models",
-            "/api/my-llm-credentials",
-            "/api/my-llm-credentials/langgenius/openai/openai",
-            "/api/my-llm-plugins/search",
-            "/api/my-llm-plugins/install",
-            "/api/my-llm-plugins/install-status/some-task-id",
             "/",
             "/login",
         ],
@@ -52,9 +47,7 @@ class TestIsDataAdminRoute:
     def test_read_only_and_research_routes_stay_open(self, path):
         # A visitor's own personal Dify tenant (from self-service sign-up)
         # must never gate these -- Research/Sessions/Feedback and read-only
-        # browsing are open to any logged-in account by design. BYOK
-        # credentials are account-scoped, not tenant-wide, so managing
-        # your own key is exactly as open as everything else here.
+        # browsing are open to any logged-in account by design.
         assert _is_data_admin_route(path) is False
 
     def test_download_suffix_alone_is_not_enough(self):

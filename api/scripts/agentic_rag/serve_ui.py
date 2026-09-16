@@ -346,6 +346,44 @@ def _render_login_page() -> str:
     return _LOGIN_PAGE_TEMPLATE.replace("__API_BASE__", api_base).replace("__GOOGLE_BUTTON__", google_html)
 
 
+def _render_index_page(account) -> str:
+    """Fills in serve_ui_template.html's account-menu placeholders --
+    per user direction after seeing the custom "My keys" modal: "we
+    should not do anything extra here, but just reuse dify's UI and
+    relevant functions." Dify's real Settings/Model Provider page
+    already does credential management AND plugin installation/browsing
+    together, better than anything worth hand-building here (confirmed
+    live: it has its own "Install model providers" marketplace browser
+    built in) -- so this links out to it directly instead.
+
+    __API_BASE__: same fallback as _render_login_page, reused here for
+    the account menu's real logout call (POST __API_BASE__/console/api/logout).
+
+    __CONSOLE_WEB_URL__: the real Dify web console's own base URL --
+    CONSOLE_WEB_URL defaults to localhost:3000 in this dev environment;
+    ./dev/start-web is the actual, already-documented way to run it.
+    Session cookies aren't port-scoped (confirmed live: opening it in the
+    same browser landed already logged in, no separate sign-in), so
+    "Settings" opens straight into Model Provider with no extra login
+    step. tab=provider was found live by clicking through Settings'
+    sidebar there and reading the URL it produces itself -- not guessed.
+
+    __ACCOUNT_EMAIL__ / __ACCOUNT_INITIAL__: shown in the account menu,
+    matching what Dify's own header shows under the account name.
+    """
+    from configs import dify_config
+
+    api_base = dify_config.CONSOLE_API_URL or "http://localhost:5001"
+    console_web_url = dify_config.CONSOLE_WEB_URL or "http://localhost:3000"
+    initial = (account.email or "?")[0].upper()
+    return (
+        _PAGE_HTML.replace("__API_BASE__", api_base)
+        .replace("__CONSOLE_WEB_URL__", console_web_url)
+        .replace("__ACCOUNT_EMAIL__", account.email)
+        .replace("__ACCOUNT_INITIAL__", initial)
+    )
+
+
 # The whole-corpus obsoletes/updates graph takes ~2 minutes to build (a few
 # dozen paginated relation fetches plus ~80 batched metadata lookups) but
 # never changes within a container's lifetime -- cached here so only the
@@ -553,7 +591,7 @@ def main() -> None:
 
     @app.route("/", methods=["GET"])
     def index():
-        return _PAGE_HTML
+        return _render_index_page(g.account)
 
     @app.route("/api/models", methods=["GET"])
     def api_models():
@@ -608,219 +646,6 @@ def main() -> None:
                     }
 
         return jsonify({"models": list(entries.values())})
-
-    @app.route("/api/my-llm-credentials", methods=["GET"])
-    def api_my_llm_credentials_list():
-        """Every LLM provider this account's own tenant could configure a
-        personal credential for -- via Dify's real, already-built
-        ModelProviderService, the same one Settings/Model Provider itself
-        uses, not a bespoke provider list or storage scheme. Any provider
-        this deployment's plugins support, predefined or customizable
-        alike -- nothing here is hardcoded to a fixed set.
-        """
-        from dify_graph.model_runtime.entities.model_entities import ModelType
-        from dify_graph.model_runtime.entities.provider_entities import FormType
-        from services.agentic_rag_session_service import get_owned_tenant_id
-        from services.model_provider_service import ModelProviderService
-
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if not owned_tenant_id:
-            return jsonify({"providers": [], "has_personal_tenant": False})
-
-        service = ModelProviderService()
-        provider_list = service.get_provider_list(tenant_id=owned_tenant_id, model_type=ModelType.LLM.value)
-
-        providers = []
-        for p in provider_list:
-            schema = p.provider_credential_schema
-            if not schema:
-                continue
-            configured = p.custom_configuration.status.value == "active"
-            saved_fields = {}
-            if configured:
-                saved_fields = service.get_provider_credential(tenant_id=owned_tenant_id, provider=p.provider) or {}
-            providers.append(
-                {
-                    "provider": p.provider,
-                    "label": p.label.en_US,
-                    "configured": configured,
-                    "saved_fields": saved_fields,
-                    "fields": [
-                        {
-                            "variable": f.variable,
-                            "label": f.label.en_US,
-                            "type": f.type.value,
-                            "required": f.required,
-                            "placeholder": f.placeholder.en_US if f.placeholder else None,
-                            "secret": f.type == FormType.SECRET_INPUT,
-                        }
-                        for f in schema.credential_form_schemas
-                    ],
-                }
-            )
-        return jsonify({"providers": providers, "has_personal_tenant": True})
-
-    @app.route("/api/my-llm-credentials/<path:provider>", methods=["POST"])
-    def api_my_llm_credentials_save(provider):
-        from dify_graph.model_runtime.entities.model_entities import ModelType
-        from dify_graph.model_runtime.errors.validate import CredentialsValidateFailedError
-        from services.agentic_rag_session_service import get_owned_tenant_id
-        from services.errors.app_model_config import ProviderNotFoundError
-        from services.model_provider_service import ModelProviderService
-
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if not owned_tenant_id:
-            return jsonify({"error": "You need your own personal workspace to set a personal key."}), 400
-
-        body = request.get_json(silent=True) or {}
-        fields = body.get("fields")
-        if not isinstance(fields, dict):
-            return jsonify({"error": "fields must be an object"}), 400
-
-        service = ModelProviderService()
-        try:
-            provider_list = service.get_provider_list(tenant_id=owned_tenant_id, model_type=ModelType.LLM.value)
-            current = next((p for p in provider_list if p.provider == provider), None)
-            if current is None:
-                return jsonify({"error": f"{provider!r} is not a supported provider"}), 400
-
-            credential_id = current.custom_configuration.current_credential_id
-            if credential_id:
-                service.update_provider_credential(
-                    tenant_id=owned_tenant_id,
-                    provider=provider,
-                    credentials=fields,
-                    credential_id=credential_id,
-                    credential_name=None,
-                )
-            else:
-                service.create_provider_credential(
-                    tenant_id=owned_tenant_id, provider=provider, credentials=fields, credential_name=None
-                )
-        except CredentialsValidateFailedError as exc:
-            return jsonify({"error": str(exc)}), 400
-        except ProviderNotFoundError as exc:
-            return jsonify({"error": str(exc)}), 400
-        return jsonify({"saved": True})
-
-    @app.route("/api/my-llm-credentials/<path:provider>", methods=["DELETE"])
-    def api_my_llm_credentials_clear(provider):
-        from dify_graph.model_runtime.entities.model_entities import ModelType
-        from services.agentic_rag_session_service import get_owned_tenant_id
-        from services.model_provider_service import ModelProviderService
-
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if not owned_tenant_id:
-            return jsonify({"cleared": False}), 400
-
-        service = ModelProviderService()
-        provider_list = service.get_provider_list(tenant_id=owned_tenant_id, model_type=ModelType.LLM.value)
-        current = next((p for p in provider_list if p.provider == provider), None)
-        credential_id = current.custom_configuration.current_credential_id if current else None
-        if not credential_id:
-            return jsonify({"cleared": False})
-
-        service.remove_provider_credential(tenant_id=owned_tenant_id, provider=provider, credential_id=credential_id)
-        return jsonify({"cleared": True})
-
-    @app.route("/api/my-llm-plugins/search", methods=["GET"])
-    def api_my_llm_plugins_search():
-        """Real Dify Marketplace search (marketplace.dify.ai/api/v1/plugins/
-        search/advanced -- the exact endpoint the real web console's own
-        plugin marketplace UI calls, confirmed live), scoped to model-type
-        plugins -- the other half of "install a provider, then configure a
-        key for it", which credential management alone doesn't cover: a
-        fresh personal tenant starts with zero plugins installed at all
-        (confirmed live), and there's no other marketplace UI in this
-        deployment for a self-service account to reach.
-        """
-        import httpx
-
-        from services.agentic_rag_session_service import get_owned_tenant_id
-
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if not owned_tenant_id:
-            return jsonify({"error": "You need your own personal workspace to install a plugin."}), 400
-
-        query = (request.args.get("q") or "").strip()
-        try:
-            resp = httpx.post(
-                "https://marketplace.dify.ai/api/v1/plugins/search/advanced",
-                json={
-                    "page": 1,
-                    "page_size": 20,
-                    "query": query,
-                    "sort_by": "install_count",
-                    "sort_order": "DESC",
-                    "category": "model",
-                    "tags": [],
-                    "exclude": [],
-                    "type": "plugin",
-                },
-                timeout=15.0,
-            )
-            resp.raise_for_status()
-            plugins = resp.json().get("data", {}).get("plugins", [])
-        except httpx.HTTPError as exc:
-            return jsonify({"error": f"Could not reach the plugin marketplace: {exc}"}), 502
-
-        from core.plugin.impl.plugin import PluginInstaller
-
-        installed_ids = {p.plugin_id for p in PluginInstaller().list_plugins(owned_tenant_id)}
-        return jsonify(
-            {
-                "plugins": [
-                    {
-                        "plugin_id": p["plugin_id"],
-                        "label": p.get("label", {}).get("en_US", p["plugin_id"]),
-                        "brief": p.get("brief", {}).get("en_US", ""),
-                        "identifier": p["latest_package_identifier"],
-                        "installed": p["plugin_id"] in installed_ids,
-                    }
-                    for p in plugins
-                ]
-            }
-        )
-
-    @app.route("/api/my-llm-plugins/install", methods=["POST"])
-    def api_my_llm_plugins_install():
-        from services.agentic_rag_session_service import get_owned_tenant_id
-        from services.plugin.plugin_service import PluginService
-
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if not owned_tenant_id:
-            return jsonify({"error": "You need your own personal workspace to install a plugin."}), 400
-
-        body = request.get_json(silent=True) or {}
-        identifier = body.get("identifier")
-        if not identifier:
-            return jsonify({"error": "identifier is required"}), 400
-
-        try:
-            result = PluginService.install_from_marketplace_pkg(owned_tenant_id, [identifier])
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 400
-        return jsonify({"task_id": result.task_id, "all_installed": result.all_installed})
-
-    @app.route("/api/my-llm-plugins/install-status/<task_id>", methods=["GET"])
-    def api_my_llm_plugins_install_status(task_id):
-        from core.plugin.impl.plugin import PluginInstaller
-        from services.agentic_rag_session_service import get_owned_tenant_id
-
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if not owned_tenant_id:
-            return jsonify({"error": "You need your own personal workspace to install a plugin."}), 400
-
-        try:
-            task = PluginInstaller().fetch_plugin_installation_task(owned_tenant_id, task_id)
-        except Exception as exc:
-            return jsonify({"error": str(exc)}), 400
-        return jsonify(
-            {
-                "status": task.status.value,
-                "plugins": [{"status": p.status.value, "message": p.message} for p in task.plugins],
-            }
-        )
 
     @app.route("/api/tools", methods=["GET"])
     def api_tools():
