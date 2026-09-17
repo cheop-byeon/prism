@@ -598,8 +598,8 @@ def main() -> None:
         """Lists this deployment's actually-configured, active LLMs via the
         same ProviderManager ask() itself uses -- so the Research controls
         can offer a real choice instead of every request being silently
-        pinned to ask()'s hardcoded default (google/gemini-2.5-flash via
-        openrouter), with no way to try a stronger model on a hard question.
+        pinned to ask()'s hardcoded default, with no way to try a stronger
+        model on a hard question.
 
         Also includes every active model in this account's OWN tenant (their
         real, personal Dify workspace -- see get_owned_tenant_id), tagged
@@ -607,11 +607,19 @@ def main() -> None:
         credential for via Dify's real Settings/Model Provider service
         (/api/my-llm-credentials below), including ones the shared admin
         tenant has never configured at all.
+
+        "default" names ask()/decision_thread()'s actual hardcoded fallback
+        (imported from there directly, not a second copy of the literal) --
+        there's no real "no model chosen" state once a request reaches the
+        agent, so the picker selects this for real on load instead of
+        showing a vague "(default model)" placeholder that hides which
+        concrete model is actually about to run.
         """
         from core.provider_manager import ProviderManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
         from extensions.ext_database import db
         from models.account import Tenant
+        from scripts.agentic_rag.ask_decision_agent import _DEFAULT_MODEL_NAME, _DEFAULT_MODEL_PROVIDER
         from services.agentic_rag_session_service import get_owned_tenant_id
 
         admin_tenant_id = db.session.query(Tenant).first().id
@@ -645,7 +653,12 @@ def main() -> None:
                         "byok": True,
                     }
 
-        return jsonify({"models": list(entries.values())})
+        return jsonify(
+            {
+                "models": list(entries.values()),
+                "default": {"provider": _DEFAULT_MODEL_PROVIDER, "model": _DEFAULT_MODEL_NAME},
+            }
+        )
 
     @app.route("/api/tools", methods=["GET"])
     def api_tools():

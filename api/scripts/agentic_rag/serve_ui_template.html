@@ -1505,6 +1505,19 @@ async function loadModels() {
       opt.textContent = m.byok ? `${m.label} (your key)` : m.label;
       researchModelEl.appendChild(opt);
     }
+    // There's no real "no model chosen" state once a request reaches the
+    // agent -- ask()/decision_thread() always fall back to this exact
+    // pair -- so select it for real (the closed dropdown then shows the
+    // actual model, e.g. "gemini-2.5-flash") instead of leaving the vague
+    // "(default model)" placeholder selected. Checked against the options
+    // just built (not assigned blindly) -- setting .value to a string with
+    // no matching <option> deselects everything instead of leaving the
+    // placeholder selected, which would be worse than doing nothing here.
+    if (data.default) {
+      const defaultValue = `${data.default.provider}|||${data.default.model}`;
+      const hasDefaultOption = Array.from(researchModelEl.options).some((o) => o.value === defaultValue);
+      if (hasDefaultOption) researchModelEl.value = defaultValue;
+    }
   } catch {
     // Leaves just the "(default model)" option -- ask() still has its own
     // hardcoded default, so a failed fetch here degrades gracefully rather
