@@ -1,0 +1,57 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+
+# Docker's data-root is set to /data/docker BEFORE Docker's first ever
+# start (see runcmd below) -- everything Docker itself owns (image
+# layers, container writable layers) lands on the big attached volume
+# from the start, not the flavor's small root disk. This is on top of,
+# not instead of, moving the actual Postgres/Weaviate/downloaded-mail
+# data there too (see runcmd) -- docker-compose.yaml bind-mounts those
+# as host paths under docker/volumes/ relative to wherever the repo is
+# checked out, so cloning the repo itself onto /data covers those for
+# free once the volume is mounted there.
+write_files:
+  - path: /etc/docker/daemon.json
+    owner: root:root
+    permissions: '0644'
+    content: |
+      {
+        "data-root": "/data/docker"
+      }
+
+runcmd:
+  # --- Mount the big approved volume at /data ---
+  # NREC's approved 5TB allocation is almost certainly a separate Cinder
+  # block volume attached to the instance, not the flavor's own root
+  # disk -- on OpenStack/KVM instances this normally shows up as
+  # /dev/vdb. Confirm with `lsblk` right after first boot and edit
+  # DATA_DEV below (then re-run this block by hand) if it's attached
+  # under a different device name -- this is the one thing in this file
+  # that can't be verified without an actual running instance.
+  - DATA_DEV=/dev/vdb
+  - |
+    if [ -b "$DATA_DEV" ]; then
+      if ! blkid "$DATA_DEV" > /dev/null 2>&1; then
+        mkfs.ext4 -F "$DATA_DEV"
+      fi
+      mkdir -p /data
+      UUID=$(blkid -s UUID -o value "$DATA_DEV")
+      grep -q "$UUID" /etc/fstab || echo "UUID=$UUID /data ext4 defaults,nofail 0 2" >> /etc/fstab
+      mount -a
+    else
+      mkdir -p /data
+      echo "WARNING: $DATA_DEV not found -- /data is on the root disk until this is fixed. Run 'lsblk' to find the real device." > /data/DEVICE_NOT_FOUND.txt
+    fi
+  - mkdir -p /data/docker
+
+  # --- Docker itself, pointed at /data/docker from its very first start ---
+  - curl -fsSL https://get.docker.com | sh
+  # Adjust "prism" below if your instance's actual default login user is
+  # different (stock Ubuntu cloud images default to "ubuntu" unless
+  # NREC's own creation flow lets you set a custom username).
+  - usermod -aG docker prism
+  - systemctl enable docker
+  - systemctl restart docker
