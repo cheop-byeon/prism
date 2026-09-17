@@ -264,6 +264,13 @@ _VERIFY_INSTRUCTION = _load_skill("verify_skill.md")
 # room for the model's own self-directed searches/fetches/re-verification.
 _MAX_ITERATIONS = 10
 
+# Single source of truth for "no model was picked" -- ask() and
+# decision_thread() each used to hardcode this pair as their own default
+# parameter values, which could silently drift out of sync on a future
+# edit to just one of them.
+_DEFAULT_MODEL_PROVIDER = "langgenius/openrouter/openrouter"
+_DEFAULT_MODEL_NAME = "google/gemini-2.5-flash"
+
 # Deep Dive tab: a genuinely more thorough pass, not just a different render
 # of the same events -- ask() takes both as optional overrides (see its
 # docstring), so the Ask/Investigate tabs' behavior is completely unaffected.
@@ -806,8 +813,8 @@ def _drafts_with_matches(query: str, catalog: list[dict]) -> list[str]:
 def decision_thread(
     draft_hint: str | None,
     query: str,
-    model_provider: str = "langgenius/openrouter/openrouter",
-    model_name: str = "google/gemini-2.5-flash",
+    model_provider: str = _DEFAULT_MODEL_PROVIDER,
+    model_name: str = _DEFAULT_MODEL_NAME,
     on_event=None,
 ) -> dict:
     """Trace one specific decision's actual text across every revision where
@@ -1977,8 +1984,8 @@ def ask(
     evolution_dataset_id: str | None = None,
     mailarchive_dataset_id: str | None = None,
     draft: str | None = None,
-    model_provider: str = "langgenius/openrouter/openrouter",
-    model_name: str = "google/gemini-2.5-flash",
+    model_provider: str = _DEFAULT_MODEL_PROVIDER,
+    model_name: str = _DEFAULT_MODEL_NAME,
     mail_top_k: int = 50,
     verbose: bool = False,
     trace: list[dict] | None = None,
