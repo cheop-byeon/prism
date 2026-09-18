@@ -35,6 +35,20 @@ server {
       include proxy.conf;
     }
 
+    # Prism (ietf_decision_agent_ui) -- reverse-proxied at /prism instead of
+    # its own subdomain, so its Flask routes are registered with the same
+    # /prism prefix baked in (PRISM_URL_PREFIX env var) and this must NOT
+    # strip the prefix on the way through: proxy_pass has no trailing URI
+    # here on purpose, so nginx forwards the original /prism/... path as-is.
+    location = /prism {
+      return 301 /prism/;
+    }
+
+    location /prism/ {
+      proxy_pass http://ietf_decision_agent_ui:8765;
+      include proxy.conf;
+    }
+
     location / {
       proxy_pass http://web:3000;
       include proxy.conf;

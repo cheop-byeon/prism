@@ -36,6 +36,7 @@ Then open http://localhost:8765/ (or whatever port is mapped).
 
 # ruff: noqa: T201 -- stdout output is the point of a CLI tool
 
+import os
 import sys
 import threading
 import traceback
@@ -43,6 +44,11 @@ import uuid
 from pathlib import Path
 
 sys.path.insert(0, "/app/api")
+
+# Lets this whole app be reverse-proxied under a path prefix (e.g. nginx
+# serving it at https://domain/prism rather than its own subdomain) without
+# a rebuild -- unset in local dev, where it's reached directly at the root.
+_URL_PREFIX = os.environ.get("PRISM_URL_PREFIX", "").rstrip("/")
 
 from app_factory import create_app
 from libs.helper import RateLimiter
@@ -343,7 +349,11 @@ def _render_login_page() -> str:
         if google_configured
         else ""
     )
-    return _LOGIN_PAGE_TEMPLATE.replace("__API_BASE__", api_base).replace("__GOOGLE_BUTTON__", google_html)
+    return (
+        _LOGIN_PAGE_TEMPLATE.replace("__API_BASE__", api_base)
+        .replace("__GOOGLE_BUTTON__", google_html)
+        .replace("__PRISM_URL_PREFIX__", _URL_PREFIX)
+    )
 
 
 def _render_index_page(account) -> str:
@@ -381,6 +391,7 @@ def _render_index_page(account) -> str:
         .replace("__CONSOLE_WEB_URL__", console_web_url)
         .replace("__ACCOUNT_EMAIL__", account.email)
         .replace("__ACCOUNT_INITIAL__", initial)
+        .replace("__PRISM_URL_PREFIX__", _URL_PREFIX)
     )
 
 
@@ -566,34 +577,39 @@ def main() -> None:
 
     @app.before_request
     def _require_console_login():
+        # Normalized against _URL_PREFIX so every literal path check below
+        # (and _DATA_ADMIN_ONLY_EXACT_PATHS/_is_data_admin_route) can keep
+        # comparing against the app's own un-prefixed route names, regardless
+        # of whatever path nginx is actually proxying this app under.
+        path = request.path.removeprefix(_URL_PREFIX) or "/"
         # Must stay reachable while logged out, or nobody could ever reach
         # the form that logs them in (or the hero image it displays) --
         # everything else in this app is gated, these two routes are the
         # deliberate exception.
-        if request.path in ("/login", "/login-hero.jpg"):
+        if path in ("/login", "/login-hero.jpg"):
             return None
         account = _authenticate_console_request(request)
         if account is None:
-            if request.path == "/":
-                return redirect("/login")
+            if path == "/":
+                return redirect(f"{_URL_PREFIX}/login")
             return jsonify({"error": "Log in to Dify's console first."}), 401
         g.account = account
-        if _is_data_admin_route(request.path) and not _is_data_admin(account):
+        if _is_data_admin_route(path) and not _is_data_admin(account):
             return jsonify({"error": "This action is restricted to data maintainers."}), 403
 
-    @app.route("/login", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/login", methods=["GET"])
     def login_page():
         return _render_login_page()
 
-    @app.route("/login-hero.jpg", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/login-hero.jpg", methods=["GET"])
     def login_hero():
         return _LOGIN_HERO_JPEG, 200, {"Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400"}
 
-    @app.route("/", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/", methods=["GET"])
     def index():
         return _render_index_page(g.account)
 
-    @app.route("/api/models", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/models", methods=["GET"])
     def api_models():
         """Lists this deployment's actually-configured, active LLMs via the
         same ProviderManager ask() itself uses -- so the Research controls
@@ -660,17 +676,17 @@ def main() -> None:
             }
         )
 
-    @app.route("/api/tools", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/tools", methods=["GET"])
     def api_tools():
         return jsonify(_tool_info())
 
-    @app.route("/api/skills", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/skills", methods=["GET"])
     def api_skills():
         from scripts.agentic_rag.ask_decision_agent import skill_texts
 
         return jsonify(skill_texts())
 
-    @app.route("/api/corpora", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora", methods=["GET"])
     def api_corpora():
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
 
@@ -681,7 +697,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/freshness", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/freshness", methods=["GET"])
     def api_corpora_freshness():
         """Per-corpus live state for the Corpora tab -- what the sidecar/
         Datatracker currently report, side by side with what's registered.
@@ -753,7 +769,7 @@ def main() -> None:
             corpora.append(row)
         return jsonify({"corpora": corpora})
 
-    @app.route("/api/corpora/rfc-suggestions", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/rfc-suggestions", methods=["GET"])
     def api_corpora_rfc_suggestions():
         """Type-ahead suggestions for "Add a new draft as a source" -- the
         exact same IetfImportService.get_rfc_suggestions the Studio dataset-
@@ -778,7 +794,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/mailing-lists", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/mailing-lists", methods=["GET"])
     def api_corpora_mailing_lists():
         """Every known IETF mailing list name -- the exact same
         IetfImportService.get_mailing_lists the Studio importer popup uses
@@ -795,7 +811,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/wg-documents", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/wg-documents", methods=["GET"])
     def api_corpora_wg_documents():
         """Every Internet-Draft (published or not) for one WG -- the exact
         same IetfImportService.get_wg_documents the Studio importer popup
@@ -816,7 +832,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/mail-sync", methods=["POST"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/mail-sync", methods=["POST"])
     def api_corpora_mail_sync():
         """Trigger the sidecar's incremental IMAP sync for one mailing list --
         download only, per the standalone UI's scope: this pulls fresh raw
@@ -837,7 +853,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/draft-download", methods=["POST"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/draft-download", methods=["POST"])
     def api_corpora_draft_download():
         """Download one draft revision's raw text to local storage -- download
         only, same scope as mail-sync above: attaching/indexing it as a
@@ -860,7 +876,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/draft-download-all", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/draft-download-all", methods=["GET"])
     def api_corpora_draft_download_all():
         """Download every existing revision of one draft (plus its published
         RFC, if any) in a single action -- the bulk counterpart to
@@ -879,7 +895,7 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
-    @app.route("/api/corpora/local-sync", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/local-sync", methods=["GET"])
     def api_corpora_local_sync():
         """The single "Sync" action for a local source's own unit card:
         draft revisions + RFC (idempotent -- only what's missing gets
@@ -901,7 +917,7 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
-    @app.route("/api/corpora/local-index", methods=["POST"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/local-index", methods=["POST"])
     def api_corpora_local_index():
         """Build (or rebuild) a local BM25 index over one source's own
         downloaded content -- draft/RFC text plus threaded mail, whatever's
@@ -927,7 +943,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/corpora/topic-discover", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/topic-discover", methods=["GET"])
     def api_corpora_topic_discover():
         """Discover RFCs for a bare topic phrase (e.g. "DNSSEC") -- no LLM
         needed for the base case: BM25 + semantic search (see
@@ -1039,7 +1055,7 @@ def main() -> None:
 
         return jsonify({"topic": query, "roadmap": roadmap, "other": other})
 
-    @app.route("/api/corpora/topic-pull", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/corpora/topic-pull", methods=["GET"])
     def api_corpora_topic_pull():
         """Pull a user-selected list of RFC numbers (from topic-discover)
         one at a time -- each resolved to its draft name, synced (revisions
@@ -1117,11 +1133,11 @@ def main() -> None:
     # "downloaded 30 of 337" instead of silently truncating.
     _WG_RESOURCE_DOWNLOAD_CAP = 30
 
-    @app.route("/api/sources/types", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/sources/types", methods=["GET"])
     def api_sources_types():
         return jsonify({"types": [{"key": key, "label": label} for key, label in _WG_RESOURCE_TYPES]})
 
-    @app.route("/api/sources/<wg>/<doc_type>", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/sources/<wg>/<doc_type>", methods=["GET"])
     def api_sources_list(wg, doc_type):
         from services.ietf_import_service import IetfImportService
 
@@ -1131,7 +1147,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/sources/<wg>/<doc_type>/download", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/sources/<wg>/<doc_type>/download", methods=["GET"])
     def api_sources_download(wg, doc_type):
         """Download every (capped) document of one type for a WG -- download
         only, same scope as the rest of this tab: files land under
@@ -1157,7 +1173,7 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
-    @app.route("/api/rfc-graph/global", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/rfc-graph/global", methods=["GET"])
     def api_rfc_graph_global():
         """The whole-corpus obsoletes/updates graph -- the RFC Graph tab's
         default "overall picture" view. Streamed via SSE since a cold build
@@ -1181,7 +1197,7 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
-    @app.route("/api/rfc-graph/focus", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/rfc-graph/focus", methods=["GET"])
     def api_rfc_graph_focus():
         """The RFC Graph tab's Focus mode -- an N-hop neighborhood (1-3
         hops, obsoletes/updates/family all included) around one RFC,
@@ -1207,7 +1223,7 @@ def main() -> None:
 
         return _sse_stream(app, work)
 
-    @app.route("/api/rfc-graph/<rfc_number>", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/rfc-graph/<rfc_number>", methods=["GET"])
     def api_rfc_graph(rfc_number):
         """Consolidated {nodes, edges} graph for the RFC Graph tab's table
         and interactive graph -- read-only, no download/attach, same as
@@ -1224,7 +1240,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/rfc-errata/<rfc_number>", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/rfc-errata/<rfc_number>", methods=["GET"])
     def api_rfc_errata(rfc_number):
         """Errata for one RFC -- node detail, fetched on demand when a
         graph node is clicked, not part of the graph payload itself.
@@ -1361,7 +1377,7 @@ def main() -> None:
 
         return work
 
-    @app.route("/api/ask", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/ask", methods=["GET"])
     def api_ask():
         query = (request.args.get("query") or "").strip()
         draft = request.args.get("draft") or None
@@ -1386,7 +1402,7 @@ def main() -> None:
         )
         return _sse_stream(app, work)
 
-    @app.route("/api/deep-dive", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/deep-dive", methods=["GET"])
     def api_deep_dive():
         """Same agent/tools/endpoint shape as /api/ask, but a genuinely more
         thorough pass -- more iterations budgeted, and an addendum telling
@@ -1418,7 +1434,7 @@ def main() -> None:
         )
         return _sse_stream(app, work)
 
-    @app.route("/api/panorama", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/panorama", methods=["GET"])
     def api_panorama():
         """Same agent/tools/endpoint shape as /api/ask and /api/deep-dive,
         but a separate third tier pointed outward at the wider RFC
@@ -1451,7 +1467,7 @@ def main() -> None:
         )
         return _sse_stream(app, work)
 
-    @app.route("/api/sessions", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/sessions", methods=["GET"])
     def api_sessions_list():
         from services.agentic_rag_session_service import AgenticRagSessionService
         from services.errors.conversation import LastConversationNotExistsError
@@ -1467,7 +1483,7 @@ def main() -> None:
         except LastConversationNotExistsError:
             return jsonify({"error": "last_id not found"}), 400
 
-    @app.route("/api/observability", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/observability", methods=["GET"])
     def api_observability():
         """Org-wide usage/cost/quality trends -- gated to data admins by
         _require_console_login (see _DATA_ADMIN_ONLY_EXACT_PATHS), same as
@@ -1482,7 +1498,7 @@ def main() -> None:
         days = max(1, min(90, days))
         return jsonify(AgenticRagSessionService.get_observability_stats(days=days))
 
-    @app.route("/api/sessions/<session_id>", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/sessions/<session_id>", methods=["GET"])
     def api_sessions_get(session_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
 
@@ -1500,7 +1516,7 @@ def main() -> None:
             }
         )
 
-    @app.route("/api/sessions/<session_id>", methods=["PATCH"])
+    @app.route(f"{_URL_PREFIX}/api/sessions/<session_id>", methods=["PATCH"])
     def api_sessions_rename(session_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
         from services.errors.conversation import ConversationNotExistsError
@@ -1514,7 +1530,7 @@ def main() -> None:
             return jsonify({"error": "session not found"}), 404
         return jsonify({"id": session.id, "title": session.name})
 
-    @app.route("/api/sessions/<session_id>", methods=["DELETE"])
+    @app.route(f"{_URL_PREFIX}/api/sessions/<session_id>", methods=["DELETE"])
     def api_sessions_delete(session_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
 
@@ -1522,7 +1538,7 @@ def main() -> None:
             return jsonify({"error": "session not found"}), 404
         return jsonify({"ok": True})
 
-    @app.route("/api/messages/<message_id>/feedback", methods=["POST"])
+    @app.route(f"{_URL_PREFIX}/api/messages/<message_id>/feedback", methods=["POST"])
     def api_message_feedback(message_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
         from services.errors.message import MessageNotExistsError
@@ -1539,7 +1555,7 @@ def main() -> None:
             return jsonify({"error": str(exc) or "message not found"}), 404
         return jsonify(result)
 
-    @app.route("/api/research/<request_id>/cancel", methods=["POST"])
+    @app.route(f"{_URL_PREFIX}/api/research/<request_id>/cancel", methods=["POST"])
     def api_research_cancel(request_id):
         """Sets the cancel_event a Deep Dive/Panorama/Ask run is already
         checking (see ask()'s cancel_event param) -- a real stop, not just
@@ -1571,13 +1587,13 @@ def main() -> None:
             model="google/gemini-2.5-flash",
         )
 
-    @app.route("/api/family-search-demo/roots", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/family-search-demo/roots", methods=["GET"])
     def api_family_search_demo_roots():
         from services.family_search_demo_service import get_demo_roots
 
         return jsonify(get_demo_roots())
 
-    @app.route("/api/family-search-demo/check-root", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/family-search-demo/check-root", methods=["GET"])
     def api_family_search_demo_check_root():
         """First hop: check the root's own (fake) mail archive; if empty,
         rank its relatives once and hand back the whole queue, so the
@@ -1596,7 +1612,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/family-search-demo/check-candidate", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/family-search-demo/check-candidate", methods=["GET"])
     def api_family_search_demo_check_candidate():
         """One more hop, only ever called after the user confirms
         continuing -- checks a single already-ranked candidate's (fake)
@@ -1613,7 +1629,7 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
-    @app.route("/api/decision-thread", methods=["GET"])
+    @app.route(f"{_URL_PREFIX}/api/decision-thread", methods=["GET"])
     def api_decision_thread():
         from scripts.agentic_rag.ask_decision_agent import decision_thread
 

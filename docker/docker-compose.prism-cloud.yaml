@@ -1,0 +1,17 @@
+# Cloud-deployment-only override: sets PRISM_URL_PREFIX so Prism registers
+# its Flask routes under /prism instead of the root, matching the nginx
+# /prism location added to docker/nginx/conf.d/default.conf.template.
+# Deliberately kept out of docker-compose.ietf-ui.yaml (used by local dev
+# too, where Prism is reached directly at http://localhost:8765/ with no
+# prefix) -- add this file's -f flag only on the deployment VM:
+#
+#   docker compose \
+#     -f docker-compose.yaml \
+#     -f docker-compose.override.yaml \
+#     -f docker-compose.ietf-ui.yaml \
+#     -f docker-compose.prism-cloud.yaml \
+#     up -d
+services:
+  ietf_decision_agent_ui:
+    environment:
+      PRISM_URL_PREFIX: /prism

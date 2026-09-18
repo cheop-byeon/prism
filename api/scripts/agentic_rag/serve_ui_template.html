@@ -947,7 +947,8 @@
     </div>
   </div>
 </header>
-<script>const CONSOLE_API_BASE = "__API_BASE__";</script>
+<script>const CONSOLE_API_BASE = "__API_BASE__";
+const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 <div class="tabs">
   <div class="tab-group">
     <button class="tab-btn active" data-tab="research"><svg class="icon"><use href="#icon-research"/></svg>Research</button>
@@ -1249,7 +1250,7 @@ document.addEventListener('click', (e) => {
 });
 document.getElementById('accountLogoutBtn').addEventListener('click', () => {
   fetch(`${CONSOLE_API_BASE}/console/api/logout`, { method: 'POST', credentials: 'include' })
-    .finally(() => { window.location.href = '/login'; });
+    .finally(() => { window.location.href = `${PRISM_PREFIX}/login`; });
 });
 
 const researchDraftEl = document.getElementById('researchDraft');
@@ -1274,14 +1275,14 @@ let currentSessionId = null;
 // is the single source of truth for what each tier actually does
 // differently: which backend endpoint it calls, and its icon/placeholder.
 const TIERS = {
-  ask: { name: 'Ask', endpoint: '/api/ask', icon: 'icon-bolt', placeholder: 'Why was INIT_CWND set to 4?' },
+  ask: { name: 'Ask', endpoint: `${PRISM_PREFIX}/api/ask`, icon: 'icon-bolt', placeholder: 'Why was INIT_CWND set to 4?' },
   investigate: {
-    name: 'Investigate', endpoint: '/api/ask', icon: 'icon-search',
+    name: 'Investigate', endpoint: `${PRISM_PREFIX}/api/ask`, icon: 'icon-search',
     placeholder: 'Why was INIT_CWND set to 4?',
   },
-  deepdive: { name: 'Deep Dive', endpoint: '/api/deep-dive', icon: 'icon-layers', placeholder: 'Why was INIT_CWND set to 4?' },
+  deepdive: { name: 'Deep Dive', endpoint: `${PRISM_PREFIX}/api/deep-dive`, icon: 'icon-layers', placeholder: 'Why was INIT_CWND set to 4?' },
   panorama: {
-    name: 'Panorama', endpoint: '/api/panorama', icon: 'icon-expand',
+    name: 'Panorama', endpoint: `${PRISM_PREFIX}/api/panorama`, icon: 'icon-expand',
     placeholder: "What's the broader RFC family behind RFC 6378's linear protection design?",
   },
 };
@@ -1372,7 +1373,7 @@ function renderToolRow(t) {
 }
 
 async function loadTools() {
-  const res = await fetch('/api/tools');
+  const res = await fetch(`${PRISM_PREFIX}/api/tools`);
   const tools = await res.json();
   toolsData = tools;
   toolDisplayNames = Object.fromEntries(tools.map(t => [t.name, t.display_name]));
@@ -1424,7 +1425,7 @@ toolsEl.addEventListener('click', (e) => {
 });
 
 async function loadSkills() {
-  const res = await fetch('/api/skills');
+  const res = await fetch(`${PRISM_PREFIX}/api/skills`);
   const skills = await res.json();
   const skillsEl = document.getElementById('skills');
   const n = skills.guardrails.length;
@@ -1469,7 +1470,7 @@ document.getElementById('skills').addEventListener('click', (e) => {
 });
 
 async function loadDrafts() {
-  const res = await fetch('/api/corpora');
+  const res = await fetch(`${PRISM_PREFIX}/api/corpora`);
   const data = await res.json();
   const draftSelects = [researchDraftEl, trackDraftEl];
   for (const c of data.catalog) {
@@ -1497,7 +1498,7 @@ async function loadModels() {
   // appended onto, which would duplicate on a second call.
   while (researchModelEl.options.length > 1) researchModelEl.remove(1);
   try {
-    const res = await fetch('/api/models');
+    const res = await fetch(`${PRISM_PREFIX}/api/models`);
     const data = await res.json();
     for (const m of data.models || []) {
       const opt = document.createElement('option');
@@ -1689,7 +1690,7 @@ function renderCorpora(corpora) {
 let resourceTypes = [];
 
 async function loadResourceTypes() {
-  const res = await fetch('/api/sources/types');
+  const res = await fetch(`${PRISM_PREFIX}/api/sources/types`);
   const data = await res.json();
   resourceTypes = data.types || [];
 }
@@ -1752,7 +1753,7 @@ let sourceSearchTimer = null;
 
 async function loadMailingLists() {
   try {
-    const res = await fetch('/api/corpora/mailing-lists');
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/mailing-lists`);
     const data = await res.json();
     allMailingLists = data.lists || [];
   } catch (err) {
@@ -1850,7 +1851,7 @@ async function expandSourceWg(wg) {
   sourceExpandedLoading = true;
   renderSourceSearchResults();
   try {
-    const res = await fetch(`/api/corpora/wg-documents?wg=${encodeURIComponent(wg)}`);
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/wg-documents?wg=${encodeURIComponent(wg)}`);
     const data = await res.json();
     sourceExpandedDocs = data.documents || [];
     sourceExpandedDocs.sort((a, b) => (isLocallyTracked(a.name) ? 0 : 1) - (isLocallyTracked(b.name) ? 0 : 1));
@@ -1881,7 +1882,7 @@ function scheduleSourceSearch(query) {
     sourceExpandedWg = null;
     sourceExpandedDocs = [];
     try {
-      const res = await fetch(`/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}&limit=20`);
+      const res = await fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}&limit=20`);
       const data = await res.json();
       sourceRfcMatches = data.suggestions || [];
       // Already-pulled RFCs float to the top. Array.sort is stable, so
@@ -1951,7 +1952,7 @@ document.getElementById('newDraftAddBtn').addEventListener('click', () => {
   btn.disabled = true;
   resultEl.hidden = false;
   resultEl.textContent = 'Starting…';
-  const source = new EventSource(`/api/corpora/draft-download-all?draft_name=${encodeURIComponent(draftName)}`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/draft-download-all?draft_name=${encodeURIComponent(draftName)}`);
   const finish = (summary) => {
     resultEl.textContent = summary;
     source.close();
@@ -2009,7 +2010,7 @@ document.getElementById('topicDiscoverBtn').addEventListener('click', async () =
   resultsEl.innerHTML = '<div class="loading">Searching the RFC corpus…</div>';
   actionsEl.hidden = true;
   try {
-    const res = await fetch(`/api/corpora/topic-discover?query=${encodeURIComponent(query)}&top_k=20`);
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/topic-discover?query=${encodeURIComponent(query)}&top_k=20`);
     const data = await res.json();
     if (data.error) {
       resultsEl.innerHTML = `<div class="error-box">${escapeHtml(data.error)}</div>`;
@@ -2083,7 +2084,7 @@ document.getElementById('topicPullBtn').addEventListener('click', () => {
   btn.disabled = true;
   statusEl.hidden = false;
   statusEl.textContent = 'Starting…';
-  const source = new EventSource(`/api/corpora/topic-pull?rfc_numbers=${encodeURIComponent(rfcNumbers.join(','))}`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/topic-pull?rfc_numbers=${encodeURIComponent(rfcNumbers.join(','))}`);
   const finish = (summary) => {
     statusEl.textContent = summary;
     source.close();
@@ -2145,7 +2146,7 @@ function renderSourcesSection(corpus, idx) {
 async function loadCorpora() {
   const container = document.getElementById('corporaList');
   try {
-    const res = await fetch('/api/corpora/freshness');
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/freshness`);
     const data = await res.json();
     corporaData = data.corpora || [];
     container.innerHTML = renderCorpora(corporaData);
@@ -2176,7 +2177,7 @@ const observabilityRangeEl = document.getElementById('observabilityRange');
 
 function loadObservability() {
   observabilityContentEl.innerHTML = '<div class="loading">Loading…</div>';
-  fetch(`/api/observability?days=${observabilityRangeEl.value}`)
+  fetch(`${PRISM_PREFIX}/api/observability?days=${observabilityRangeEl.value}`)
     .then((r) => {
       if (r.status === 403) throw new Error('Data maintainers only.');
       return r.json();
@@ -2253,7 +2254,7 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     syncBtn.disabled = true;
     syncBtn.textContent = 'Syncing…';
     try {
-      const res = await fetch('/api/corpora/mail-sync', {
+      const res = await fetch(`${PRISM_PREFIX}/api/corpora/mail-sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ list_name: syncBtn.dataset.list }),
@@ -2273,7 +2274,7 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     const original = downloadBtn.textContent;
     downloadBtn.textContent = 'Downloading…';
     try {
-      const res = await fetch('/api/corpora/draft-download', {
+      const res = await fetch(`${PRISM_PREFIX}/api/corpora/draft-download`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ draft_name: downloadBtn.dataset.draft, revision: downloadBtn.dataset.rev }),
@@ -2296,7 +2297,7 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
   const localSyncBtn = e.target.closest('.local-sync-btn');
   if (localSyncBtn) {
     localSyncBtn.disabled = true;
-    const source = new EventSource(`/api/corpora/local-sync?draft_name=${encodeURIComponent(localSyncBtn.dataset.draft)}`);
+    const source = new EventSource(`${PRISM_PREFIX}/api/corpora/local-sync?draft_name=${encodeURIComponent(localSyncBtn.dataset.draft)}`);
     source.onmessage = (ev) => {
       const msg = JSON.parse(ev.data);
       if (msg.type === 'progress') {
@@ -2315,7 +2316,7 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     localIndexBtn.disabled = true;
     localIndexBtn.textContent = 'Indexing…';
     try {
-      const res = await fetch('/api/corpora/local-index', {
+      const res = await fetch(`${PRISM_PREFIX}/api/corpora/local-index`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ draft_name: localIndexBtn.dataset.draft }),
@@ -2349,7 +2350,7 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     if (!firstExpand) return;
     resourceTypes.forEach(async (t) => {
       try {
-        const res = await fetch(`/api/sources/${encodeURIComponent(corpus.wg)}/${t.key}`);
+        const res = await fetch(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(corpus.wg)}/${t.key}`);
         const data = await res.json();
         corpus.resources[t.key] = data.error ? { error: data.error } : { count: data.count };
       } catch (err) {
@@ -2367,7 +2368,7 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     const corpus = corporaData[idx];
     sourceDownloadBtn.disabled = true;
     sourceDownloadBtn.textContent = 'Downloading…';
-    const source = new EventSource(`/api/sources/${encodeURIComponent(corpus.wg)}/${type}/download`);
+    const source = new EventSource(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(corpus.wg)}/${type}/download`);
     const finish = (summary, links) => {
       corpus.resources[type].downloadSummary = summary;
       if (links) corpus.resources[type].links = links;
@@ -2866,7 +2867,7 @@ document.getElementById('rfcGraphDetail').addEventListener('click', async (e) =>
   btn.textContent = 'Loading…';
   const listEl = document.getElementById('rfcErrataList');
   try {
-    const res = await fetch(`/api/rfc-errata/${encodeURIComponent(btn.dataset.rfc)}`);
+    const res = await fetch(`${PRISM_PREFIX}/api/rfc-errata/${encodeURIComponent(btn.dataset.rfc)}`);
     const data = await res.json();
     const errata = data.errata || [];
     if (!errata.length) {
@@ -2894,7 +2895,7 @@ function loadGlobalGraph() {
   const token = rfcRequestToken;
   rfcLoadOverviewBtnEl.disabled = true;
   rfcGraphStatusEl.innerHTML = '<div class="loading">Building the whole-corpus graph (first load only, ~2 min)…</div>';
-  const source = new EventSource('/api/rfc-graph/global');
+  const source = new EventSource(`${PRISM_PREFIX}/api/rfc-graph/global`);
   source.onmessage = (ev) => {
     if (token !== rfcRequestToken) return source.close(); // superseded by a mode switch/new search
     const msg = JSON.parse(ev.data);
@@ -2942,7 +2943,7 @@ function runFocus() {
   rfcGraphBtnEl.disabled = true;
   rfcGraphStatusEl.innerHTML = `<div class="loading">Focusing on ${escapeHtml(id)}…</div>`;
   const params = new URLSearchParams({ rfc: id, hops });
-  const source = new EventSource(`/api/rfc-graph/focus?${params}`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/rfc-graph/focus?${params}`);
   source.onmessage = (ev) => {
     if (token !== rfcRequestToken) return source.close(); // superseded by a mode switch/new search
     const msg = JSON.parse(ev.data);
@@ -3126,7 +3127,7 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
     if (!requestId) return;
     btnEl.disabled = true;
     btnEl.textContent = 'Stopping…';
-    fetch(`/api/research/${requestId}/cancel`, { method: 'POST' }).catch(() => {});
+    fetch(`${PRISM_PREFIX}/api/research/${requestId}/cancel`, { method: 'POST' }).catch(() => {});
   };
 
   const stop = () => {
@@ -3291,7 +3292,7 @@ researchConvEl.addEventListener('click', (e) => {
   const messageId = row.dataset.messageId;
   const clearing = btn.classList.contains('active');
   const rating = clearing ? null : btn.dataset.rating;
-  fetch(`/api/messages/${messageId}/feedback`, {
+  fetch(`${PRISM_PREFIX}/api/messages/${messageId}/feedback`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ rating }),
@@ -3354,7 +3355,7 @@ function loadSessionList(opts) {
   } else if (opts.lastId) {
     params.set('last_id', opts.lastId);
   }
-  fetch(`/api/sessions?${params}`)
+  fetch(`${PRISM_PREFIX}/api/sessions?${params}`)
     .then((r) => r.json())
     .then((data) => {
       if (data.error) throw new Error(data.error);
@@ -3380,7 +3381,7 @@ sessionSearchInputEl.addEventListener('input', () => {
 });
 
 function openSession(id) {
-  fetch(`/api/sessions/${id}`)
+  fetch(`${PRISM_PREFIX}/api/sessions/${id}`)
     .then((r) => r.json())
     .then((data) => {
       if (data.error) throw new Error(data.error);
@@ -3420,7 +3421,7 @@ sessionListEl.addEventListener('click', (e) => {
   const delBtn = e.target.closest('.session-item-delete');
   if (delBtn) {
     e.stopPropagation();
-    fetch(`/api/sessions/${delBtn.dataset.deleteId}`, { method: 'DELETE' })
+    fetch(`${PRISM_PREFIX}/api/sessions/${delBtn.dataset.deleteId}`, { method: 'DELETE' })
       .catch(() => {})
       .finally(() => {
         if (delBtn.dataset.deleteId === currentSessionId) {
@@ -3451,7 +3452,7 @@ sessionListEl.addEventListener('click', (e) => {
       committed = true;
       const newName = input.value.trim();
       if (newName && newName !== previousTitle) {
-        fetch(`/api/sessions/${id}`, {
+        fetch(`${PRISM_PREFIX}/api/sessions/${id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: newName }),
@@ -3488,7 +3489,7 @@ const familyDemoBtnEl = document.getElementById('familyDemoBtn');
 const familyDemoConvEl = document.getElementById('familyDemoConversation');
 
 async function loadFamilyDemoRoots() {
-  const res = await fetch('/api/family-search-demo/roots');
+  const res = await fetch(`${PRISM_PREFIX}/api/family-search-demo/roots`);
   const roots = await res.json();
   familyDemoRootEl.innerHTML = roots
     .map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.id)}: ${escapeHtml(r.title)}</option>`)
@@ -3534,7 +3535,7 @@ async function familyDemoProceed(turn, query, checked, queue) {
     familyDemoAddStep(turn, `Checking ${escapeHtml(next.id)}'s mail archive…`);
     try {
       const res = await fetch(
-        `/api/family-search-demo/check-candidate?query=${encodeURIComponent(query)}&rfc_id=${encodeURIComponent(next.id)}`
+        `${PRISM_PREFIX}/api/family-search-demo/check-candidate?query=${encodeURIComponent(query)}&rfc_id=${encodeURIComponent(next.id)}`
       );
       const data = await res.json();
       if (data.error) {
@@ -3577,7 +3578,7 @@ async function runFamilySearchDemo() {
 
   try {
     const res = await fetch(
-      `/api/family-search-demo/check-root?query=${encodeURIComponent(query)}&root=${encodeURIComponent(root)}`
+      `${PRISM_PREFIX}/api/family-search-demo/check-root?query=${encodeURIComponent(query)}&root=${encodeURIComponent(root)}`
     );
     const data = await res.json();
     if (data.error) {
@@ -3666,7 +3667,7 @@ function trackDecision() {
 
   const params = new URLSearchParams({query});
   if (draft) params.set('draft', draft);
-  const source = new EventSource(`/api/decision-thread?${params}`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/decision-thread?${params}`);
   let finished = false;
 
   source.onmessage = (ev) => {

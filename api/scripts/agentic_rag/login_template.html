@@ -30,7 +30,7 @@
 
   .hero-panel {
     flex: 1 1 52%; position: relative; border-radius: var(--radius-lg); overflow: hidden;
-    background-image: url('/login-hero.jpg'); background-size: cover; background-position: 30% center;
+    background-image: url('__PRISM_URL_PREFIX__/login-hero.jpg'); background-size: cover; background-position: 30% center;
     display: flex; flex-direction: column; justify-content: space-between; padding: 32px;
   }
   /* Darkens the top/right (where the image is already busy) just enough to
@@ -191,6 +191,7 @@
 // Real protection here is HTTPS in a real deployment, exactly as it is
 // for Dify's own login form.
 const API_BASE = "__API_BASE__";
+const PRISM_PREFIX = "__PRISM_URL_PREFIX__";
 
 const form = document.getElementById('loginForm');
 const errorBox = document.getElementById('errorBox');
@@ -223,7 +224,7 @@ form.addEventListener('submit', async (e) => {
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.result === 'success') {
-      window.location.href = '/';
+      window.location.href = `${PRISM_PREFIX}/`;
       return;
     }
     showError(data.data || data.message || 'Sign in failed -- check your email and password.');
