@@ -1199,7 +1199,9 @@ def main() -> None:
         from services.ietf_import_service import IetfImportService
 
         try:
-            return jsonify(IetfImportService.list_wg_resources(wg, doc_type))
+            listing = IetfImportService.list_wg_resources(wg, doc_type)
+            listing.update(IetfImportService.get_local_resource_status(doc_type, listing.get("documents", [])))
+            return jsonify(listing)
         except Exception as exc:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500

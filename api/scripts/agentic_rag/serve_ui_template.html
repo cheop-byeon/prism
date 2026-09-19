@@ -682,8 +682,6 @@
     cursor: pointer; padding: 8px 0 0; font-family: var(--sans);
   }
   .sources-toggle:hover { text-decoration: underline; }
-  .sources-panel { margin-top: 4px; }
-  .source-facet .facet-label { width: 140px; }
   .facet-note { font-size: var(--text-sm); color: var(--text-dim); padding: 0 0 6px 140px; }
   .facet-note a { color: var(--accent); text-decoration: none; }
   .facet-note a:hover { text-decoration: underline; }
@@ -708,7 +706,7 @@
   .local-index-table td.action-cell button:disabled { opacity: 0.5; cursor: default; }
   .local-index-table .ts { margin-top: 4px; font-size: var(--text-xs); color: var(--text-dim); }
   .local-index-table .ts[title], .local-index-table .ts span[title] { cursor: help; border-bottom: 1px dotted var(--text-quaternary); }
-  .local-index-table .ts .error { color: var(--error); border-bottom: none; cursor: auto; }
+  .local-index-table .ts .error, .local-index-table td.error, .local-index-table .error { color: var(--error); border-bottom: none; cursor: auto; }
   .local-index-table .pull-progress-track { margin: 6px 0 0; }
   .local-index-table-note { font-size: var(--text-xs); color: var(--text-tertiary); margin: 0 0 10px; }
   #newDraftResult, #newSourceResolved { padding-left: 110px; }
@@ -2245,28 +2243,48 @@ function renderSourcesSection(corpus, idx) {
   if (!corpus.sourcesExpanded) {
     return `<button class="sources-toggle" data-idx="${idx}">+ Add sources</button>`;
   }
+  // Same Type/Metadata/Sync grid as the Email/Drafts-RFCs table above, for
+  // visual consistency -- but Sync-only, no Sparse/Dense columns. Most of
+  // these 15 doctypes download as PDF/PPTX/whatever Datatracker has on
+  // file, not plain text, so LocalSourceIndexService has nothing it could
+  // actually index for them yet; adding those columns without real
+  // extraction behind them would just be a button that lies about what it
+  // does. Recording is link-only (nothing is ever downloaded for it), so
+  // it never gets a "synced X ago" caption, just whatever links a run
+  // already fetched.
   const rows = resourceTypes.map((t) => {
     const state = (corpus.resources || {})[t.key] || {};
-    let valueHtml = '';
-    if (state.loading) valueHtml = 'Checking…';
-    else if (state.error) valueHtml = escapeHtml(state.error);
-    else if (state.count != null) valueHtml = `${state.count} available`;
+    let metaHtml = '';
+    if (state.loading) metaHtml = 'Checking…';
+    else if (state.error) metaHtml = `<span class="error">${escapeHtml(state.error)}</span>`;
+    else if (state.count != null) metaHtml = `${state.downloaded_count || 0} of ${state.count} downloaded`;
 
-    const note = state.downloadSummary ? `<div class="facet-note">${escapeHtml(state.downloadSummary)}</div>` : '';
+    const syncCaption = state.last_synced_at
+      ? tooltipSpan(`synced ${formatRelativeTime(state.last_synced_at)}`, state.last_synced_at)
+      : (t.key === 'recording' ? 'external links only' : 'never synced');
+    const summaryNote = state.downloadSummary ? `<div class="ts">${escapeHtml(state.downloadSummary)}</div>` : '';
     const links = (state.links && state.links.length)
-      ? `<div class="facet-note">${state.links.map((l) =>
+      ? `<div class="ts">${state.links.map((l) =>
           `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">${escapeHtml(l.name)}</a>`).join(', ')}</div>`
       : '';
+    const syncLabel = state.downloaded_count ? 'Re-sync' : 'Sync';
     const disabled = state.count ? '' : 'disabled';
     return `
-      <div class="corpus-facet source-facet">
-        <span class="facet-label">${escapeHtml(t.label)}</span>
-        <span class="facet-value${state.error ? ' error' : ''}">${valueHtml}</span>
-        <button class="source-download-btn" data-idx="${idx}" data-type="${t.key}" ${disabled}>Download</button>
-      </div>
-      ${note}${links}`;
+      <tr>
+        <td>${escapeHtml(t.label)}</td>
+        <td${state.error ? ' class="error"' : ''}>${metaHtml}</td>
+        <td class="action-cell">
+          <button class="source-download-btn" data-idx="${idx}" data-type="${t.key}" ${disabled}>${syncLabel}</button>
+          <div class="ts">${syncCaption}</div>
+          ${summaryNote}${links}
+        </td>
+      </tr>`;
   }).join('');
-  return `<button class="sources-toggle" data-idx="${idx}">&minus; Add sources</button><div class="sources-panel">${rows}</div>`;
+  return `<button class="sources-toggle" data-idx="${idx}">&minus; Add sources</button>
+    <table class="local-index-table">
+      <thead><tr><th>Type</th><th>Metadata</th><th>Sync</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
 }
 
 async function loadCorpora() {
@@ -2563,9 +2581,19 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
     sourceDownloadBtn.disabled = true;
     sourceDownloadBtn.textContent = 'Downloading…';
     const source = new EventSource(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(corpus.wg)}/${type}/download`);
-    const finish = (summary, links) => {
+    // Refetch this one type's status so downloaded_count/last_synced_at
+    // (the persisted caption other rows already show fresh) update too --
+    // without this, only the transient downloadSummary text below it would
+    // reflect the run that just finished.
+    const finish = async (summary, links) => {
       corpus.resources[type].downloadSummary = summary;
       if (links) corpus.resources[type].links = links;
+      try {
+        const res = await fetch(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(corpus.wg)}/${type}`);
+        Object.assign(corpus.resources[type], await res.json());
+      } catch (err) {
+        // Keep the stale count/timestamp rather than losing the row over a refresh hiccup.
+      }
       source.close();
       document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
     };

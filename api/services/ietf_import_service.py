@@ -334,6 +334,12 @@ class IetfImportService:
     # that are already fetched fresh elsewhere.
     _LOCAL_SOURCES_PATH = Path("/app/api/storage/ietf-downloads/local_sources.json")
 
+    # Only used by get_local_resource_status below (download_wg_resource_to_local
+    # keeps its own inline literal for this same directory, matching this
+    # file's existing convention elsewhere) -- broken out to a class
+    # attribute here specifically so it's monkeypatchable in tests.
+    _RESOURCES_DIR = Path("/app/api/storage/ietf-downloads/resources")
+
     @staticmethod
     def list_local_source_names() -> list[str]:
         if not IetfImportService._LOCAL_SOURCES_PATH.is_file():
@@ -574,6 +580,36 @@ class IetfImportService:
             for obj in data.get("objects", [])
         ]
         return {"count": data.get("meta", {}).get("total_count", len(documents)), "documents": documents}
+
+    @staticmethod
+    def get_local_resource_status(doc_type: str, documents: list[dict]) -> dict:
+        """Cross-references list_wg_resources' remote document list against
+        what's actually already on disk under storage/ietf-downloads/
+        resources/ -- those files are named by document `name` (unique
+        across the whole WG) plus the extension download_wg_resource_to_local
+        derives from `uploaded_filename`, not by wg/doc_type, so there's no
+        way to just glob a wg/doc_type-scoped directory; each document has
+        to be checked individually against that same naming convention.
+
+        Recording is link-only (download_wg_resource_to_local never writes a
+        file for it -- see that method's docstring), so it never contributes
+        a downloaded count or a last-synced time.
+        """
+        if doc_type == "recording":
+            return {"downloaded_count": 0, "last_synced_at": None}
+
+        local_dir = IetfImportService._RESOURCES_DIR
+        downloaded_count = 0
+        mtimes: list[float] = []
+        for doc in documents:
+            name = doc.get("name", "")
+            uploaded_filename = doc.get("uploaded_filename", "")
+            extension = Path(uploaded_filename).suffix if uploaded_filename else ".txt"
+            path = local_dir / f"{name}{extension}"
+            if path.is_file():
+                downloaded_count += 1
+                mtimes.append(path.stat().st_mtime)
+        return {"downloaded_count": downloaded_count, "last_synced_at": max(mtimes, default=None)}
 
     @staticmethod
     def download_wg_resource_to_local(doc_type: str, document: dict) -> dict:
