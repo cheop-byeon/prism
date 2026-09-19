@@ -1331,6 +1331,22 @@ function formatRelativeTime(unixSeconds) {
   return `${diffDays}d ago`;
 }
 
+// Rounding to whole days (formatRelativeTime above) means two events just
+// hours apart can land on opposite sides of a rounding boundary once
+// they're many days old, and display as e.g. "11d ago" vs "12d ago" even
+// though they happened in the same sitting -- confirmed live: a draft
+// synced and indexed 3.3 hours apart rounded to the same day, but a
+// bigger same-session gap can straddle a boundary and look inconsistent.
+// The label alone can't be trusted for a close comparison, so the exact
+// timestamp always rides along as a hover tooltip -- verifiable instead
+// of trusting two independently-rounded labels against each other.
+function relativeTimeHtml(unixSeconds, verb) {
+  const ago = formatRelativeTime(unixSeconds);
+  if (!ago) return '';
+  const exact = new Date(unixSeconds * 1000).toLocaleString();
+  return ` &middot; <span title="${escapeHtml(exact)}">${verb} ${ago}</span>`;
+}
+
 function linkify(text) {
   return escapeHtml(text).replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
@@ -1617,9 +1633,8 @@ function renderCorpora(corpora) {
       let statusValue;
       let actionsHtml;
       if (c.is_local) {
-        const syncedAgo = formatRelativeTime(ls.last_synced_at);
         statusValue = `mail: ${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`;
-        if (syncedAgo) statusValue += ` &middot; synced ${syncedAgo}`;
+        statusValue += relativeTimeHtml(ls.last_synced_at, 'synced');
         const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
         actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>`;
       } else {
@@ -1648,9 +1663,8 @@ function renderCorpora(corpora) {
         const rfcPart = c.rfc_number
           ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`)
           : 'not yet an RFC';
-        const syncedAgo = formatRelativeTime(ls.last_synced_at);
         value = `${draftPart} &middot; ${rfcPart}`;
-        if (syncedAgo) value += ` &middot; synced ${syncedAgo}`;
+        value += relativeTimeHtml(ls.last_synced_at, 'synced');
         const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
         actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>`;
       } else {
@@ -1678,8 +1692,7 @@ function renderCorpora(corpora) {
       let indexValue;
       if (idxStat.built) {
         indexValue = `${idxStat.total_documents} document${idxStat.total_documents === 1 ? '' : 's'} indexed (${Object.entries(idxStat.by_kind || {}).map(([k, n]) => `${n} ${k}`).join(', ')})`;
-        const indexedAgo = formatRelativeTime(idxStat.built_at);
-        if (indexedAgo) indexValue += ` &middot; indexed ${indexedAgo}`;
+        indexValue += relativeTimeHtml(idxStat.built_at, 'indexed');
       } else {
         indexValue = 'not indexed yet';
       }
