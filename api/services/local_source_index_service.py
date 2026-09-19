@@ -180,7 +180,16 @@ class LocalSourceIndexService:
         counts: dict[str, int] = {}
         for doc in documents:
             counts[doc.get("kind", "?")] = counts.get(doc.get("kind", "?"), 0) + 1
-        return {"built": True, "total_documents": len(documents), "by_kind": counts}
+        # Same free-from-disk approach as IetfImportService.
+        # get_local_download_status's last_synced_at -- the index file's own
+        # mtime IS "when this was last built", no separate timestamp to keep
+        # in sync with reality.
+        return {
+            "built": True,
+            "total_documents": len(documents),
+            "by_kind": counts,
+            "built_at": path.stat().st_mtime,
+        }
 
     @staticmethod
     def search(draft_name: str, query: str, top_k: int = 5) -> dict:

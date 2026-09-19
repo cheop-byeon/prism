@@ -1314,6 +1314,23 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// Sync/Build index's own status text (raw ✓, N revs, N documents indexed)
+// already says WHAT happened, but not WHEN -- making it impossible to tell
+// "this just finished" from "this was done a week ago" at a glance. Backed
+// by a file mtime already on disk (see get_local_download_status/
+// get_index_status), not a separately-tracked timestamp.
+function formatRelativeTime(unixSeconds) {
+  if (!unixSeconds) return null;
+  const diffSeconds = Math.max(0, Date.now() / 1000 - unixSeconds);
+  if (diffSeconds < 60) return 'just now';
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+
 function linkify(text) {
   return escapeHtml(text).replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
@@ -1600,8 +1617,11 @@ function renderCorpora(corpora) {
       let statusValue;
       let actionsHtml;
       if (c.is_local) {
+        const syncedAgo = formatRelativeTime(ls.last_synced_at);
         statusValue = `mail: ${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`;
-        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>Sync</button>`;
+        if (syncedAgo) statusValue += ` &middot; synced ${syncedAgo}`;
+        const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
+        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>`;
       } else {
         const ms = c.mail_status || {};
         statusValue = ms.error
@@ -1628,8 +1648,11 @@ function renderCorpora(corpora) {
         const rfcPart = c.rfc_number
           ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`)
           : 'not yet an RFC';
+        const syncedAgo = formatRelativeTime(ls.last_synced_at);
         value = `${draftPart} &middot; ${rfcPart}`;
-        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>Sync</button>`;
+        if (syncedAgo) value += ` &middot; synced ${syncedAgo}`;
+        const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
+        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>`;
       } else {
         const dr = c.draft_relations || {};
         value = dr.error
@@ -1652,14 +1675,20 @@ function renderCorpora(corpora) {
 
     let indexFacet = '';
     if (c.is_local) {
-      const indexValue = idxStat.built
-        ? `${idxStat.total_documents} document${idxStat.total_documents === 1 ? '' : 's'} indexed (${Object.entries(idxStat.by_kind || {}).map(([k, n]) => `${n} ${k}`).join(', ')})`
-        : 'not indexed yet';
+      let indexValue;
+      if (idxStat.built) {
+        indexValue = `${idxStat.total_documents} document${idxStat.total_documents === 1 ? '' : 's'} indexed (${Object.entries(idxStat.by_kind || {}).map(([k, n]) => `${n} ${k}`).join(', ')})`;
+        const indexedAgo = formatRelativeTime(idxStat.built_at);
+        if (indexedAgo) indexValue += ` &middot; indexed ${indexedAgo}`;
+      } else {
+        indexValue = 'not indexed yet';
+      }
+      const indexBtnLabel = idxStat.built ? 'Rebuild index' : 'Build index';
       indexFacet = `
         <div class="corpus-facet">
           <span class="facet-label">Search index</span>
           <span class="facet-value${idxStat.error ? ' error' : ''}">${idxStat.error ? escapeHtml(idxStat.error) : indexValue}</span>
-          <button class="local-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-database"/></svg>Build index</button>
+          <button class="local-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-database"/></svg>${indexBtnLabel}</button>
         </div>`;
     }
 

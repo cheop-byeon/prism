@@ -369,26 +369,36 @@ class IetfImportService:
                 "rfc_downloaded": False,
                 "mail_downloaded": False,
                 "mail_thread_downloaded": False,
+                "last_synced_at": None,
             }
 
         revision_re = re.compile(rf"^{re.escape(draft_name)}-(\d+)\.txt$")
-        revisions = sorted(
-            int(match.group(1))
-            for entry in local_dir.iterdir()
-            if entry.is_file() and (match := revision_re.match(entry.name))
-        )
-        rfc_downloaded = bool(rfc_number and any(local_dir.glob(f"ietf-RFC{rfc_number}.*")))
-        mail_downloaded = bool(wg and any(local_dir.glob(f"ietf-mailarchive-{wg}-*.mbox")))
+        revision_files = [
+            entry for entry in local_dir.iterdir() if entry.is_file() and revision_re.match(entry.name)
+        ]
+        revisions = sorted(int(revision_re.match(entry.name).group(1)) for entry in revision_files)
+        rfc_files = list(local_dir.glob(f"ietf-RFC{rfc_number}.*")) if rfc_number else []
+        mail_files = list(local_dir.glob(f"ietf-mailarchive-{wg}-*.mbox")) if wg else []
         thread_dir = local_dir / "preprocessed"
-        mail_thread_downloaded = bool(
-            wg and thread_dir.is_dir() and any(thread_dir.glob(f"ietf-mailarchive-{wg}-*-threads.jsonl"))
+        thread_files = (
+            list(thread_dir.glob(f"ietf-mailarchive-{wg}-*-threads.jsonl")) if wg and thread_dir.is_dir() else []
         )
+
+        # "Last synced" is just the newest mtime among everything Sync could
+        # have touched -- free to compute from files already on disk, no
+        # separate timestamp needs persisting anywhere. None (not "never")
+        # when nothing's been synced yet, so the frontend can tell those
+        # two states apart instead of showing a bogus "0 seconds ago".
+        all_files = revision_files + rfc_files + mail_files + thread_files
+        last_synced_at = max((f.stat().st_mtime for f in all_files), default=None)
+
         return {
             "revisions_downloaded": len(revisions),
             "latest_revision_downloaded": f"{revisions[-1]:02d}" if revisions else None,
-            "rfc_downloaded": rfc_downloaded,
-            "mail_downloaded": mail_downloaded,
-            "mail_thread_downloaded": mail_thread_downloaded,
+            "rfc_downloaded": bool(rfc_files),
+            "mail_downloaded": bool(mail_files),
+            "mail_thread_downloaded": bool(thread_files),
+            "last_synced_at": last_synced_at,
         }
 
     @staticmethod
