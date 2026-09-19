@@ -688,6 +688,10 @@
   .facet-note a:hover { text-decoration: underline; }
   .facet-note.warn { color: var(--kind-fetch); padding-left: 110px; }
   .add-source-subhint { font-size: var(--text-xs); color: var(--text-tertiary); margin: 0 0 10px; }
+  .pull-status { padding: 10px 0 6px; }
+  .pull-progress-track { height: 6px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; margin-bottom: 6px; }
+  .pull-progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s ease; }
+  .pull-status-label { font-size: var(--text-sm); color: var(--text-dim); }
   #newDraftResult, #newSourceResolved { padding-left: 110px; }
   .local-badge {
     font-size: var(--text-2xs); font-weight: 600; color: var(--text-dim); border: 1px solid var(--border);
@@ -1112,11 +1116,13 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
           </div>
           <div id="topicDiscoverResults" class="topic-discover-results" hidden></div>
           <div id="topicDiscoverActions" class="topic-discover-actions" hidden>
-            <button id="topicSelectAllBtn" type="button" class="btn-secondary">Select all</button>
-            <button id="topicSelectNoneBtn" type="button" class="btn-secondary">Select none</button>
+            <button id="topicSelectToggleBtn" type="button" class="btn-secondary" aria-pressed="false">Select all</button>
             <button id="topicPullBtn" type="button" class="btn-primary">Pull selected</button>
           </div>
-          <div id="topicPullStatus" class="facet-note" hidden></div>
+          <div id="topicPullStatus" class="pull-status" hidden>
+            <div class="pull-progress-track"><div class="pull-progress-fill" id="topicPullProgressFill"></div></div>
+            <div class="pull-status-label" id="topicPullStatusLabel"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -2066,13 +2072,35 @@ function renderTopicDiscoverResults(data) {
   }
   resultsEl.innerHTML = html;
   actionsEl.hidden = false;
+  updateTopicSelectToggleBtn();
 }
 
-document.getElementById('topicSelectAllBtn').addEventListener('click', () => {
-  document.querySelectorAll('#topicDiscoverResults input[type=checkbox]:not(:disabled)').forEach((cb) => { cb.checked = true; });
+// Single toggle instead of separate Select all/Select none buttons -- its
+// pressed state always mirrors whether every selectable (non-disabled, i.e.
+// not-already-local) checkbox is currently checked, so it stays correct
+// even after the user hand-toggles individual rows rather than just
+// reflecting whichever button was clicked last.
+function topicSelectableCheckboxes() {
+  return Array.from(document.querySelectorAll('#topicDiscoverResults input[type=checkbox]:not(:disabled)'));
+}
+
+function updateTopicSelectToggleBtn() {
+  const boxes = topicSelectableCheckboxes();
+  const allSelected = boxes.length > 0 && boxes.every((cb) => cb.checked);
+  const toggleBtn = document.getElementById('topicSelectToggleBtn');
+  toggleBtn.classList.toggle('active', allSelected);
+  toggleBtn.setAttribute('aria-pressed', String(allSelected));
+  toggleBtn.textContent = allSelected ? 'Deselect all' : 'Select all';
+}
+
+document.getElementById('topicSelectToggleBtn').addEventListener('click', () => {
+  const boxes = topicSelectableCheckboxes();
+  const allSelected = boxes.length > 0 && boxes.every((cb) => cb.checked);
+  boxes.forEach((cb) => { cb.checked = !allSelected; });
+  updateTopicSelectToggleBtn();
 });
-document.getElementById('topicSelectNoneBtn').addEventListener('click', () => {
-  document.querySelectorAll('#topicDiscoverResults input[type=checkbox]').forEach((cb) => { cb.checked = false; });
+document.getElementById('topicDiscoverResults').addEventListener('change', (e) => {
+  if (e.target.matches('input[type=checkbox]')) updateTopicSelectToggleBtn();
 });
 
 document.getElementById('topicPullBtn').addEventListener('click', () => {
@@ -2081,32 +2109,41 @@ document.getElementById('topicPullBtn').addEventListener('click', () => {
   if (!rfcNumbers.length) return;
   const btn = document.getElementById('topicPullBtn');
   const statusEl = document.getElementById('topicPullStatus');
+  const fillEl = document.getElementById('topicPullProgressFill');
+  const labelEl = document.getElementById('topicPullStatusLabel');
   btn.disabled = true;
   statusEl.hidden = false;
-  statusEl.textContent = 'Starting…';
+  fillEl.style.width = '0%';
+  labelEl.textContent = 'Starting…';
   const source = new EventSource(`${PRISM_PREFIX}/api/corpora/topic-pull?rfc_numbers=${encodeURIComponent(rfcNumbers.join(','))}`);
-  const finish = (summary) => {
-    statusEl.textContent = summary;
+  // Only auto-close on a fully clean run -- if anything failed, the summary
+  // naming which RFC and why is the whole point of finishing this action,
+  // and it would be gone before it could be read.
+  const finish = (summary, allOk) => {
+    labelEl.textContent = summary;
+    fillEl.style.width = '100%';
     source.close();
     btn.disabled = false;
     loadCorpora();
+    if (allOk) setTimeout(closeAddSourceModal, 1200);
   };
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
-      statusEl.textContent = msg.message || 'Pulling…';
+      if (msg.total) fillEl.style.width = `${Math.round((msg.current / msg.total) * 100)}%`;
+      labelEl.textContent = msg.message || 'Pulling…';
     } else if (msg.type === 'result') {
       const results = msg.data.results || [];
       const ok = results.filter((r) => r.ok).length;
       const failed = results.filter((r) => !r.ok);
       let summary = `Pulled ${ok}/${results.length}.`;
       if (failed.length) summary += ` Failed: ${failed.map((r) => `RFC${r.rfc} (${r.error})`).join(', ')}`;
-      finish(summary);
+      finish(summary, failed.length === 0);
     } else if (msg.type === 'error') {
-      finish(`Error: ${msg.message}`);
+      finish(`Error: ${msg.message}`, false);
     }
   };
-  source.onerror = () => finish('Connection lost.');
+  source.onerror = () => finish('Connection lost.', false);
 });
 
 // Every non-draft/RFC/mailarchive Datatracker doctype (agenda, minutes,

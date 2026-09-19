@@ -1077,7 +1077,14 @@ def main() -> None:
         def work(on_event):
             results = []
             for i, rfc_number in enumerate(rfc_numbers, start=1):
-                on_event({"stage": "pulling", "message": f"RFC{rfc_number} ({i}/{len(rfc_numbers)})"})
+                on_event(
+                    {
+                        "stage": "pulling",
+                        "current": i,
+                        "total": len(rfc_numbers),
+                        "message": f"RFC{rfc_number} ({i}/{len(rfc_numbers)})",
+                    }
+                )
                 draft_name = IetfImportService.resolve_draft_name_for_rfc(rfc_number)
                 if not draft_name:
                     results.append({"rfc": rfc_number, "ok": False, "error": "could not resolve a draft name"})
