@@ -1663,6 +1663,35 @@ function renderCorpora(corpora) {
         </div>`;
     }
 
+    // Embeddings, unlike the BM25 index above, run as a real Celery task
+    // (see tasks/local_source_embedding_index_task.py) so they survive
+    // this page closing -- embedding_index_status here is exactly the
+    // persisted job-status file, polled after starting a build and also
+    // picked up on a fresh page load if one was already in flight (see
+    // startEmbedPollingIfNeeded).
+    let embeddingFacet = '';
+    if (c.is_local) {
+      const embStat = c.embedding_index_status || { status: 'not_started' };
+      const embRunning = embStat.status === 'queued' || embStat.status === 'running';
+      let embValue;
+      if (embRunning) embValue = embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…');
+      else if (embStat.status === 'completed') embValue = embStat.message || 'Embedded.';
+      else if (embStat.status === 'error') embValue = embStat.message || 'Failed.';
+      else embValue = 'not built yet';
+      const embBtnLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild embedding index' : 'Build embedding index');
+      const pct = embRunning && embStat.total ? Math.round((embStat.current / embStat.total) * 100) : 0;
+      const progressHtml = embRunning
+        ? `<div class="pull-progress-track" style="margin:2px 0 0 120px"><div class="pull-progress-fill" style="width:${pct}%"></div></div>`
+        : '';
+      embeddingFacet = `
+        <div class="corpus-facet">
+          <span class="facet-label">Embeddings</span>
+          <span class="facet-value${embStat.status === 'error' ? ' error' : ''}">${escapeHtml(embValue)}</span>
+          <button class="local-embedding-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}" ${embRunning ? 'disabled' : ''}><svg class="icon icon-sm"><use href="#icon-database"/></svg>${embBtnLabel}</button>
+        </div>
+        ${progressHtml}`;
+    }
+
     const expanded = expandedSourceIndices.has(idx);
     return `
       <tr class="source-row${c.is_local ? ' local-source-row' : ''}${expanded ? ' expanded' : ''}" data-idx="${idx}">
@@ -1680,6 +1709,7 @@ function renderCorpora(corpora) {
           ${mailFacet}
           ${draftFacet}
           ${indexFacet}
+          ${embeddingFacet}
           ${renderSourcesSection(c, idx)}
         </td>
       </tr>`;
@@ -2187,9 +2217,48 @@ async function loadCorpora() {
     const data = await res.json();
     corporaData = data.corpora || [];
     container.innerHTML = renderCorpora(corporaData);
+    corporaData.forEach(startEmbedPollingIfNeeded);
   } catch (err) {
     container.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
   }
+}
+
+// Embedding index status lives entirely server-side (see JobStatusService),
+// so a job already running when this page loads -- started from another
+// tab, or before this same tab was closed and reopened -- is picked up
+// here exactly the same way as one just started by clicking the button.
+// Keyed by draft_name (not index into corporaData) so a concurrent
+// loadCorpora() re-render, which rebuilds that array, can't cause this to
+// either double-poll the same job or silently drop it.
+const activeEmbedPolls = new Set();
+
+function startEmbedPollingIfNeeded(corpus) {
+  const draftName = corpus.draft_name;
+  const st = corpus.embedding_index_status;
+  if (!st || (st.status !== 'queued' && st.status !== 'running') || activeEmbedPolls.has(draftName)) return;
+  activeEmbedPolls.add(draftName);
+
+  const poll = async () => {
+    let status;
+    try {
+      const res = await fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index/status?draft_name=${encodeURIComponent(draftName)}`);
+      status = await res.json();
+    } catch (err) {
+      activeEmbedPolls.delete(draftName);
+      return;
+    }
+    const idx = corporaData.findIndex((c) => c.draft_name === draftName);
+    if (idx !== -1) {
+      corporaData[idx].embedding_index_status = status;
+      document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
+    }
+    if (status.status === 'queued' || status.status === 'running') {
+      setTimeout(poll, 2000);
+    } else {
+      activeEmbedPolls.delete(draftName);
+    }
+  };
+  poll();
 }
 
 // "Add source" -- both ways of finding something to add ("Find one" and
@@ -2370,6 +2439,35 @@ document.getElementById('corporaList').addEventListener('click', async (e) => {
       return;
     }
     loadCorpora();
+    return;
+  }
+
+  // Unlike Build index above, this doesn't wait for the result inline --
+  // the request just enqueues the Celery task and returns immediately (see
+  // api_corpora_local_embedding_index), so progress comes from polling
+  // instead (startEmbedPollingIfNeeded), which keeps working even if this
+  // click handler's own page gets reloaded before the job finishes.
+  const localEmbedBtn = e.target.closest('.local-embedding-index-btn');
+  if (localEmbedBtn) {
+    const idx = parseInt(localEmbedBtn.dataset.idx, 10);
+    localEmbedBtn.disabled = true;
+    try {
+      const res = await fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ draft_name: localEmbedBtn.dataset.draft }),
+      });
+      const status = await res.json();
+      if (!res.ok) {
+        corporaData[idx].embedding_index_status = { status: 'error', message: status.error || 'Failed to start.' };
+      } else {
+        corporaData[idx].embedding_index_status = status;
+      }
+    } catch (err) {
+      corporaData[idx].embedding_index_status = { status: 'error', message: String(err) };
+    }
+    document.getElementById('corporaList').innerHTML = renderCorpora(corporaData);
+    startEmbedPollingIfNeeded(corporaData[idx]);
     return;
   }
 

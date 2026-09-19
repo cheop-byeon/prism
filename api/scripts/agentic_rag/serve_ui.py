@@ -767,6 +767,14 @@ def main() -> None:
                     row["index_status"] = LocalSourceIndexService.get_index_status(draft_name)
                 except Exception as exc:
                     row["index_status"] = {"error": str(exc)}
+                try:
+                    from services.job_status_service import JobStatusService
+
+                    row["embedding_index_status"] = JobStatusService.get_status(f"embed:{draft_name}") or {
+                        "status": "not_started"
+                    }
+                except Exception as exc:
+                    row["embedding_index_status"] = {"status": "error", "message": str(exc)}
             corpora.append(row)
         return jsonify({"corpora": corpora})
 
