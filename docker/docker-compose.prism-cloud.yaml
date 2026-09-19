@@ -1,9 +1,25 @@
-# Cloud-deployment-only override: sets PRISM_URL_PREFIX so Prism registers
-# its Flask routes under /prism instead of the root, matching the nginx
-# /prism location added to docker/nginx/conf.d/default.conf.template.
-# Deliberately kept out of docker-compose.ietf-ui.yaml (used by local dev
-# too, where Prism is reached directly at http://localhost:8765/ with no
-# prefix) -- add this file's -f flag only on the deployment VM:
+# Cloud-deployment-only override. Two things, both scoped to this one VM's
+# floating IP (158.39.200.231 -- update every occurrence below if that
+# ever changes, e.g. once a real domain replaces it):
+#
+# 1. PRISM_URL_PREFIX so Prism registers its Flask routes under /prism
+#    instead of the root, matching the nginx /prism location added to
+#    docker/nginx/conf.d/default.conf.template.
+#
+# 2. CONSOLE_API_URL/CONSOLE_WEB_URL/SERVICE_API_URL/APP_API_URL/APP_WEB_URL
+#    overridden to the floating IP on every service that reads them.
+#    docker/.env and docker-compose.override.yaml are both gitignored, so
+#    they ship with their dev-only localhost/empty values on every clone
+#    including this VM's -- api's CONSOLE_API_URL: 'http://localhost:5001'
+#    in docker-compose.override.yaml is exactly why Prism's login page
+#    tried to reach the *browser's own* localhost instead of this server.
+#    Since this file is loaded last (see the -f order below), its values
+#    win over docker-compose.override.yaml's for the same keys.
+#
+# Both deliberately kept out of docker-compose.ietf-ui.yaml/
+# docker-compose.override.yaml (used by local dev too, where everything is
+# reached directly at localhost with no prefix) -- add this file's -f flag
+# only on the deployment VM:
 #
 #   docker compose \
 #     -f docker-compose.yaml \
@@ -11,7 +27,29 @@
 #     -f docker-compose.ietf-ui.yaml \
 #     -f docker-compose.prism-cloud.yaml \
 #     up -d
+x-cloud-urls: &cloud-urls
+  CONSOLE_API_URL: http://158.39.200.231
+  CONSOLE_WEB_URL: http://158.39.200.231
+  SERVICE_API_URL: http://158.39.200.231
+  APP_API_URL: http://158.39.200.231
+  APP_WEB_URL: http://158.39.200.231
+
 services:
   ietf_decision_agent_ui:
     environment:
+      <<: *cloud-urls
       PRISM_URL_PREFIX: /prism
+
+  api:
+    environment: *cloud-urls
+
+  worker:
+    environment: *cloud-urls
+
+  worker_beat:
+    environment: *cloud-urls
+
+  web:
+    environment:
+      CONSOLE_API_URL: http://158.39.200.231
+      APP_API_URL: http://158.39.200.231
