@@ -693,6 +693,24 @@
   .pull-progress-track { height: 6px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; margin-bottom: 6px; }
   .pull-progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s ease; }
   .pull-status-label { font-size: var(--text-sm); color: var(--text-dim); }
+  .local-index-table { width: 100%; border-collapse: collapse; margin: 10px 0 4px; font-size: var(--text-sm); }
+  .local-index-table th {
+    text-align: left; color: var(--text-tertiary); font-weight: 600; font-size: var(--text-xs);
+    text-transform: uppercase; letter-spacing: 0.02em; padding: 4px 10px 6px; border-bottom: 1px solid var(--border);
+  }
+  .local-index-table th.has-tooltip { cursor: help; border-bottom: 1px dotted var(--text-quaternary); }
+  .local-index-table td { padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; color: var(--text); }
+  .local-index-table td.action-cell button {
+    background: transparent; border: 1px solid var(--border); color: var(--accent);
+    padding: 3px 9px; font-size: var(--text-xs); font-weight: 600; border-radius: var(--radius-sm); cursor: pointer;
+  }
+  .local-index-table td.action-cell button:hover { border-color: var(--accent); }
+  .local-index-table td.action-cell button:disabled { opacity: 0.5; cursor: default; }
+  .local-index-table .ts { margin-top: 4px; font-size: var(--text-xs); color: var(--text-dim); }
+  .local-index-table .ts[title], .local-index-table .ts span[title] { cursor: help; border-bottom: 1px dotted var(--text-quaternary); }
+  .local-index-table .ts .error { color: var(--error); border-bottom: none; cursor: auto; }
+  .local-index-table .pull-progress-track { margin: 6px 0 0; }
+  .local-index-table-note { font-size: var(--text-xs); color: var(--text-tertiary); margin: 0 0 10px; }
   #newDraftResult, #newSourceResolved { padding-left: 110px; }
   .local-badge {
     font-size: var(--text-2xs); font-weight: 600; color: var(--text-dim); border: 1px solid var(--border);
@@ -1348,6 +1366,15 @@ function relativeTimeHtml(unixSeconds, verb) {
   return ` &middot; <span title="${escapeHtml(exact)}">${verb} ${ago}</span>`;
 }
 
+// Same exact-timestamp-on-hover idea as relativeTimeHtml above, but for
+// standalone use in its own table cell rather than appended onto an
+// existing value string (no leading " · " separator).
+function tooltipSpan(text, unixSeconds) {
+  if (!unixSeconds) return escapeHtml(text);
+  const exact = new Date(unixSeconds * 1000).toLocaleString();
+  return `<span title="${escapeHtml(exact)}">${escapeHtml(text)}</span>`;
+}
+
 function linkify(text) {
   return escapeHtml(text).replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
 }
@@ -1616,50 +1643,13 @@ function renderCorpora(corpora) {
     const ls = c.local_status || {};
     const idxStat = c.index_status || {};
 
-    // Same two facets, same order, same labels for every row -- "Mail" then
-    // "Draft" -- whether it's a real Dify-dataset-backed corpus or a local
-    // source. What differs is only the status text and the action each
-    // kind actually needs: a real corpus already has its content indexed,
-    // so its actions just refresh sidecar freshness / grab one revision for
-    // a quick look; a local source has nothing but local files, so both of
-    // its facets share the same one "Sync" action (drafts+RFC+mail all at
-    // once -- see IetfImportService.sync_local_source), since splitting
-    // that into two independent buttons was exactly the "more granularity
-    // than useful" complaint that led here. "Search index" is the one
-    // genuinely extra facet, local-only, since a real corpus doesn't need
-    // a local BM25 index -- it's already queryable through the agent's
-    // normal dataset tools.
-    // Local sources only ever have ONE sync action -- IetfImportService.
-    // sync_local_source pulls draft/RFC/mail together in one call -- so
-    // showing it as two separate "Mail" and "Draft" rows, each with its own
-    // "Sync" button, implied two independent actions that don't actually
-    // exist. Combined into a single "Downloads" row instead; real (non-
-    // local) corpora keep separate Mail/Draft rows below since those
-    // genuinely ARE two independent actions (syncing the real dataset's
-    // mail vs. downloading one draft revision).
-    let downloadsFacet = '';
+    // Real (non-local) corpora: Mail and Draft stay separate rows, since
+    // syncing the real dataset's mail and downloading one draft revision
+    // genuinely ARE two independent actions there (unlike local sources
+    // below, where one sync call pulls both).
     let mailFacet = '';
     let draftFacet = '';
-    if (c.is_local) {
-      const draftPart = ls.revisions_downloaded
-        ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${ls.latest_revision_downloaded})`
-        : 'no revisions yet';
-      const rfcPart = c.rfc_number
-        ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`)
-        : 'not yet an RFC';
-      const mailPart = c.wg
-        ? ` &middot; mail (${escapeHtml(c.wg)}): ${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`
-        : '';
-      let value = `${draftPart} &middot; ${rfcPart}${mailPart}`;
-      value += relativeTimeHtml(ls.last_synced_at, 'synced');
-      const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
-      downloadsFacet = `
-        <div class="corpus-facet">
-          <span class="facet-label" title="Raw draft revisions, the published RFC (once one exists), and this WG's mail -- one action pulls all three">Downloads</span>
-          <span class="facet-value">${value}</span>
-          <button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>
-        </div>`;
-    } else {
+    if (!c.is_local) {
       if (c.wg) {
         const ms = c.mail_status || {};
         const statusValue = ms.error
@@ -1691,56 +1681,75 @@ function renderCorpora(corpora) {
       }
     }
 
-    // Keyword index and semantic index are two parallel, independent
-    // search mechanisms over the exact same Downloads content above --
-    // named and tooltipped to say so explicitly, since "Search index" vs.
-    // "Embeddings" gave no hint they were two answers to the same
-    // question (find relevant text here) rather than unrelated features.
-    let indexFacet = '';
+    // Local sources: one row per content type (Email, Drafts/RFCs), each
+    // showing the same three actions -- Sync, Sparse index (BM25), Dense
+    // index (embeddings). Per user direction, this is a VISUAL split only:
+    // sync_local_source pulls draft/RFC/mail together in one call, and
+    // build_index/build_embedding_index each build one combined index over
+    // all of it -- so both rows' buttons trigger the exact same action and
+    // show the exact same timestamps. Not a real per-type pipeline split
+    // (that would need separate sync calls and separate indices per type,
+    // which was deliberately ruled out as bigger than what's needed here).
+    let localIndexTable = '';
     if (c.is_local) {
-      let indexValue;
-      if (idxStat.built) {
-        indexValue = `${idxStat.total_documents} document${idxStat.total_documents === 1 ? '' : 's'} indexed (${Object.entries(idxStat.by_kind || {}).map(([k, n]) => `${n} ${k}`).join(', ')})`;
-        indexValue += relativeTimeHtml(idxStat.built_at, 'indexed');
-      } else {
-        indexValue = 'not indexed yet';
-      }
-      const indexBtnLabel = idxStat.built ? 'Rebuild index' : 'Build index';
-      indexFacet = `
-        <div class="corpus-facet">
-          <span class="facet-label" title="Fast exact-keyword matching over the Downloads content above (drafts + RFC + mail threads). Rebuilt from scratch in seconds, so there's no harm re-running it often.">Keyword index (BM25)</span>
-          <span class="facet-value${idxStat.error ? ' error' : ''}">${idxStat.error ? escapeHtml(idxStat.error) : indexValue}</span>
-          <button class="local-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-database"/></svg>${indexBtnLabel}</button>
-        </div>`;
-    }
+      const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
+      const syncBtn = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}">${syncLabel}</button>`;
+      const syncCaption = ls.last_synced_at
+        ? tooltipSpan(`synced ${formatRelativeTime(ls.last_synced_at)}`, ls.last_synced_at)
+        : 'never synced';
 
-    // Embeddings, unlike the BM25 index above, run as a real Celery task
-    // (see tasks/local_source_embedding_index_task.py) so they survive
-    // this page closing -- embedding_index_status here is exactly the
-    // persisted job-status file, polled after starting a build and also
-    // picked up on a fresh page load if one was already in flight (see
-    // startEmbedPollingIfNeeded).
-    let embeddingFacet = '';
-    if (c.is_local) {
+      const sparseBtnLabel = idxStat.built ? 'Rebuild' : 'Build';
+      const sparseBtn = `<button class="local-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}">${sparseBtnLabel}</button>`;
+      const sparseCaption = idxStat.error
+        ? `<span class="error">${escapeHtml(idxStat.error)}</span>`
+        : idxStat.built
+          ? tooltipSpan(`sparse ${formatRelativeTime(idxStat.built_at)}`, idxStat.built_at)
+          : 'not indexed';
+
       const embStat = c.embedding_index_status || { status: 'not_started' };
       const embRunning = embStat.status === 'queued' || embStat.status === 'running';
-      let embValue;
-      if (embRunning) embValue = embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…');
-      else if (embStat.status === 'completed') embValue = embStat.message || 'Embedded.';
-      else if (embStat.status === 'error') embValue = embStat.message || 'Failed.';
-      else embValue = 'not built yet';
-      const embBtnLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild embedding index' : 'Build embedding index');
+      const denseBtnLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild' : 'Build');
+      const denseBtn = `<button class="local-embedding-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}" ${embRunning ? 'disabled' : ''}>${denseBtnLabel}</button>`;
+      let denseCaption;
+      if (embRunning) denseCaption = escapeHtml(embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…'));
+      else if (embStat.status === 'error') denseCaption = `<span class="error">${escapeHtml(embStat.message || 'Failed.')}</span>`;
+      else if (embStat.status === 'completed') denseCaption = tooltipSpan(`dense ${formatRelativeTime(embStat.updated_at)}`, embStat.updated_at);
+      else denseCaption = 'not built';
       const pct = embRunning && embStat.total ? Math.round((embStat.current / embStat.total) * 100) : 0;
-      const progressHtml = embRunning
-        ? `<div class="pull-progress-track" style="margin:2px 0 0 120px"><div class="pull-progress-fill" style="width:${pct}%"></div></div>`
+      const denseProgressHtml = embRunning
+        ? `<div class="pull-progress-track"><div class="pull-progress-fill" style="width:${pct}%"></div></div>`
         : '';
-      embeddingFacet = `
-        <div class="corpus-facet">
-          <span class="facet-label" title="Slower meaning-based matching over the same Downloads content the keyword index above covers -- finds relevant text that doesn't share exact words with the query. Runs as a background job (see the progress bar below while it's active), since it's too slow to run inline the way the keyword index is.">Semantic index (embeddings)</span>
-          <span class="facet-value${embStat.status === 'error' ? ' error' : ''}">${escapeHtml(embValue)}</span>
-          <button class="local-embedding-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}" ${embRunning ? 'disabled' : ''}><svg class="icon icon-sm"><use href="#icon-database"/></svg>${embBtnLabel}</button>
-        </div>
-        ${progressHtml}`;
+
+      const mailMeta = c.wg
+        ? `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`
+        : 'no WG for this draft';
+      const draftMeta = `${ls.revisions_downloaded ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${ls.latest_revision_downloaded})` : 'no revisions yet'} &middot; ${c.rfc_number ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`) : 'not yet an RFC'}`;
+
+      const actionCell = (btn, caption, extra) => `<td class="action-cell">${btn}<div class="ts">${caption}</div>${extra || ''}</td>`;
+
+      localIndexTable = `
+        <table class="local-index-table">
+          <thead>
+            <tr><th>Type</th><th>Metadata</th><th>Sync</th><th title="Fast exact-keyword matching over this row's content" class="has-tooltip">Sparse index (BM25)</th><th title="Slower meaning-based matching over the same content -- finds relevant text that doesn't share exact words with the query" class="has-tooltip">Dense index (embeddings)</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Email${c.wg ? ` (${escapeHtml(c.wg)})` : ''}</td>
+              <td>${mailMeta}</td>
+              ${actionCell(syncBtn, syncCaption)}
+              ${actionCell(sparseBtn, sparseCaption)}
+              ${actionCell(denseBtn, denseCaption, denseProgressHtml)}
+            </tr>
+            <tr>
+              <td>Drafts/RFCs</td>
+              <td>${draftMeta}</td>
+              ${actionCell(syncBtn, syncCaption)}
+              ${actionCell(sparseBtn, sparseCaption)}
+              ${actionCell(denseBtn, denseCaption, denseProgressHtml)}
+            </tr>
+          </tbody>
+        </table>
+        <p class="local-index-table-note">Sync/Sparse/Dense are each one combined action over everything downloaded for this source -- both rows above trigger the same run and show the same timestamps, they're just split by content type for readability.</p>`;
     }
 
     const expanded = expandedSourceIndices.has(idx);
@@ -1757,11 +1766,9 @@ function renderCorpora(corpora) {
       </tr>
       <tr class="source-detail-row" data-idx="${idx}" ${expanded ? '' : 'hidden'}>
         <td colspan="3">
-          ${downloadsFacet}
           ${mailFacet}
           ${draftFacet}
-          ${indexFacet}
-          ${embeddingFacet}
+          ${localIndexTable}
           ${renderSourcesSection(c, idx)}
         </td>
       </tr>`;
