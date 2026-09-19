@@ -17,6 +17,8 @@ import json
 import re
 from pathlib import Path
 
+import httpx
+import numpy as np
 from rank_bm25 import BM25Okapi
 
 _DOWNLOADS_DIR = Path("/app/api/storage/ietf-downloads")
@@ -24,6 +26,14 @@ _PREPROCESSED_DIR = _DOWNLOADS_DIR / "preprocessed"
 _INDEX_DIR = _DOWNLOADS_DIR / "index"
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
+
+# Same local model/endpoint as RfcCorpusIndexService.build_embedding_index --
+# duplicated rather than shared for now since these are each's only caller
+# and the two services intentionally don't depend on each other (see this
+# file's own docstring on why); worth a shared helper if a third caller
+# shows up.
+_OLLAMA_EMBED_URL = "http://host.docker.internal:11434/api/embed"
+_EMBED_MODEL = "rfc-dralign-q8"
 
 
 def _tokenize(text: str) -> list[str]:
@@ -96,6 +106,66 @@ class LocalSourceIndexService:
         if on_event:
             on_event({"stage": "indexing", "message": f"Indexed {len(documents)} documents"})
         return {"total_documents": len(documents), "by_kind": counts}
+
+    @staticmethod
+    def _embeddings_matrix_path(draft_name: str) -> Path:
+        return _INDEX_DIR / f"{draft_name}-embeddings.npy"
+
+    @staticmethod
+    def _embeddings_ids_path(draft_name: str) -> Path:
+        return _INDEX_DIR / f"{draft_name}-embeddings-ids.json"
+
+    @staticmethod
+    def build_embedding_index(
+        draft_name: str, wg: str | None, rfc_number: str | None, on_event=None, batch_size: int = 20
+    ) -> dict:
+        """Same document set as build_index (the BM25 tier above), embedded
+        via the same local rfc-dralign-q8 model RfcCorpusIndexService uses
+        for its own whole-corpus embedding tier -- see that module's
+        docstring for why this calls the embedding model directly rather
+        than going through Dify's own Dataset/vector-store pipeline.
+
+        Meant to be run from a Celery task (see
+        tasks/local_source_embedding_index_task.py), not called directly
+        from a request handler -- a source's worth of mail/draft/RFC text
+        is small compared to the whole corpus, but still slow enough
+        (measured ~160ms/doc for RfcCorpusIndexService's short
+        title+abstract texts; these are full documents) that it must
+        survive the requesting page closing, unlike build_index's BM25
+        tier which is cheap enough to run inline in the request/SSE.
+        """
+        if on_event:
+            on_event({"stage": "indexing", "current": 0, "total": 0, "message": "Gathering local content…"})
+        documents = LocalSourceIndexService._gather_documents(draft_name, wg, rfc_number)
+        if not documents:
+            return {"error": "Nothing downloaded locally yet for this draft -- sync first."}
+
+        ids = [doc["id"] for doc in documents]
+        texts = [doc["text"] for doc in documents]
+
+        vectors: list[list[float]] = []
+        with httpx.Client(timeout=120.0) as client:
+            for i in range(0, len(texts), batch_size):
+                batch = texts[i : i + batch_size]
+                resp = client.post(_OLLAMA_EMBED_URL, json={"model": _EMBED_MODEL, "input": batch})
+                resp.raise_for_status()
+                vectors.extend(resp.json()["embeddings"])
+                if on_event:
+                    done = min(i + batch_size, len(texts))
+                    on_event(
+                        {
+                            "stage": "indexing",
+                            "current": done,
+                            "total": len(texts),
+                            "message": f"Embedding… ({done}/{len(texts)})",
+                        }
+                    )
+
+        matrix = np.array(vectors, dtype=np.float32)
+        _INDEX_DIR.mkdir(parents=True, exist_ok=True)
+        np.save(LocalSourceIndexService._embeddings_matrix_path(draft_name), matrix)
+        LocalSourceIndexService._embeddings_ids_path(draft_name).write_text(json.dumps(ids))
+        return {"total_documents": len(ids), "dims": matrix.shape[1] if matrix.size else 0}
 
     @staticmethod
     def get_index_status(draft_name: str) -> dict:

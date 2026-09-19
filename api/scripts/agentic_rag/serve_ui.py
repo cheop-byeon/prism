@@ -512,6 +512,7 @@ _DATA_ADMIN_ONLY_EXACT_PATHS = {
     "/api/corpora/draft-download-all",
     "/api/corpora/local-sync",
     "/api/corpora/local-index",
+    "/api/corpora/local-embedding-index",
     "/api/corpora/topic-pull",
     # Read-only, but org-wide across every account -- not one account's own
     # data the way Sessions/Research are, so it's gated the same as the
@@ -942,6 +943,47 @@ def main() -> None:
         except Exception as exc:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
+
+    @app.route(f"{_URL_PREFIX}/api/corpora/local-embedding-index", methods=["POST"])
+    def api_corpora_local_embedding_index():
+        """Kick off the (slow) embedding tier for one source's own local
+        content -- unlike build_index's BM25 tier above, this runs as a
+        real Celery task (see tasks/local_source_embedding_index_task.py)
+        so it keeps going after this request returns, and after the
+        requesting page closes. Poll api_corpora_local_embedding_index_status
+        for progress instead of waiting on this request.
+        """
+        from services.ietf_import_service import IetfImportService
+        from services.job_status_service import JobStatusService
+        from tasks.local_source_embedding_index_task import local_source_embedding_index_task
+
+        data = request.get_json(silent=True) or {}
+        draft_name = (data.get("draft_name") or "").strip()
+        if not draft_name:
+            return jsonify({"error": "draft_name is required"}), 400
+
+        job_key = f"embed:{draft_name}"
+        existing = JobStatusService.get_status(job_key)
+        if existing and existing["status"] in ("queued", "running"):
+            return jsonify({"job_key": job_key, **existing})
+
+        wg = IetfImportService.resolve_wg_for_draft(draft_name)
+        rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
+        JobStatusService.set_status(job_key, "queued", message="Queued…")
+        local_source_embedding_index_task.delay(job_key, draft_name, wg, rfc_number)
+        return jsonify({"job_key": job_key, "status": "queued"})
+
+    @app.route(f"{_URL_PREFIX}/api/corpora/local-embedding-index/status", methods=["GET"])
+    def api_corpora_local_embedding_index_status():
+        from services.job_status_service import JobStatusService
+
+        draft_name = (request.args.get("draft_name") or "").strip()
+        if not draft_name:
+            return jsonify({"error": "draft_name is required"}), 400
+        status = JobStatusService.get_status(f"embed:{draft_name}")
+        if status is None:
+            return jsonify({"status": "not_found"})
+        return jsonify(status)
 
     @app.route(f"{_URL_PREFIX}/api/corpora/topic-discover", methods=["GET"])
     def api_corpora_topic_discover():
