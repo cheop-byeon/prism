@@ -667,6 +667,7 @@
     border-top: 1px solid var(--border);
   }
   .corpus-facet .facet-label { font-size: var(--text-sm); color: var(--text-dim); width: 110px; flex-shrink: 0; }
+  .corpus-facet .facet-label[title], .facet-value [title] { cursor: help; border-bottom: 1px dotted var(--text-quaternary); }
   .corpus-facet .facet-value { font-size: var(--text-sm); color: var(--text); flex: 1; }
   .corpus-facet .facet-value.error { color: var(--error); }
   .corpus-facet button {
@@ -1628,65 +1629,73 @@ function renderCorpora(corpora) {
     // genuinely extra facet, local-only, since a real corpus doesn't need
     // a local BM25 index -- it's already queryable through the agent's
     // normal dataset tools.
+    // Local sources only ever have ONE sync action -- IetfImportService.
+    // sync_local_source pulls draft/RFC/mail together in one call -- so
+    // showing it as two separate "Mail" and "Draft" rows, each with its own
+    // "Sync" button, implied two independent actions that don't actually
+    // exist. Combined into a single "Downloads" row instead; real (non-
+    // local) corpora keep separate Mail/Draft rows below since those
+    // genuinely ARE two independent actions (syncing the real dataset's
+    // mail vs. downloading one draft revision).
+    let downloadsFacet = '';
     let mailFacet = '';
-    if (c.wg) {
-      let statusValue;
-      let actionsHtml;
-      if (c.is_local) {
-        statusValue = `mail: ${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`;
-        statusValue += relativeTimeHtml(ls.last_synced_at, 'synced');
-        const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
-        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>`;
-      } else {
+    let draftFacet = '';
+    if (c.is_local) {
+      const draftPart = ls.revisions_downloaded
+        ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${ls.latest_revision_downloaded})`
+        : 'no revisions yet';
+      const rfcPart = c.rfc_number
+        ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`)
+        : 'not yet an RFC';
+      const mailPart = c.wg
+        ? ` &middot; mail (${escapeHtml(c.wg)}): ${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`
+        : '';
+      let value = `${draftPart} &middot; ${rfcPart}${mailPart}`;
+      value += relativeTimeHtml(ls.last_synced_at, 'synced');
+      const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
+      downloadsFacet = `
+        <div class="corpus-facet">
+          <span class="facet-label" title="Raw draft revisions, the published RFC (once one exists), and this WG's mail -- one action pulls all three">Downloads</span>
+          <span class="facet-value">${value}</span>
+          <button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>
+        </div>`;
+    } else {
+      if (c.wg) {
         const ms = c.mail_status || {};
-        statusValue = ms.error
+        const statusValue = ms.error
           ? escapeHtml(ms.error)
           : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages &middot; ${escapeHtml(ms.status || 'unknown')}`;
-        actionsHtml = `<button class="sync-mail-btn" data-list="${escapeHtml(c.wg)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>Sync now</button>`;
+        mailFacet = `
+          <div class="corpus-facet">
+            <span class="facet-label">Mail (${escapeHtml(c.wg)})</span>
+            <span class="facet-value">${statusValue}</span>
+            <button class="sync-mail-btn" data-list="${escapeHtml(c.wg)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>Sync now</button>
+          </div>`;
       }
-      mailFacet = `
-        <div class="corpus-facet">
-          <span class="facet-label">Mail (${escapeHtml(c.wg)})</span>
-          <span class="facet-value">${statusValue}</span>
-          ${actionsHtml}
-        </div>`;
-    }
-
-    let draftFacet = '';
-    if (c.draft_name) {
-      let value;
-      let actionsHtml;
-      if (c.is_local) {
-        const draftPart = ls.revisions_downloaded
-          ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${ls.latest_revision_downloaded})`
-          : 'no revisions yet';
-        const rfcPart = c.rfc_number
-          ? (ls.rfc_downloaded ? `RFC ${escapeHtml(String(c.rfc_number))} ✓` : `RFC ${escapeHtml(String(c.rfc_number))} pending`)
-          : 'not yet an RFC';
-        value = `${draftPart} &middot; ${rfcPart}`;
-        value += relativeTimeHtml(ls.last_synced_at, 'synced');
-        const syncLabel = ls.last_synced_at ? 'Re-sync' : 'Sync';
-        actionsHtml = `<button class="local-sync-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-sync"/></svg>${syncLabel}</button>`;
-      } else {
+      if (c.draft_name) {
         const dr = c.draft_relations || {};
-        value = dr.error
+        const value = dr.error
           ? escapeHtml(dr.error)
           : dr.latest_rev
             ? `latest: rev ${escapeHtml(dr.latest_rev)}${dr.last_rev_date ? ' (' + escapeHtml(dr.last_rev_date.slice(0, 10)) + ')' : ''}`
             : 'unknown';
-        actionsHtml = `<button class="download-draft-btn" data-draft="${escapeHtml(c.draft_name)}"
-                  data-rev="${escapeHtml(dr.latest_rev || '')}" ${dr.latest_rev ? '' : 'disabled'}>
-            <svg class="icon icon-sm"><use href="#icon-download"/></svg>Download latest revision
-          </button>`;
+        draftFacet = `
+          <div class="corpus-facet">
+            <span class="facet-label">Draft</span>
+            <span class="facet-value">${value}</span>
+            <button class="download-draft-btn" data-draft="${escapeHtml(c.draft_name)}"
+                      data-rev="${escapeHtml(dr.latest_rev || '')}" ${dr.latest_rev ? '' : 'disabled'}>
+                <svg class="icon icon-sm"><use href="#icon-download"/></svg>Download latest revision
+              </button>
+          </div>`;
       }
-      draftFacet = `
-        <div class="corpus-facet">
-          <span class="facet-label">Draft</span>
-          <span class="facet-value">${value}</span>
-          ${actionsHtml}
-        </div>`;
     }
 
+    // Keyword index and semantic index are two parallel, independent
+    // search mechanisms over the exact same Downloads content above --
+    // named and tooltipped to say so explicitly, since "Search index" vs.
+    // "Embeddings" gave no hint they were two answers to the same
+    // question (find relevant text here) rather than unrelated features.
     let indexFacet = '';
     if (c.is_local) {
       let indexValue;
@@ -1699,7 +1708,7 @@ function renderCorpora(corpora) {
       const indexBtnLabel = idxStat.built ? 'Rebuild index' : 'Build index';
       indexFacet = `
         <div class="corpus-facet">
-          <span class="facet-label">Search index</span>
+          <span class="facet-label" title="Fast exact-keyword matching over the Downloads content above (drafts + RFC + mail threads). Rebuilt from scratch in seconds, so there's no harm re-running it often.">Keyword index (BM25)</span>
           <span class="facet-value${idxStat.error ? ' error' : ''}">${idxStat.error ? escapeHtml(idxStat.error) : indexValue}</span>
           <button class="local-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}"><svg class="icon icon-sm"><use href="#icon-database"/></svg>${indexBtnLabel}</button>
         </div>`;
@@ -1727,7 +1736,7 @@ function renderCorpora(corpora) {
         : '';
       embeddingFacet = `
         <div class="corpus-facet">
-          <span class="facet-label">Embeddings</span>
+          <span class="facet-label" title="Slower meaning-based matching over the same Downloads content the keyword index above covers -- finds relevant text that doesn't share exact words with the query. Runs as a background job (see the progress bar below while it's active), since it's too slow to run inline the way the keyword index is.">Semantic index (embeddings)</span>
           <span class="facet-value${embStat.status === 'error' ? ' error' : ''}">${escapeHtml(embValue)}</span>
           <button class="local-embedding-index-btn" data-draft="${escapeHtml(c.draft_name)}" data-idx="${idx}" ${embRunning ? 'disabled' : ''}><svg class="icon icon-sm"><use href="#icon-database"/></svg>${embBtnLabel}</button>
         </div>
@@ -1748,6 +1757,7 @@ function renderCorpora(corpora) {
       </tr>
       <tr class="source-detail-row" data-idx="${idx}" ${expanded ? '' : 'hidden'}>
         <td colspan="3">
+          ${downloadsFacet}
           ${mailFacet}
           ${draftFacet}
           ${indexFacet}
