@@ -2242,15 +2242,16 @@ function renderSourcesSection(corpus, idx) {
   if (!corpus.sourcesExpanded) {
     return `<button class="sources-toggle" data-idx="${idx}">+ Add sources</button>`;
   }
-  // Same Type/Metadata/Sync grid as the Email/Drafts-RFCs table above, for
-  // visual consistency -- but Sync-only, no Sparse/Dense columns. Most of
-  // these 15 doctypes download as PDF/PPTX/whatever Datatracker has on
-  // file, not plain text, so LocalSourceIndexService has nothing it could
-  // actually index for them yet; adding those columns without real
-  // extraction behind them would just be a button that lies about what it
-  // does. Recording is link-only (nothing is ever downloaded for it), so
-  // it never gets a "synced X ago" caption, just whatever links a run
-  // already fetched.
+  // Same Type/Metadata/Sync/Sparse/Dense shape as the Email/Drafts-RFCs
+  // table above, plus one extra column this table alone needs: Text
+  // extraction. Most of these 15 doctypes download as PDF/PPTX/whatever
+  // Datatracker has on file, not plain text, so LocalSourceIndexService has
+  // nothing it could index for them without converting that to text first
+  // -- a real step that doesn't exist yet. Sync is the only one of the four
+  // actions that's actually wired up; Text extraction/Sparse/Dense are
+  // deliberate disabled placeholders so the pipeline order (sync -> extract
+  // -> index) is visible even before the middle step is built, rather than
+  // silently omitting the columns the way the previous version did.
   const rows = resourceTypes.map((t) => {
     const state = (corpus.resources || {})[t.key] || {};
     let metaHtml = '';
@@ -2277,11 +2278,32 @@ function renderSourcesSection(corpus, idx) {
           <div class="ts">${syncCaption}</div>
           ${summaryNote}${links}
         </td>
+        <td class="action-cell">
+          <button disabled title="Not built yet -- would convert this type's downloaded files (often PDF/PPTX) to plain text so Sparse/Dense index below have something to work with.">Extract text</button>
+          <div class="ts">not built yet</div>
+        </td>
+        <td class="action-cell">
+          <button disabled title="Needs Text extraction built first -- there's no plain text to index for this type yet.">Build</button>
+          <div class="ts">needs text extraction</div>
+        </td>
+        <td class="action-cell">
+          <button disabled title="Needs Text extraction built first -- there's no plain text to index for this type yet.">Build</button>
+          <div class="ts">needs text extraction</div>
+        </td>
       </tr>`;
   }).join('');
   return `<button class="sources-toggle" data-idx="${idx}">&minus; Add sources</button>
     <table class="local-index-table">
-      <thead><tr><th>Type</th><th>Metadata</th><th>Sync</th></tr></thead>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Metadata</th>
+          <th>Sync</th>
+          <th class="has-tooltip" title="Would convert PDF/PPTX/etc. content to plain text so it can eventually be indexed -- not built yet.">Text extraction</th>
+          <th class="has-tooltip" title="Fast exact-keyword matching -- needs Text extraction built first for these formats.">Sparse index (BM25)</th>
+          <th class="has-tooltip" title="Slower meaning-based matching -- needs Text extraction built first for these formats.">Dense index (embeddings)</th>
+        </tr>
+      </thead>
       <tbody>${rows}</tbody>
     </table>`;
 }
