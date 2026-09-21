@@ -1971,16 +1971,21 @@ function fetchSources() {
       listEl.innerHTML = '<p class="corpora-hint">No sources yet -- search above to add one.</p>';
       return;
     }
-    listEl.innerHTML = corpora.map(renderSourceGroup).join('');
+    sourceCorpora = corpora;
+    wgResourceState = {};
+    listEl.innerHTML = corpora.map((c, idx) => renderSourceGroup(c, idx)).join('');
     listEl.querySelectorAll('[data-sync-mail]').forEach((btn) => btn.addEventListener('click', () => runMailSync(btn)));
     listEl.querySelectorAll('[data-download-rev]').forEach((btn) => btn.addEventListener('click', () => runDraftDownload(btn)));
     listEl.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
     listEl.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
+    listEl.querySelectorAll('[data-wgres-toggle]').forEach((btn) => btn.addEventListener('click', () => toggleWgResources(Number(btn.dataset.wgresToggle))));
   }).catch((err) => {
     listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
   });
 }
-function renderSourceGroup(c) {
+let sourceCorpora = [];
+let wgResourceState = {};
+function renderSourceGroup(c, idx) {
   const label = c.rfc_number ? `RFC ${escapeHtml(String(c.rfc_number))}` : escapeHtml(c.draft_name || 'Untitled source');
   const pill = c.is_local ? '<span class="po-pill po-warn">Local source</span>' : '<span class="po-pill">Ready for research</span>';
   const specFacet = `
@@ -2024,6 +2029,19 @@ function renderSourceGroup(c) {
         ${dr.latest_rev ? `<button type="button" class="po-linkbutton" data-download-rev="1" data-draft="${escapeHtml(c.draft_name)}" data-rev="${escapeHtml(String(dr.latest_rev))}">Download latest ↓</button>` : ''}
       </div>`;
   }
+  // WG resources -- every non-draft/RFC/mailarchive Datatracker doctype
+  // (agenda, minutes, slides, charter, recording, ...), the third real
+  // content type this page's own hint text already promises ("mail, draft
+  // text, WG resources") but the first cut of this page only ever
+  // rendered the first two. Counts are fetched lazily on first expand
+  // (15 doctypes x every corpus would mean dozens of requests before the
+  // page even finishes loading), same reasoning as classic's own version.
+  const wgResourcesHtml = c.wg
+    ? `<div class="pm-groupfoot">
+        <button type="button" class="po-linkbutton" data-wgres-toggle="${idx}">+ WG resources (agenda, minutes, slides, charter, …)</button>
+      </div>
+      <div id="pm-wgres-${idx}" hidden></div>`
+    : '';
   return `
     <div class="pm-group">
       <div class="pm-grouphead">
@@ -2031,7 +2049,97 @@ function renderSourceGroup(c) {
         ${pill}
       </div>
       <div class="pm-facets">${specFacet}${mailFacet}${draftFacet}</div>
+      ${wgResourcesHtml}
     </div>`;
+}
+function toggleWgResources(idx) {
+  const containerEl = document.getElementById(`pm-wgres-${idx}`);
+  const toggleBtn = document.querySelector(`[data-wgres-toggle="${idx}"]`);
+  const isHidden = containerEl.hidden;
+  containerEl.hidden = !isHidden;
+  if (toggleBtn) toggleBtn.textContent = isHidden
+    ? '− WG resources (agenda, minutes, slides, charter, …)'
+    : '+ WG resources (agenda, minutes, slides, charter, …)';
+  if (isHidden && !wgResourceState[idx]) {
+    wgResourceState[idx] = { loading: true };
+    loadWgResources(idx);
+  }
+}
+function loadWgResources(idx) {
+  const containerEl = document.getElementById(`pm-wgres-${idx}`);
+  const wg = sourceCorpora[idx].wg;
+  containerEl.innerHTML = '<p class="po-loading">Checking agenda, minutes, slides, charter, …</p>';
+  fetch(`${PRISM_PREFIX}/api/sources/types`).then((r) => r.json()).then((typesData) => {
+    const types = typesData.types || [];
+    return Promise.all(types.map((t) =>
+      fetch(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(wg)}/${encodeURIComponent(t.key)}`)
+        .then((r) => r.json())
+        .then((data) => ({ ...t, ...data }))
+        .catch((err) => ({ ...t, error: String(err) }))
+    ));
+  }).then((resources) => {
+    wgResourceState[idx] = { loading: false, resources };
+    renderWgResources(idx);
+  }).catch((err) => {
+    containerEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load WG resources.')}</div>`;
+  });
+}
+function renderWgResources(idx) {
+  const containerEl = document.getElementById(`pm-wgres-${idx}`);
+  const state = wgResourceState[idx];
+  if (!state || state.loading) return;
+  const rows = (state.resources || []).filter((r) => (r.count || 0) > 0 || r.downloaded_count || r.error);
+  if (!rows.length) {
+    containerEl.innerHTML = '<p class="corpora-hint">No agenda, minutes, slides, charter, or other WG documents found.</p>';
+    return;
+  }
+  containerEl.innerHTML = `
+    <div class="pm-tablewrap"><table class="pm-table"><thead><tr><th>Type</th><th>Downloaded</th><th></th></tr></thead><tbody>
+      ${rows.map((r) => {
+        const meta = r.error
+          ? `<span class="po-error" style="display:inline;padding:2px 6px;">${escapeHtml(r.error)}</span>`
+          : `${r.downloaded_count || 0} of ${r.count || 0}`;
+        const canDownload = !r.error && r.count && r.key !== 'recording';
+        return `<tr>
+          <td>${escapeHtml(r.label)}</td>
+          <td>${meta}</td>
+          <td>${canDownload ? `<button type="button" class="po-linkbutton" data-wgres-download="${idx}" data-type="${escapeHtml(r.key)}">Download ↓</button>` : ''}</td>
+        </tr>`;
+      }).join('')}
+    </tbody></table></div>`;
+  containerEl.querySelectorAll('[data-wgres-download]').forEach((btn) => {
+    btn.addEventListener('click', () => runWgResourceDownload(Number(btn.dataset.wgresDownload), btn.dataset.type, btn));
+  });
+}
+function runWgResourceDownload(idx, docType, btn) {
+  const wg = sourceCorpora[idx].wg;
+  btn.disabled = true;
+  btn.textContent = 'Downloading…';
+  setSourceQueueText(`${wg}/${docType}: downloading…`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(wg)}/${encodeURIComponent(docType)}/download`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      setSourceQueueText(`${wg}/${docType}: ${msg.message || 'downloading…'}`);
+    } else if (msg.type === 'result') {
+      source.close();
+      const ok = (msg.data.results || []).filter((r) => r.ok).length;
+      setSourceQueueText(`${wg}/${docType}: downloaded ${ok}/${(msg.data.results || []).length}.`);
+      delete wgResourceState[idx];
+      loadWgResources(idx);
+    } else if (msg.type === 'error') {
+      source.close();
+      setSourceQueueText(`${wg}/${docType}: ${msg.message}`);
+      btn.disabled = false;
+      btn.textContent = 'Download ↓';
+    }
+  };
+  source.onerror = () => {
+    source.close();
+    setSourceQueueText(`${wg}/${docType}: connection lost while downloading.`);
+    btn.disabled = false;
+    btn.textContent = 'Download ↓';
+  };
 }
 function runMailSync(btn) {
   const wg = btn.dataset.wg;
@@ -2081,18 +2189,26 @@ function runLocalSync(draftName, btn) {
 // suggestions (same lookup the Studio dataset-importer popup uses) --
 // deliberately not matchDocuments()'s local corpora catalog, since this
 // needs to find things that AREN'T a source yet at all.
+// The sidecar's suggestions search is picky about an "RFC " prefix --
+// "RFC 9114" (a natural way to type a lookup) returns zero results where
+// "9114" alone finds it, confirmed live. Stripping the prefix before
+// querying, same normalization matchDocuments() already applies to its
+// own bare-RFC-number matching elsewhere on this page.
+function normalizeSourceQuery(q) {
+  return q.replace(/^rfc\s*/i, '').trim() || q;
+}
 let sourceAddDebounce = null;
 const poSourceAddInputEl = document.getElementById('poSourceAddInput');
 const poSourceAddResultsEl = document.getElementById('poSourceAddResults');
 poSourceAddInputEl.addEventListener('input', () => {
   clearTimeout(sourceAddDebounce);
-  const query = poSourceAddInputEl.value.trim();
+  const query = normalizeSourceQuery(poSourceAddInputEl.value.trim());
   sourceAddDebounce = setTimeout(() => {
     fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}`).then((r) => r.json()).then((data) => {
       const suggestions = (data.suggestions || []).slice(0, 8);
       if (!suggestions.length) { poSourceAddResultsEl.hidden = true; return; }
       poSourceAddResultsEl.innerHTML = suggestions.map((s) => `
-        <button type="button" data-draft="${escapeHtml(s.draft_base_name || (s.draft_names || [])[0] || '')}">
+        <button type="button" data-draft="${escapeHtml(resolveDraftNameFromRfcSuggestion(s))}">
           ${escapeHtml((s.doc_id || '').toUpperCase())}${s.title ? ' — ' + escapeHtml(s.title) : ''}<small>${escapeHtml(s.wg || s.stream || '')}</small>
         </button>`).join('');
       poSourceAddResultsEl.hidden = false;
@@ -2106,16 +2222,37 @@ poSourceAddInputEl.addEventListener('input', () => {
     }).catch(() => {});
   }, 300);
 });
+function resolveDraftNameFromRfcSuggestion(s) {
+  return s.draft_base_name || (s.draft_names && s.draft_names[0]) || s.doc_id || '';
+}
+// Submitting (Enter, or clicking "Add source") always does something --
+// previously this only handled a literal "draft-..." name typed exactly,
+// so typing an RFC number, a WG acronym, or a topic and hitting the
+// button was a silent no-op. Now it resolves whatever was typed through
+// the same real rfc-suggestions lookup the dropdown uses and adds the
+// best match, with visible feedback in the download-queue line either way
+// -- never nothing happening.
 document.getElementById('poSourceAddForm').addEventListener('submit', (e) => {
   e.preventDefault();
   const typed = poSourceAddInputEl.value.trim();
   poSourceAddResultsEl.hidden = true;
+  if (!typed) return;
   if (typed.toLowerCase().startsWith('draft-')) {
     poSourceAddInputEl.value = '';
     runLocalSync(typed, null);
+    return;
   }
-  // A bare RFC number or WG name isn't itself a syncable draft name --
-  // pick one of the typeahead suggestions above instead.
+  setSourceQueueText(`Looking up “${typed}”…`);
+  fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(normalizeSourceQuery(typed))}&limit=5`).then((r) => r.json()).then((data) => {
+    const suggestion = (data.suggestions || [])[0];
+    const draftName = suggestion && resolveDraftNameFromRfcSuggestion(suggestion);
+    if (!draftName) {
+      setSourceQueueText(`No draft found for “${typed}”. Try a more specific RFC number, draft name, or working group.`);
+      return;
+    }
+    poSourceAddInputEl.value = '';
+    runLocalSync(draftName, null);
+  }).catch(() => setSourceQueueText(`Couldn’t look up “${typed}”.`));
 });
 document.addEventListener('click', (e) => {
   if (!poSourceAddInputEl.contains(e.target) && !poSourceAddResultsEl.contains(e.target)) poSourceAddResultsEl.hidden = true;
