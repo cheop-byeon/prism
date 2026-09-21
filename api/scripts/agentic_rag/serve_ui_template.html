@@ -6,8 +6,14 @@
 <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.9/standalone/umd/vis-network.min.js"></script>
 <style>
   :root {
-    --bg: #0f1117; --panel: #171a23; --panel-2: #1e2230; --border: #2a2f3f;
-    --text: #e7e9ee; --text-dim: #b8c0d0; --accent: #7c9eff; --accent-dim: #3a4a7a;
+    /* Prismatic -- promoted from the decision-brief-only --brief-* tokens
+       below (Phase 1) to the app's real global theme, per the
+       prism-spectrum mockup's Prismatic override block (its dark-mode
+       values, since this app is a single fixed dark theme). --brief-accent/
+       --brief-accent-dim already anticipated almost exactly this palette. */
+    --bg: #0c1020; --panel: #151b30; --panel-2: #1d2540; --border: #2d3656;
+    --text: #eff1ff; --text-dim: #a5aecb; --accent: #b5a3ff; --accent-dim: #2b2450;
+    --cyan: #69e3e8; --purple: #e6a5ff;
     --error: #e0645a;
     --kind-discovery: #7c9eff; --kind-retrieval: #4caf7d; --kind-fetch: #e0a94a;
     --kind-diff: #c47ce0; --kind-verify: #e0645a; --kind-other: #9aa1b2; --kind-action: #e07b4a;
@@ -67,29 +73,29 @@
     --radius-lg: 12px;  /* modal */
     --radius-pill: 999px;
 
-    --focus-ring: 0 0 0 3px rgba(124, 158, 255, 0.35);
+    --focus-ring: 0 0 0 3px rgba(181, 163, 255, 0.35);
 
     /* Research scope badge -- the model now decides at run time whether a
        question stays within one draft's own history or needs the wider
        RFC landscape (see _RESEARCH_ADDENDUM), so there are only two states
        to color, derived from the turn's own trace, not four pre-chosen
-       tiers. --scope-narrow keeps the plain --accent blue since it's the
-       default/baseline case; --scope-expanded reuses Deep Dive's old
-       purple for the less common, more expensive case. */
+       tiers. --scope-narrow keeps the plain --accent violet since it's the
+       default/baseline case; --scope-expanded uses the distinct --purple
+       accent (Prismatic's secondary hue) for the less common, more
+       expensive case, now that --accent itself is violet too. */
     --scope-narrow: var(--accent);
     --scope-narrow-bg: var(--accent-dim);
-    --scope-expanded: #b98cf0;
-    --scope-expanded-bg: #2a2040;
+    --scope-expanded: var(--purple);
+    --scope-expanded-bg: #3a1f4a;
 
-    /* Decision-brief answer + evidence panel only (Prism redesign phase 1)
-       -- deliberately separate from --accent/--panel above rather than
-       reusing them, since this re-themes just that one surface, not the
-       whole app. "Prismatic" per user direction; --claim-stated/inferred/
-       unresolved reuse the diff-view green/amber/muted semantics already
-       established for --added/--modified elsewhere in this file, rather
-       than inventing a new three-color scale from scratch. */
-    --brief-accent: #a7b6ff;
-    --brief-accent-dim: #2c3450;
+    /* Decision-brief answer + evidence panel (Prism redesign phase 1) --
+       these anticipated the Prismatic palette before it was the app-wide
+       theme, so now just alias the promoted globals above rather than
+       carrying their own separate values. --claim-stated/inferred/
+       unresolved still reuse the diff-view green/amber/muted semantics
+       already established for --added/--modified elsewhere in this file. */
+    --brief-accent: var(--accent);
+    --brief-accent-dim: var(--accent-dim);
     --brief-serif: Georgia, "Times New Roman", serif;
     --claim-stated: var(--added);
     --claim-stated-bg: var(--added-bg);
@@ -101,8 +107,40 @@
   * { box-sizing: border-box; }
   body {
     margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans);
-    display: flex; flex-direction: column; height: 100vh;
+    height: 100vh; overflow: hidden;
   }
+
+  /* App shell: a left rail (the 4 primary workspace pages -- Workspace/
+     Documents/Investigations/Archive coverage, per the prism-spectrum
+     mockup) beside a main column (a slim utility topbar, then the existing
+     tab-content). Reuses the same .tab-btn/.tab-pane/data-tab convention
+     the old horizontal-only nav used -- rail-nav and topbar are just two
+     different-looking rows of .tab-btn, switched by the one generic
+     listener (see the JS `.tab-btn` click handler), not two mechanisms. */
+  .app-shell { display: flex; height: 100vh; }
+  .rail {
+    width: 208px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--panel); border-right: 1px solid var(--border); padding: 16px 12px; overflow-y: auto;
+  }
+  .rail-brand { display: flex; align-items: center; gap: 8px; padding: 4px 6px 18px; }
+  .rail-brand .brand-mark { width: 28px; height: 20px; flex-shrink: 0; color: var(--text-dim); }
+  .rail-brand h1 { font-size: var(--text-lg); margin: 0; font-weight: 600; }
+  .rail-brand .brand-sub { font-size: var(--text-xs); color: var(--text-tertiary); font-weight: 400; display: block; }
+  .rail-new {
+    display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 18px;
+    background: var(--accent-dim); color: var(--accent); border: 1px solid var(--accent-dim);
+    border-radius: var(--radius-sm); padding: 9px 12px; font-size: var(--text-sm); font-weight: 600;
+    font-family: var(--sans); cursor: pointer;
+  }
+  .rail-new:hover { background: var(--accent); color: #fff; }
+  .rail-nav { display: flex; flex-direction: column; gap: 2px; }
+  .rail-nav .tab-btn {
+    width: 100%; justify-content: flex-start; border-bottom: none; border-radius: var(--radius-sm);
+    padding: 10px 10px;
+  }
+  .rail-nav .tab-btn.active { background: var(--accent-dim); color: var(--accent); border-bottom-color: transparent; }
+
+  .main-area { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
   header {
     padding: 14px var(--gutter-x); border-bottom: 1px solid var(--border);
     display: flex; align-items: center; gap: 12px; flex-shrink: 0;
@@ -134,14 +172,15 @@
   }
   .account-dropdown-item:hover { background: var(--panel-2); }
 
+  /* .tabs is now the secondary utility strip inside <header> (Sources/
+     Usage/RFC Graph/How it Works, plus Track a Decision parked here only
+     until Stage B folds it into Investigations' Decision-history sub-view)
+     -- visually subordinate to .rail-nav, which holds the 4 primary
+     workspace pages. Both are rows of the same .tab-btn/data-tab convention,
+     switched by the one generic listener. */
   .tabs {
-    display: flex; align-items: center; gap: 2px; padding: 0 var(--gutter-x); border-bottom: 1px solid var(--border);
-    flex-shrink: 0; background: var(--panel); overflow-x: auto;
+    display: flex; align-items: center; gap: 2px; overflow-x: auto;
   }
-  /* Grouped instead of nine flat equal-weight peers: primary work
-     (Research, Track a Decision) | utility tabs | a visually demoted demo,
-     rather than every tab reading as an equally important destination. */
-  .tab-group { display: flex; gap: 2px; }
   .tab-divider { width: 1px; align-self: stretch; background: var(--border); margin: 8px 4px; flex-shrink: 0; }
   .tab-btn {
     background: transparent; color: var(--text-dim); border: none; border-bottom: 2px solid transparent;
@@ -150,12 +189,9 @@
   }
   .tab-btn:hover { color: var(--text); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-  .tab-btn.demo { color: var(--text-quaternary); }
-  .tab-btn.demo:hover { color: var(--text-tertiary); }
-  .demo-chip {
-    font-size: 9px; font-weight: 700; letter-spacing: 0.05em; border: 1px dashed var(--border);
-    border-radius: 4px; padding: 1px 4px; color: var(--text-quaternary);
-  }
+  .tabs .tab-btn { padding: 8px 10px; font-size: var(--text-xs); font-weight: 500; color: var(--text-tertiary); }
+  .tabs .tab-btn:hover { color: var(--text-dim); }
+  .tabs .tab-btn.active { color: var(--accent); }
 
   .tab-content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
   .tab-pane {
@@ -302,19 +338,6 @@
   .turn { max-width: 780px; margin: 0 auto 28px; }
   .turn .q { font-size: var(--text-lg); color: var(--text-dim); margin-bottom: 10px; }
   .turn .q strong { color: var(--text); }
-  .family-demo-step {
-    background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 10px 14px; margin-bottom: 8px; font-size: var(--text-md); color: var(--text-dim); line-height: 1.5;
-  }
-  .family-demo-step.family-demo-found { border-color: var(--accent); color: var(--text); }
-  .family-demo-step.family-demo-found strong { color: var(--accent); }
-  .family-demo-step.family-demo-error { border-color: var(--error); color: var(--text); }
-  .family-demo-confirm { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .family-demo-confirm button {
-    background: var(--accent); color: #0a0e1a; border: none; border-radius: var(--radius-sm);
-    padding: 5px 14px; font-size: var(--text-sm); font-weight: 600; cursor: pointer; font-family: var(--sans);
-  }
-  .family-demo-confirm button.no { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
   .answer {
     background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--turn-color, var(--border));
     border-radius: var(--radius-md); padding: 16px 18px; font-size: var(--text-lg); line-height: 1.6;
@@ -959,6 +982,10 @@
       <circle cx="10" cy="10" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/>
       <path d="M15 15l5.5 5.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
     </symbol>
+    <symbol id="icon-compass" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path d="M15 9l-2 6-6 2 2-6 6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/>
+    </symbol>
     <symbol id="icon-sync" viewBox="0 0 24 24">
       <path d="M20 12a8 8 0 10-2.34 5.66" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
       <path d="M20 6v6h-6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -1002,49 +1029,74 @@
     </symbol>
   </defs>
 </svg>
-<header>
-  <svg class="brand-mark" viewBox="0 0 44 32" role="img" aria-label="Prism logo: a beam entering a prism and splitting into a spectrum">
-    <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
-    <polygon points="14,3 14,29 30,16" fill="var(--panel-2)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-    <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
-    <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
-  </svg>
-  <div class="brand-text">
-    <h1>Prism</h1>
-    <span class="brand-sub">Decision Rationale Agent</span>
-  </div>
-  <div class="account-menu">
-    <button id="accountMenuBtn" type="button" class="account-avatar" title="__ACCOUNT_EMAIL__">__ACCOUNT_INITIAL__</button>
-    <div class="account-dropdown" id="accountDropdown" hidden>
-      <div class="account-dropdown-email">__ACCOUNT_EMAIL__</div>
-      <a class="account-dropdown-item" href="__CONSOLE_WEB_URL__/apps?action=showSettings&amp;tab=provider" target="_blank" rel="noopener">Settings</a>
-      <button type="button" class="account-dropdown-item" id="accountLogoutBtn">Log out</button>
-    </div>
-  </div>
-</header>
 <script>const CONSOLE_API_BASE = "__API_BASE__";
 const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
-<div class="tabs">
-  <div class="tab-group">
-    <button class="tab-btn active" data-tab="research"><svg class="icon"><use href="#icon-research"/></svg>Research</button>
-    <button class="tab-btn" data-tab="track"><svg class="icon"><use href="#icon-track"/></svg>Track a Decision</button>
-  </div>
-  <div class="tab-divider"></div>
-  <div class="tab-group">
-    <button class="tab-btn" data-tab="corpora"><svg class="icon"><use href="#icon-database"/></svg>Sources</button>
-    <button class="tab-btn" data-tab="usage"><svg class="icon"><use href="#icon-layers"/></svg>Usage</button>
-    <button class="tab-btn" data-tab="rfcgraph"><svg class="icon"><use href="#icon-graph"/></svg>RFC Graph</button>
-    <button class="tab-btn" data-tab="howto"><svg class="icon"><use href="#icon-book"/></svg>How it Works</button>
-  </div>
-  <div class="tab-divider"></div>
-  <button class="tab-btn demo" data-tab="familydemo">Family Search <span class="demo-chip">DEMO</span></button>
-</div>
-<div class="tab-content">
+<div class="app-shell">
+  <aside class="rail">
+    <div class="rail-brand">
+      <svg class="brand-mark" viewBox="0 0 44 32" role="img" aria-label="Prism logo: a beam entering a prism and splitting into a spectrum">
+        <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <polygon points="14,3 14,29 30,16" fill="var(--panel-2)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <div>
+        <h1>Prism</h1>
+        <span class="brand-sub">Decision Rationale Agent</span>
+      </div>
+    </div>
+    <button id="railNewBtn" type="button" class="rail-new">
+      <svg class="icon"><use href="#icon-plus"/></svg>New investigation
+    </button>
+    <nav class="rail-nav" aria-label="Workspace">
+      <!-- Investigations (pane-research) stays the default-active page until
+           Workspace has real content in Stage D -- see plan. -->
+      <button class="tab-btn" data-tab="workspace"><svg class="icon"><use href="#icon-compass"/></svg>Workspace</button>
+      <button class="tab-btn" data-tab="document"><svg class="icon"><use href="#icon-book"/></svg>Documents</button>
+      <button class="tab-btn active" data-tab="research"><svg class="icon"><use href="#icon-research"/></svg>Investigations</button>
+      <button class="tab-btn" data-tab="coverage"><svg class="icon"><use href="#icon-database"/></svg>Archive coverage</button>
+    </nav>
+  </aside>
+  <div class="main-area">
+    <header>
+      <div class="tabs">
+        <button class="tab-btn" data-tab="corpora"><svg class="icon"><use href="#icon-database"/></svg>Sources</button>
+        <button class="tab-btn" data-tab="usage"><svg class="icon"><use href="#icon-layers"/></svg>Usage</button>
+        <button class="tab-btn" data-tab="rfcgraph"><svg class="icon"><use href="#icon-graph"/></svg>RFC Graph</button>
+        <button class="tab-btn" data-tab="howto"><svg class="icon"><use href="#icon-book"/></svg>How it Works</button>
+        <div class="tab-divider"></div>
+        <!-- Parked here only until Stage B folds Track a Decision into
+             Investigations' Decision-history sub-view -- not a permanent
+             utility tab, see plan. -->
+        <button class="tab-btn" data-tab="track"><svg class="icon"><use href="#icon-track"/></svg>Track a Decision</button>
+      </div>
+      <div class="account-menu">
+        <button id="accountMenuBtn" type="button" class="account-avatar" title="__ACCOUNT_EMAIL__">__ACCOUNT_INITIAL__</button>
+        <div class="account-dropdown" id="accountDropdown" hidden>
+          <div class="account-dropdown-email">__ACCOUNT_EMAIL__</div>
+          <a class="account-dropdown-item" href="__CONSOLE_WEB_URL__/apps?action=showSettings&amp;tab=provider" target="_blank" rel="noopener">Settings</a>
+          <button type="button" class="account-dropdown-item" id="accountLogoutBtn">Log out</button>
+        </div>
+      </div>
+    </header>
+    <div class="tab-content">
+  <section class="tab-pane" id="pane-workspace">
+    <p class="corpora-hint">Workspace landing page -- coming in Stage D (composer, continue-an-investigation, reading desk).</p>
+  </section>
+
+  <section class="tab-pane" id="pane-document">
+    <p class="corpora-hint">Document reading view -- coming in Stage E (section browser, passage selection).</p>
+  </section>
+
+  <section class="tab-pane" id="pane-coverage">
+    <p class="corpora-hint">Archive coverage -- coming in Stage C (derived from the last investigation's actual trace).</p>
+  </section>
+
   <section class="tab-pane active" id="pane-research">
     <div class="research-layout">
       <aside class="session-sidebar">
@@ -1075,23 +1127,6 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       </div>
       <div class="evidence-panel-body" id="evidencePanelBody"></div>
     </aside>
-  </section>
-
-  <section class="tab-pane" id="pane-familydemo">
-    <p class="corpora-hint">
-      Prototype with entirely fabricated data -- no real RFCs, no real emails (see
-      services/family_search_demo_service.py). Proves the workflow shape before importing a real
-      family's worth of mailarchive data: check one RFC's own mail archive, and if nothing relevant
-      turns up, rank its relatives by likely relevance and ask before checking the next one, one hop
-      at a time. Motivating case: DNSSEC-style families, where a later RFC often explains a decision
-      an earlier one made that its own mail archive never discusses.
-    </p>
-    <div class="controls">
-      <select id="familyDemoRoot"></select>
-      <input id="familyDemoQuery" type="text" placeholder="Why is the key rotation interval fixed at 90 days?" />
-      <button id="familyDemoBtn" class="btn-primary">Search</button>
-    </div>
-    <div class="conversation" id="familyDemoConversation"></div>
   </section>
 
   <section class="tab-pane" id="pane-track">
@@ -1281,6 +1316,8 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       </table>
     </div>
   </section>
+    </div>
+  </div>
 </div>
 <div class="modal-overlay" id="discussionModal" hidden>
   <div class="modal-box">
@@ -1522,6 +1559,14 @@ document.querySelectorAll('.tab-btn').forEach((btn) => {
     btn.classList.add('active');
     document.getElementById(`pane-${btn.dataset.tab}`).classList.add('active');
   });
+});
+
+// "New investigation" reuses the exact same reset newSessionBtnEl already
+// does -- just also switches to Investigations first, since the rail button
+// is reachable from any page, not only from inside Investigations itself.
+document.getElementById('railNewBtn').addEventListener('click', () => {
+  document.querySelector('.tab-btn[data-tab="research"]').click();
+  newSessionBtnEl.click();
 });
 
 let toolDisplayNames = {};
@@ -3850,136 +3895,6 @@ sessionListEl.addEventListener('click', (e) => {
 });
 
 loadSessionList();
-
-// Family Search (Demo) -- prototype-only, entirely fabricated data (see
-// services/family_search_demo_service.py). Unlike every other tab here,
-// this one genuinely pauses mid-investigation and waits for a human
-// decision (continue to the next candidate, or stop) instead of running
-// straight through to a final answer -- proving that interaction shape
-// works before any real mailarchive data for a real RFC family gets
-// imported. Each step is its own plain request (no SSE): the ranking
-// only happens once, right after the root's own mail comes up empty, and
-// the frontend just walks that ranked queue one confirmed hop at a time.
-const familyDemoRootEl = document.getElementById('familyDemoRoot');
-const familyDemoQueryEl = document.getElementById('familyDemoQuery');
-const familyDemoBtnEl = document.getElementById('familyDemoBtn');
-const familyDemoConvEl = document.getElementById('familyDemoConversation');
-
-async function loadFamilyDemoRoots() {
-  const res = await fetch(`${PRISM_PREFIX}/api/family-search-demo/roots`);
-  const roots = await res.json();
-  familyDemoRootEl.innerHTML = roots
-    .map((r) => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.id)}: ${escapeHtml(r.title)}</option>`)
-    .join('');
-}
-
-function familyDemoAddStep(turn, html, cls) {
-  const div = document.createElement('div');
-  div.className = `family-demo-step${cls ? ' ' + cls : ''}`;
-  div.innerHTML = html;
-  turn.appendChild(div);
-  turn.scrollIntoView({ behavior: 'smooth', block: 'end' });
-  return div;
-}
-
-// Walks the ranked queue one hop at a time: show a checking step, fetch
-// that candidate's result, then either stop (found/exhausted) or render a
-// Yes/No confirm step before recursing into the next one. `checked` is
-// every id already tried, in order, purely for the final "stopped" /
-// "exhausted" summary message.
-async function familyDemoProceed(turn, query, checked, queue) {
-  if (!queue.length) {
-    familyDemoAddStep(
-      turn,
-      `No relevant discussion found in ${checked.map(escapeHtml).join(', ')}, and no further related RFCs to check.`,
-      'family-demo-error'
-    );
-    return;
-  }
-
-  const next = queue[0];
-  const confirmStep = familyDemoAddStep(
-    turn,
-    `<div>I haven't found any relevant discussion in ${escapeHtml(checked[checked.length - 1])}'s own mail archive. ` +
-      `There are other RFCs that are complementary to or update this one -- would you like me to check ` +
-      `<strong>${escapeHtml(next.id)}</strong> (${escapeHtml(next.title)}) next?</div>` +
-      `<div class="family-demo-confirm" style="margin-top:8px">` +
-      `<button class="yes">Yes, check it</button><button class="no">No, stop here</button></div>`
-  );
-
-  confirmStep.querySelector('.yes').addEventListener('click', async () => {
-    confirmStep.remove();
-    familyDemoAddStep(turn, `Checking ${escapeHtml(next.id)}'s mail archive…`);
-    try {
-      const res = await fetch(
-        `${PRISM_PREFIX}/api/family-search-demo/check-candidate?query=${encodeURIComponent(query)}&rfc_id=${encodeURIComponent(next.id)}`
-      );
-      const data = await res.json();
-      if (data.error) {
-        familyDemoAddStep(turn, `Error: ${escapeHtml(data.error)}`, 'family-demo-error');
-        return;
-      }
-      if (data.status === 'found') {
-        familyDemoAddStep(
-          turn,
-          `<strong>Found in ${escapeHtml(data.rfc)}</strong> (${escapeHtml(data.title)}): ${escapeHtml(data.answer)}`,
-          'family-demo-found'
-        );
-        return;
-      }
-      await familyDemoProceed(turn, query, [...checked, next.id], queue.slice(1));
-    } catch (err) {
-      familyDemoAddStep(turn, `Error: ${escapeHtml(String(err))}`, 'family-demo-error');
-    }
-  });
-
-  confirmStep.querySelector('.no').addEventListener('click', () => {
-    confirmStep.remove();
-    familyDemoAddStep(turn, `Stopped. Searched: ${checked.map(escapeHtml).join(', ')}. No answer found.`);
-  });
-}
-
-async function runFamilySearchDemo() {
-  const root = familyDemoRootEl.value;
-  const query = familyDemoQueryEl.value.trim();
-  if (!query || !root) return;
-  familyDemoBtnEl.disabled = true;
-
-  const turn = document.createElement('div');
-  turn.className = 'turn';
-  turn.innerHTML = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)} <em>(starting from ${escapeHtml(root)})</em></div>`;
-  familyDemoConvEl.appendChild(turn);
-  turn.scrollIntoView({ behavior: 'smooth' });
-
-  familyDemoAddStep(turn, `Checking ${escapeHtml(root)}'s own mail archive…`);
-
-  try {
-    const res = await fetch(
-      `${PRISM_PREFIX}/api/family-search-demo/check-root?query=${encodeURIComponent(query)}&root=${encodeURIComponent(root)}`
-    );
-    const data = await res.json();
-    if (data.error) {
-      familyDemoAddStep(turn, `Error: ${escapeHtml(data.error)}`, 'family-demo-error');
-    } else if (data.status === 'found') {
-      familyDemoAddStep(
-        turn,
-        `<strong>Found in ${escapeHtml(data.rfc)}</strong> (${escapeHtml(data.title)}): ${escapeHtml(data.answer)}`,
-        'family-demo-found'
-      );
-    } else if (data.status === 'exhausted') {
-      familyDemoAddStep(turn, `No relevant discussion found, and ${escapeHtml(root)} has no related RFCs to check.`, 'family-demo-error');
-    } else {
-      await familyDemoProceed(turn, query, [data.checked], data.queue);
-    }
-  } catch (err) {
-    familyDemoAddStep(turn, `Error: ${escapeHtml(String(err))}`, 'family-demo-error');
-  }
-  familyDemoBtnEl.disabled = false;
-}
-
-familyDemoBtnEl.addEventListener('click', runFamilySearchDemo);
-familyDemoQueryEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') runFamilySearchDemo(); });
-loadFamilyDemoRoots();
 
 const trackDraftEl = document.getElementById('trackDraft');
 const threadQueryEl = document.getElementById('threadQuery');
