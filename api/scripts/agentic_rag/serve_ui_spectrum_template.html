@@ -87,6 +87,40 @@
   .po-title { font: 500 30px/1.2 var(--po-serif); letter-spacing: -0.8px; margin: 10px 0 12px; }
   .po-subtitle { font-size: 13px; color: var(--po-muted); margin-bottom: 20px; }
 
+  /* Workspace page */
+  .po-hero { margin-bottom: 28px; }
+  .po-title em {
+    font-style: normal; background: linear-gradient(90deg, var(--po-accent), var(--po-purple) 52%, var(--po-cyan));
+    background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .po-herotext { max-width: 420px; font-size: 13px; line-height: 1.8; color: var(--po-muted); margin-top: 12px; }
+  .po-composer { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 14px; margin-bottom: 32px; }
+  .po-composer:focus-within { border-color: var(--po-accent); }
+  .po-compose-tabs { display: flex; gap: 18px; margin: 0 20px; border-bottom: 1px solid var(--po-line); }
+  .po-compose-tabs button { background: transparent; border: none; padding: 12px 0 10px; font-size: 12px; color: var(--po-muted); border-bottom: 2px solid transparent; }
+  .po-compose-tabs button[aria-pressed="true"] { color: var(--po-accent); border-color: var(--po-accent); }
+  .po-questionform textarea {
+    width: 100%; min-height: 100px; resize: vertical; border: 0; background: transparent;
+    padding: 20px; font: 15px/1.6 var(--po-serif); color: var(--po-ink);
+  }
+  .po-questionform textarea:focus { outline: none; }
+  .po-composefoot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 13px 18px; border-top: 1px solid var(--po-line);
+  }
+  .po-doclookup { padding: 18px; }
+  .po-tiny { font-size: 11px; color: var(--po-muted); }
+  .po-sectionhead { display: flex; align-items: baseline; justify-content: space-between; margin: 30px 0 12px; }
+  .po-sectionhead h2 { font: 500 16px var(--po-serif); margin: 0; }
+  .po-sectionhead small { color: var(--po-muted); font-size: 11px; }
+  .po-recent {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 14px; width: 100%; text-align: left;
+    padding: 15px 16px; border: 1px solid var(--po-line); border-radius: 10px; background: var(--po-paper); margin-bottom: 8px;
+  }
+  .po-recent:hover { border-color: var(--po-accent); }
+  .po-recent strong { display: block; font-size: 13px; font-weight: 500; }
+  .po-recent small { display: block; color: var(--po-muted); font-size: 11px; margin-top: 4px; }
+
   /* Investigation page chrome */
   .po-context { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
   .po-context code { background: var(--po-soft); padding: 3px 6px; border-radius: 4px; color: var(--po-ink); font-size: 11px; font-family: var(--po-mono); }
@@ -209,9 +243,38 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     </header>
 
     <section class="po-page" data-page="workspace" hidden>
-      <div class="po-eyebrow">Clarity, across decades.</div>
-      <h1 class="po-title">Every protocol.<br>A spectrum of decisions.</h1>
-      <p class="corpora-hint">Workspace landing (composer, continue-an-investigation, reading desk) is not built yet -- ask a question from Investigations for now.</p>
+      <div class="po-hero">
+        <div class="po-eyebrow">Clarity, across decades.</div>
+        <h1 class="po-title">Every protocol.<br>A spectrum of <em>decisions.</em></h1>
+        <p class="po-herotext">Illuminate the discussions behind the specification. Follow the evidence. Understand the decision.</p>
+      </div>
+
+      <div class="po-composer">
+        <div class="po-compose-tabs">
+          <button type="button" data-entry="question" aria-pressed="true">Ask a question</button>
+          <button type="button" data-entry="document" aria-pressed="false">Start from a document</button>
+        </div>
+        <!-- No manual scope selector here (unlike the mockup) -- the agent
+             already decides for itself whether to stay within one draft or
+             widen the search, see _RESEARCH_ADDENDUM. -->
+        <form class="po-questionform" id="poWorkspaceForm">
+          <textarea id="poWorkspaceQuery" placeholder="Why was INIT_CWND set to 4?" required></textarea>
+          <div class="po-composefoot">
+            <span class="po-tiny">The agent decides how deep to go and whether to look beyond this draft.</span>
+            <button class="po-primary" type="submit">Investigate</button>
+          </div>
+        </form>
+        <div class="po-doclookup" hidden>
+          <p class="corpora-hint">Starting from a specific document needs the Documents page, which isn't built yet.</p>
+          <button class="po-secondary" type="button" data-goto="document">Open Documents →</button>
+        </div>
+      </div>
+
+      <div class="po-sectionhead"><h2>Continue an investigation</h2><small>Your recent sessions</small></div>
+      <div id="poRecentList"><p class="corpora-hint">Loading…</p></div>
+
+      <div class="po-sectionhead"><h2>Reading desk</h2></div>
+      <p class="corpora-hint">Recently opened documents will appear here once the Documents page is built.</p>
     </section>
 
     <section class="po-page" data-page="document" hidden>
@@ -296,6 +359,64 @@ function view(name) {
 }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
 
+// -- Workspace composer: entry-mode tabs (question vs document) ----------
+document.querySelectorAll('[data-entry]').forEach((b) => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-entry]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    document.querySelector('.po-questionform').hidden = b.dataset.entry !== 'question';
+    document.querySelector('.po-doclookup').hidden = b.dataset.entry !== 'document';
+  });
+});
+
+// Submitting from Workspace reuses the exact same runAsk() the
+// Investigations composer uses (defined further down, but function
+// declarations are hoisted, and this only ever runs on a later user
+// interaction, well after the whole script has finished its first pass)
+// -- it just relays the typed question into Investigations' own query
+// field first, rather than duplicating the SSE flow for a second composer.
+// Matches the mockup's own submit behavior: new investigations land on
+// Research activity, not Findings, since that's the "the agent is
+// currently working" view.
+document.getElementById('poWorkspaceForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const workspaceQueryEl = document.getElementById('poWorkspaceQuery');
+  const query = workspaceQueryEl.value.trim();
+  if (!query) return;
+  document.getElementById('poQuery').value = query;
+  workspaceQueryEl.value = '';
+  go('investigation');
+  view('activity');
+  runAsk();
+});
+
+// -- "Continue an investigation" -- real recent sessions, not the
+// mockup's one hardcoded card. Reuses the same /api/sessions data the
+// rail's own list already fetches, rendered as full-width cards here
+// instead of the rail's compact rows. -------------------------------
+function loadRecentInvestigations() {
+  const listEl = document.getElementById('poRecentList');
+  fetch(`${PRISM_PREFIX}/api/sessions`).then((r) => r.json()).then((data) => {
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      listEl.innerHTML = '<p class="corpora-hint">No investigations yet -- ask a question above to start one.</p>';
+      return;
+    }
+    listEl.innerHTML = sessions.slice(0, 6).map((s) => `
+      <button type="button" class="po-recent" data-session-id="${escapeHtml(s.id)}">
+        <strong>${escapeHtml(s.title || s.id)}</strong>
+        <small>${s.model_id ? escapeHtml(s.model_id) : ''}</small>
+      </button>
+    `).join('');
+    listEl.querySelectorAll('.po-recent').forEach((btn) => {
+      btn.addEventListener('click', () => openSession(btn.dataset.sessionId));
+    });
+  }).catch(() => {
+    listEl.innerHTML = '<p class="corpora-hint">Couldn’t load recent investigations.</p>';
+  });
+}
+// Initial call happens via loadSessionList() below (it calls this too, so
+// both lists come from one fetch flow) -- not called standalone here.
+
 document.getElementById('poNewBtn').addEventListener('click', () => {
   go('investigation');
   currentSessionId = null;
@@ -359,6 +480,10 @@ function loadSessionList() {
       btn.addEventListener('click', () => openSession(btn.dataset.sessionId));
     });
   }).catch(() => {});
+  // Keeps Workspace's "Continue an investigation" cards in sync with the
+  // rail's own list -- every existing call site that refreshes one now
+  // refreshes both, rather than needing a second call added everywhere.
+  loadRecentInvestigations();
 }
 loadSessionList();
 
