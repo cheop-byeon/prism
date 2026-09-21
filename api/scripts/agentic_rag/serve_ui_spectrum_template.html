@@ -54,6 +54,11 @@
     font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--po-muted);
     margin: 20px 4px 8px;
   }
+  .pm-navlabel {
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--po-muted);
+    margin: 17px 10px 4px;
+  }
+  .pm-navlabel:first-child { margin-top: 0; }
   input[type=text].po-sessionsearch {
     width: 100%; background: var(--po-soft); border: 1px solid var(--po-line); color: var(--po-ink);
     border-radius: 7px; padding: 6px 9px; font-size: 12px; font-family: inherit; margin-bottom: 6px;
@@ -180,6 +185,9 @@
   }
   .po-primary:hover { filter: brightness(1.08); }
   .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
+  .po-linkbutton { background: transparent; color: var(--po-accent); font-size: 12px; padding: 0; text-align: left; }
+  .po-linkbutton:hover { text-decoration: underline; }
+  .po-linkbutton:disabled { color: var(--po-muted); cursor: default; text-decoration: none; }
   .po-secondary:hover { color: var(--po-ink); border-color: var(--po-muted); }
 
   /* Live plan / activity steps */
@@ -338,6 +346,71 @@
   .po-coverage-row .po-coveragestatus { font-size: 12px; color: var(--po-muted); }
 
   .corpora-hint { color: var(--po-muted); font-size: 13px; line-height: 1.6; }
+
+  /* Sources/Usage/RFC Graph/How-it-works -- structural classes ported
+     verbatim from the prism-complete mockup's own pm-* rule set (kept
+     under a separate prefix from po-*, same as the mockup itself, since
+     these are a distinct "operations" component family layered on top of
+     the base design system), values translated 1:1 since both pages share
+     the same --po-* token names. */
+  .pm-pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+  .pm-pagehead .po-title { margin-bottom: 6px; }
+  .pm-pagehead p { font-size: 13px; color: var(--po-muted); max-width: 440px; }
+  .pm-pagehead select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
+  .pm-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
+  .pm-toolbar input { min-width: 0; flex: 1; padding: 11px 13px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 8px; font-size: 13px; color: var(--po-ink); }
+  .pm-toolbar select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
+  .pm-group { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; overflow: hidden; margin: 14px 0; }
+  .pm-grouphead { padding: 16px 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--po-soft); border-bottom: 1px solid var(--po-line); }
+  .pm-grouphead h2 { font-size: 15px; font-weight: 500; margin: 0; }
+  .pm-grouphead p { font-size: 11px; color: var(--po-muted); margin: 4px 0 0; }
+  .pm-facets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px 18px; }
+  .pm-facet { border-right: 1px solid var(--po-line); padding-right: 10px; }
+  .pm-facet:last-child { border: 0; }
+  .pm-facet strong { display: block; font-size: 13px; font-weight: 500; }
+  .pm-facet small { display: block; font-size: 11px; color: var(--po-muted); margin: 4px 0 10px; }
+  .pm-groupfoot { border-top: 1px solid var(--po-line); padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; color: var(--po-muted); flex-wrap: wrap; }
+  .pm-queue { padding: 14px 18px; border-left: 2px solid var(--po-cyan); background: var(--po-soft); border-radius: 0 8px 8px 0; margin-top: 18px; font-size: 12px; line-height: 1.7; }
+  .pm-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0 26px; }
+  .pm-metric { padding: 16px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; }
+  .pm-metric small { font-size: 11px; color: var(--po-muted); }
+  .pm-metric strong { display: block; font-size: 26px; letter-spacing: -0.5px; font-weight: 500; margin: 8px 0 3px; }
+  .pm-metric span { font-size: 11px; color: var(--po-muted); }
+  .pm-chart { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; height: 150px; align-items: end; margin: 18px 0 26px; padding-bottom: 22px; border-bottom: 1px solid var(--po-line); }
+  .pm-barcolumn { height: 100%; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 5px; position: relative; font-size: 10px; color: var(--po-muted); }
+  .pm-bar { width: 65%; min-height: 2px; background: linear-gradient(0deg, var(--po-accent), var(--po-cyan)); border-radius: 4px 4px 0 0; border: none; }
+  .pm-barcolumn small { position: absolute; bottom: -20px; font-size: 10px; white-space: nowrap; }
+  .pm-tablewrap { overflow-x: auto; }
+  .pm-table { border-collapse: collapse; width: 100%; font-size: 12px; text-align: left; }
+  .pm-table th { font-weight: 400; color: var(--po-muted); font-size: 11px; padding: 9px 8px; border-bottom: 1px solid var(--po-line); }
+  .pm-table td { padding: 12px 8px; border-bottom: 1px solid var(--po-line); }
+  .pm-table th:last-child, .pm-table td:last-child { text-align: right; }
+  .pm-table small { display: block; color: var(--po-muted); font-size: 10px; }
+  .pm-graphwrap { border: 1px solid var(--po-line); border-radius: 14px; background: radial-gradient(ellipse at 45% 50%, var(--po-tint), var(--po-bg) 70%); position: relative; overflow: hidden; }
+  .pm-graph { display: block; width: 100%; height: 380px; cursor: default; }
+  .pm-legend { display: flex; gap: 18px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--po-line); font-size: 11px; color: var(--po-muted); }
+  .pm-legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .pm-legend b { display: inline-block; width: 16px; height: 2px; }
+  .pm-graphdetail { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; margin-top: 14px; padding: 16px; flex-wrap: wrap; }
+  .pm-graphdetail h2 { font-size: 16px; font-weight: 500; margin: 4px 0; }
+  .pm-graphdetail p { font-size: 12px; color: var(--po-muted); margin: 0; }
+  .pm-process { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; margin: 20px 0; }
+  .pm-process div { padding: 12px 10px; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 8px; font-size: 12px; }
+  .pm-process small { display: block; color: var(--po-cyan); font-size: 10px; margin-bottom: 5px; letter-spacing: 0.04em; }
+  .pm-tool { border: 1px solid var(--po-line); border-radius: 10px; background: var(--po-paper); margin: 10px 0; padding: 0; overflow: hidden; }
+  .pm-tool summary { padding: 15px 17px; color: var(--po-ink); font-size: 13px; cursor: pointer; }
+  .pm-tool summary small { color: var(--po-muted); font-size: 11px; margin-left: 8px; }
+  .pm-toolbody { padding: 0 17px 16px; color: var(--po-muted); font-size: 12px; }
+  .pm-toolbody p { margin: 0 0 12px; line-height: 1.6; }
+  .pm-toolbody dl { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; font-size: 11px; margin: 0; }
+  .pm-toolbody dt { color: var(--po-cyan); }
+  .pm-toolbody dd { margin: 0; }
+  .pm-toolbody code { display: block; background: var(--po-soft); padding: 10px; border-radius: 6px; font-size: 11px; overflow-wrap: anywhere; margin-top: 8px; }
+  .pm-sample { font-size: 11px; color: var(--po-muted); margin: 14px 0; }
+  @media (max-width: 900px) {
+    .pm-facets { grid-template-columns: 1fr; }
+    .pm-metrics { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body>
@@ -348,20 +421,22 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     <div class="po-brand">prism</div>
     <button id="poNewBtn" class="po-new" type="button">+ New investigation</button>
     <nav class="po-railnav" aria-label="Workspace">
+      <div class="pm-navlabel">Research</div>
       <button data-goto="workspace"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 9l-2 6-6 2 2-6 6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Workspace</button>
       <button data-goto="document"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Documents</button>
       <button data-goto="investigation" aria-current="page"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Investigations</button>
-      <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>Archive coverage</button>
+      <button data-goto="graph"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.1 7.1L10 16M15.9 7.1L14 16M8.4 6h7.2" stroke="currentColor" stroke-width="1.4"/></svg>RFC Graph</button>
+      <div class="pm-navlabel">Library</div>
+      <button data-goto="sources"><svg width="15" height="15" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>Sources</button>
+      <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Archive coverage</button>
+      <div class="pm-navlabel">Operations</div>
+      <button data-goto="usage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 20V10M11 20V4M18 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Usage</button>
+      <button data-goto="tools"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>How it works</button>
     </nav>
     <div class="po-railcaption">Recent investigations</div>
     <input id="poSessionSearch" type="text" class="po-sessionsearch" placeholder="Search sessions…">
     <div class="po-sessionlist" id="poSessionList"></div>
-    <!-- Sources/Usage/RFC Graph/How it Works aren't rebuilt here -- each is
-         its own large feature (add-source modals, a full observability
-         dashboard, a vis-network graph, tool/skill browsers) out of scope
-         for this pass. Linked out to the original page rather than left
-         silently unreachable. -->
-    <a class="po-classiclink" id="poClassicLink" href="#" target="_blank" rel="noopener">Sources, Usage, RFC Graph, How it Works →</a>
+    <a class="po-classiclink" id="poClassicLink" href="#" target="_blank" rel="noopener">Classic view (fuller Sources/Usage/RFC Graph tools) →</a>
     <div class="po-profile">
       <span class="po-avatar" id="poAvatar">__ACCOUNT_INITIAL__</span>
       <div style="min-width:0;">
@@ -478,6 +553,64 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <p class="po-subtitle">Coverage belongs beside the findings. Missing evidence should never look like a missing discussion.</p>
       <div id="poCoverageBody"></div>
     </section>
+
+    <section class="po-page" data-page="graph" hidden>
+      <div class="po-eyebrow">Research / RFC Graph</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">No specification stands alone.</h1><p>Follow real Obsoletes/Updates/Citation/Topic relationships out from one RFC.</p></div></div>
+      <form class="pm-toolbar" id="poGraphForm">
+        <input id="poGraphInput" type="text" placeholder="RFC number, e.g. 9000" aria-label="RFC number">
+        <button class="po-primary" type="submit">Go</button>
+        <label class="po-tiny" style="margin-left:auto;">Relationships
+          <select id="poGraphEdgeFilter" aria-label="Graph relationship filter">
+            <option value="all">All relationships</option>
+            <option value="structural">Obsoletes / Updates only</option>
+            <option value="family">Citation + Topic Match only</option>
+          </select>
+        </label>
+      </form>
+      <div id="poGraphStatus"></div>
+      <div class="pm-graphwrap" id="poGraphWrap" hidden>
+        <svg class="pm-graph" id="poGraphSvg" role="img" aria-label="RFC relationship graph; select a node for detail"></svg>
+        <div class="pm-legend">
+          <span><b style="background:var(--po-cyan)"></b>Obsoletes / Updates</span>
+          <span><b style="background:var(--po-purple)"></b>Citation / Topic match</span>
+        </div>
+      </div>
+      <div class="pm-graphdetail" id="poGraphDetail" hidden></div>
+    </section>
+
+    <section class="po-page" data-page="sources" hidden>
+      <div class="po-eyebrow">Library / Sources</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">Build the evidence base.</h1><p>Everything here is a download-only local copy -- mail, draft text, WG resources. Attaching or indexing into a real Dify dataset is still a manual Studio step.</p></div></div>
+      <form class="pm-toolbar pm-sourceform" id="poSourceAddForm">
+        <input id="poSourceAddInput" type="text" placeholder="Search an RFC, draft, or working group…" aria-label="Find source" autocomplete="off">
+        <button class="po-primary" type="submit"><span>+</span>Add source</button>
+      </form>
+      <div class="po-lookup-results" id="poSourceAddResults" hidden></div>
+      <div id="poSourcesList"><p class="corpora-hint">Loading…</p></div>
+      <div class="pm-queue" id="poSourceQueue" hidden aria-live="polite"><strong>Download queue</strong><div class="pm-queuetext" id="poSourceQueueText"></div></div>
+    </section>
+
+    <section class="po-page" data-page="usage" hidden>
+      <div class="po-eyebrow">Operations / Usage</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">See what research costs.</h1><p>Org-wide across every Prism account, not just yours -- data maintainers only.</p></div>
+        <select id="poUsageRange" aria-label="Usage date range">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+      <div id="poUsageBody"><p class="corpora-hint">Loading…</p></div>
+    </section>
+
+    <section class="po-page" data-page="tools" hidden>
+      <div class="po-eyebrow">Operations / How it works</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">Behind every finding,<br>a traceable process.</h1><p>The agent's real tools and the instructions that combine them into an answer.</p></div></div>
+      <div class="po-sectionhead"><h2>Tool catalog</h2><small>Expand a tool to inspect its contract</small></div>
+      <div id="poToolsList"><p class="corpora-hint">Loading…</p></div>
+      <div class="po-sectionhead"><h2>Skill</h2><small>How the tools above get combined into an answer</small></div>
+      <div id="poSkillBody"></div>
+    </section>
   </div>
 </div>
 
@@ -515,8 +648,16 @@ function escapeHtml(s) {
 // verbatim) --------------------------------------------------------------
 const BREADCRUMBS = {
   workspace: 'Workspace / Overview', document: 'Documents',
-  investigation: 'Investigations', coverage: 'Archive / Coverage',
+  investigation: 'Investigations', coverage: 'Library / Coverage',
+  graph: 'Research / RFC Graph', sources: 'Library / Sources',
+  usage: 'Operations / Usage', tools: 'Operations / How it works',
 };
+// Each of these fetches real data the first time its page is opened, not
+// on initial load -- same lazy-load reasoning as the mockup's own
+// "nothing is fetched until you click Refresh" note on Usage, just applied
+// to first-visit instead of a manual button, since every one of these
+// calls is read-only and safe to run once automatically.
+const _pageOpened = {};
 function go(name) {
   document.querySelectorAll('[data-page]').forEach((p) => { p.hidden = p.dataset.page !== name; });
   document.getElementById('poBreadcrumb').textContent = BREADCRUMBS[name] || '';
@@ -529,6 +670,13 @@ function go(name) {
   // click, well after the whole script has finished its first pass.
   if (name === 'coverage') renderCoverage();
   if (name === 'workspace') renderReadingDesk();
+  if (!_pageOpened[name]) {
+    _pageOpened[name] = true;
+    if (name === 'tools') loadToolsPage();
+    if (name === 'usage') loadUsagePage();
+    if (name === 'sources') loadSourcesPage();
+    if (name === 'graph') loadGraphPage();
+  }
 }
 document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
 
@@ -614,10 +762,14 @@ document.getElementById('poLogoutBtn').addEventListener('click', () => {
     .finally(() => { window.location.href = `${PRISM_PREFIX}/login`; });
 });
 
-// -- Tool display names (for live step labels) ---------------------------
+// -- Tool display names (for live step labels) -- /api/tools returns a
+// bare array (jsonify(_tool_info()) serializes the list directly), not a
+// {tools: [...]} wrapper -- this previously read data.tools here, which is
+// always undefined against a bare array, so toolDisplayNames silently
+// stayed empty and toolLabel() fell back to raw tool names the whole time.
 let toolDisplayNames = {};
-fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()).then((data) => {
-  (data.tools || []).forEach((t) => { toolDisplayNames[t.name] = t.display_name || t.name; });
+fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()).then((tools) => {
+  (tools || []).forEach((t) => { toolDisplayNames[t.name] = t.display_name || t.name; });
 }).catch(() => {});
 function toolLabel(name) { return toolDisplayNames[name] || name; }
 
@@ -1573,6 +1725,401 @@ wireDocLookup(
   null,
   (id) => goToDocument(id)
 );
+
+// -- How it works -- real /api/tools + /api/skills, restyled into the
+// mockup's pm-tool <details>/dl contract layout instead of classic's
+// list+detail-panel split. dt/dd pairs use what the real tool payload
+// actually carries (resource/example, see _TOOL_DETAILS) rather than the
+// mockup's fabricated Inputs/Returns/Boundary framing, which nothing in
+// this backend computes. ------------------------------------------------
+function loadToolsPage() {
+  const listEl = document.getElementById('poToolsList');
+  const skillEl = document.getElementById('poSkillBody');
+  Promise.all([
+    fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()),
+    fetch(`${PRISM_PREFIX}/api/skills`).then((r) => r.json()),
+  ]).then(([tools, skillsData]) => {
+    tools = tools || [];
+    listEl.innerHTML = tools.map((t, i) => `
+      <details class="pm-tool"${i === 0 ? ' open' : ''}>
+        <summary>${escapeHtml(t.display_name || t.name)}<small>${escapeHtml(t.group || t.kind || '')}${t.forced ? ' · forced at least once per run' : ''}</small></summary>
+        <div class="pm-toolbody">
+          <p>${escapeHtml(t.description || '')}</p>
+          ${t.resource ? `<dl><dt>Touches</dt><dd>${escapeHtml(t.resource)}</dd></dl>` : ''}
+          ${t.example ? `<code>${escapeHtml(t.example)}</code>` : ''}
+        </div>
+      </details>
+    `).join('') || '<p class="corpora-hint">No tools reported.</p>';
+
+    const guardrails = skillsData.guardrails || [];
+    skillEl.innerHTML = `
+      <details class="pm-tool" open>
+        <summary>Agent instructions<small>How every tool call above gets orchestrated</small></summary>
+        <div class="pm-toolbody"><code>${escapeHtml(skillsData.agent || '')}</code></div>
+      </details>
+      ${guardrails.map((g) => `
+        <details class="pm-tool">
+          <summary>${escapeHtml(g.name)}<small>Guardrail</small></summary>
+          <div class="pm-toolbody">
+            <p>${escapeHtml(g.purpose || '')}</p>
+            ${g.instruction ? `<code>${escapeHtml(g.instruction)}</code>` : ''}
+          </div>
+        </details>
+      `).join('')}
+    `;
+  }).catch(() => {
+    listEl.innerHTML = '<div class="po-error">Couldn’t load the tool catalog.</div>';
+    skillEl.innerHTML = '';
+  });
+}
+
+// -- RFC Graph -- real /api/rfc-graph/<rfc_number> ({center, nodes, edges}
+// from real obsoletes/updates + Citation Match + Topic Match data), drawn
+// as a plain static circular layout (center node in the middle, its
+// neighbors evenly spaced around it) rather than vis-network or the
+// mockup's own fixed illustrative scatter -- a single real request has no
+// hop-distance data to lay out by (that's Focus mode's SSE endpoint, not
+// this simpler one), and a circle is an honest, deterministic layout for
+// "one center, N neighbors" without pulling in a physics engine for a
+// single real RFC's neighborhood (rarely more than a few dozen nodes). ---
+let graphData = null;
+let selectedGraphNode = null;
+function loadGraphPage() {
+  const inputEl = document.getElementById('poGraphInput');
+  if (!inputEl.value.trim()) inputEl.value = '9000';
+  runGraph();
+}
+document.getElementById('poGraphForm').addEventListener('submit', (e) => { e.preventDefault(); runGraph(); });
+document.getElementById('poGraphEdgeFilter').addEventListener('change', () => renderGraphSvg());
+
+function runGraph() {
+  const rfcNumber = document.getElementById('poGraphInput').value.trim();
+  if (!rfcNumber) return;
+  const statusEl = document.getElementById('poGraphStatus');
+  const wrapEl = document.getElementById('poGraphWrap');
+  const detailEl = document.getElementById('poGraphDetail');
+  statusEl.innerHTML = `<div class="po-loading">Loading RFC ${escapeHtml(rfcNumber)}’s relationships…</div>`;
+  wrapEl.hidden = true;
+  detailEl.hidden = true;
+  fetch(`${PRISM_PREFIX}/api/rfc-graph/${encodeURIComponent(rfcNumber)}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    graphData = data;
+    selectedGraphNode = data.center;
+    statusEl.textContent = '';
+    wrapEl.hidden = false;
+    renderGraphSvg();
+  }).catch((err) => {
+    statusEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load this graph.')}</div>`;
+  });
+}
+
+function renderGraphSvg() {
+  if (!graphData) return;
+  const svg = document.getElementById('poGraphSvg');
+  const filter = document.getElementById('poGraphEdgeFilter').value;
+  const width = svg.getBoundingClientRect().width || 600;
+  const height = 380;
+  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
+  const nodes = graphData.nodes || [];
+  const edges = (graphData.edges || []).filter((e) => {
+    const isFamily = e.kind === 'family' || e.kind === 'topic_bm25';
+    if (filter === 'structural') return !isFamily;
+    if (filter === 'family') return isFamily;
+    return true;
+  });
+  const cx = width / 2;
+  const cy = height / 2;
+  const others = nodes.filter((n) => n.id !== graphData.center);
+  const radius = Math.max(70, Math.min(width, height) / 2 - 55);
+  const pos = { [graphData.center]: [cx, cy] };
+  others.forEach((n, i) => {
+    const angle = (2 * Math.PI * i) / Math.max(1, others.length) - Math.PI / 2;
+    pos[n.id] = [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
+  });
+  const ns = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs) => {
+    const node = document.createElementNS(ns, tag);
+    Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
+    return node;
+  };
+  svg.replaceChildren();
+  edges.forEach((e) => {
+    const p1 = pos[e.source];
+    const p2 = pos[e.target];
+    if (!p1 || !p2) return;
+    const isFamily = e.kind === 'family' || e.kind === 'topic_bm25';
+    svg.appendChild(el('line', {
+      x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1],
+      stroke: isFamily ? 'var(--po-purple)' : 'var(--po-cyan)',
+      'stroke-width': 1.2, opacity: 0.55,
+      'stroke-dasharray': isFamily ? '4 5' : 'none',
+    }));
+  });
+  nodes.forEach((n) => {
+    const p = pos[n.id];
+    if (!p) return;
+    const g = el('g', {});
+    g.style.cursor = 'pointer';
+    const isSelected = n.id === selectedGraphNode;
+    const isCenter = n.id === graphData.center;
+    if (isSelected) g.appendChild(el('circle', { cx: p[0], cy: p[1], r: 26, fill: 'var(--po-tint)' }));
+    g.appendChild(el('circle', {
+      cx: p[0], cy: p[1], r: isCenter ? 11 : 7,
+      fill: isCenter ? 'var(--po-cyan)' : 'var(--po-accent)',
+      stroke: 'var(--po-paper)', 'stroke-width': 2,
+    }));
+    const text = el('text', { x: p[0], y: p[1] + 24, 'text-anchor': 'middle', fill: 'var(--po-ink)', 'font-size': 11 });
+    text.textContent = n.id;
+    g.appendChild(text);
+    g.addEventListener('click', () => { selectedGraphNode = n.id; renderGraphSvg(); });
+    svg.appendChild(g);
+  });
+  const activeNode = nodes.find((n) => n.id === selectedGraphNode) || nodes.find((n) => n.id === graphData.center);
+  if (activeNode) showGraphNodeDetail(activeNode);
+}
+
+function showGraphNodeDetail(n) {
+  const detailEl = document.getElementById('poGraphDetail');
+  detailEl.hidden = false;
+  const isCenter = n.id === graphData.center;
+  detailEl.innerHTML = `
+    <div>
+      <div class="po-eyebrow" style="margin-bottom:5px;">${isCenter ? 'Center specification' : 'Related specification'}</div>
+      <h2>${escapeHtml(n.id)}</h2>
+      <p>${escapeHtml(n.title || '')}${n.wg ? ' &middot; ' + escapeHtml(n.wg) : ''}${n.std_level ? ' &middot; ' + escapeHtml(n.std_level) : ''}</p>
+    </div>
+    <button type="button" class="po-primary" data-goto-doc="${escapeHtml(n.id)}">Read this RFC →</button>
+  `;
+  const btn = detailEl.querySelector('[data-goto-doc]');
+  if (btn) btn.addEventListener('click', () => { go('document'); goToDocument(btn.dataset.gotoDoc); });
+}
+new ResizeObserver(() => renderGraphSvg()).observe(document.getElementById('poGraphWrap'));
+
+// -- Usage -- real /api/observability?days=N (org-wide, data-admin gated
+// server-side; a non-admin just sees the resulting {error} rendered
+// inline, same handling as every other gated fetch in this app). The
+// mockup's per-model filter has no real counterpart (this deployment has
+// one app, not per-model bucketed stats), so it's replaced by the date
+// range selector classic's own Usage tab already has; the mockup's "Model
+// calls" table becomes a real tool-call-frequency table since that's what
+// the backend actually tracks (MessageAgentThought rows), not per-call
+// token/cost line items. -------------------------------------------------
+function loadUsagePage() {
+  runUsage();
+  document.getElementById('poUsageRange').addEventListener('change', runUsage);
+}
+function formatCompactNumber(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+function runUsage() {
+  const bodyEl = document.getElementById('poUsageBody');
+  const days = document.getElementById('poUsageRange').value;
+  bodyEl.innerHTML = '<p class="po-loading">Loading…</p>';
+  fetch(`${PRISM_PREFIX}/api/observability?days=${days}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    const totals = data.totals || {};
+    const daily = data.daily || [];
+    const toolUsage = data.tool_usage || [];
+    const maxCost = Math.max(0.01, ...daily.map((d) => d.cost));
+    bodyEl.innerHTML = `
+      <div class="pm-metrics">
+        <div class="pm-metric"><small>Total cost</small><strong>$${(totals.cost || 0).toFixed(2)}</strong><span>USD · last ${data.days || days} days</span></div>
+        <div class="pm-metric"><small>Turns</small><strong>${(totals.turns || 0).toLocaleString()}</strong><span>${(totals.sessions || 0).toLocaleString()} sessions · ${(totals.accounts || 0).toLocaleString()} accounts</span></div>
+        <div class="pm-metric"><small>Total tokens</small><strong>${formatCompactNumber(totals.tokens || 0)}</strong><span>avg latency ${(totals.avg_latency || 0).toFixed(1)}s · ${(totals.satisfaction_pct || 0).toFixed(0)}% 👍</span></div>
+      </div>
+      <div class="po-sectionhead"><h2>Daily spend</h2><small>USD · hover a bar for its amount</small></div>
+      <div class="pm-chart">${daily.length ? daily.map((d) => `
+        <div class="pm-barcolumn">
+          <button type="button" class="pm-bar" style="height:${Math.max(2, (d.cost / maxCost) * 110)}px" title="${escapeHtml(d.date)}: $${d.cost.toFixed(4)} · ${d.turns} turns"></button>
+          <small>${escapeHtml(d.date.slice(5))}</small>
+        </div>
+      `).join('') : '<p class="corpora-hint">No activity in this range.</p>'}</div>
+      <div class="po-sectionhead"><h2>Tool calls</h2><small>Frequency across the selected period</small></div>
+      <div class="pm-tablewrap"><table class="pm-table"><thead><tr><th>Tool</th><th>Calls</th></tr></thead><tbody>
+        ${toolUsage.length ? toolUsage.map((t) => `<tr><td>${escapeHtml(toolLabel(t.tool))}</td><td>${t.calls.toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="2" class="corpora-hint">No tool calls in this range.</td></tr>'}
+      </tbody></table></div>
+    `;
+  }).catch((err) => {
+    bodyEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load usage data.')}</div>`;
+  });
+}
+
+// -- Sources -- real /api/corpora/freshness (real Dify-dataset corpora +
+// locally-tracked-only sources, same merged list classic's Sources tab
+// shows), scoped to browse/sync/add -- classic's separate sparse/dense
+// (BM25/embedding) index-build controls are a deeper admin feature the
+// mockup doesn't represent either, so they're left to the classic page
+// (linked from the rail) rather than duplicated here. local-sync is used
+// for both adding a brand-new local source and refreshing an existing one
+// -- it's the same real backend action either way (draft+RFC+mail, all
+// idempotent), not two different mechanisms. -----------------------------
+function loadSourcesPage() {
+  fetchSources();
+}
+function setSourceQueueText(text) {
+  document.getElementById('poSourceQueue').hidden = false;
+  document.getElementById('poSourceQueueText').textContent = text;
+}
+function fetchSources() {
+  const listEl = document.getElementById('poSourcesList');
+  fetch(`${PRISM_PREFIX}/api/corpora/freshness`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    const corpora = data.corpora || [];
+    if (!corpora.length) {
+      listEl.innerHTML = '<p class="corpora-hint">No sources yet -- search above to add one.</p>';
+      return;
+    }
+    listEl.innerHTML = corpora.map(renderSourceGroup).join('');
+    listEl.querySelectorAll('[data-sync-mail]').forEach((btn) => btn.addEventListener('click', () => runMailSync(btn)));
+    listEl.querySelectorAll('[data-download-rev]').forEach((btn) => btn.addEventListener('click', () => runDraftDownload(btn)));
+    listEl.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
+    listEl.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
+  }).catch((err) => {
+    listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
+  });
+}
+function renderSourceGroup(c) {
+  const label = c.rfc_number ? `RFC ${escapeHtml(String(c.rfc_number))}` : escapeHtml(c.draft_name || 'Untitled source');
+  const pill = c.is_local ? '<span class="po-pill po-warn">Local source</span>' : '<span class="po-pill">Ready for research</span>';
+  const specFacet = `
+    <div class="pm-facet">
+      <strong>Specification</strong>
+      <small>${c.rfc_number ? 'Published RFC' : 'Not yet published as an RFC'}</small>
+      ${c.rfc_number ? `<button type="button" class="po-linkbutton" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}
+    </div>`;
+  let mailFacet;
+  let draftFacet;
+  if (c.is_local) {
+    const ls = c.local_status || {};
+    const mailMeta = c.wg ? `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}` : 'No WG for this draft';
+    mailFacet = `<div class="pm-facet"><strong>Mailing-list archive</strong><small>${escapeHtml(mailMeta)}</small></div>`;
+    const draftMeta = ls.revisions_downloaded
+      ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} downloaded (latest ${escapeHtml(String(ls.latest_revision_downloaded || '?'))})`
+      : 'No revisions downloaded yet';
+    draftFacet = `
+      <div class="pm-facet">
+        <strong>Draft revisions</strong>
+        <small>${draftMeta}</small>
+        <button type="button" class="po-linkbutton" data-local-sync="${escapeHtml(c.draft_name)}">${ls.last_synced_at ? 'Re-sync' : 'Sync'} ↓</button>
+      </div>`;
+  } else {
+    const ms = c.mail_status || {};
+    const mailValue = c.wg
+      ? (ms.error ? escapeHtml(ms.error) : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages`)
+      : 'No WG for this draft';
+    mailFacet = `
+      <div class="pm-facet">
+        <strong>Mailing-list archive</strong>
+        <small>${mailValue}</small>
+        ${c.wg ? `<button type="button" class="po-linkbutton" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}">Sync now ↓</button>` : ''}
+      </div>`;
+    const dr = c.draft_relations || {};
+    const draftValue = dr.error ? escapeHtml(dr.error) : (dr.latest_rev ? `Latest: rev ${escapeHtml(String(dr.latest_rev))}` : 'Unknown');
+    draftFacet = `
+      <div class="pm-facet">
+        <strong>Draft revisions</strong>
+        <small>${draftValue}</small>
+        ${dr.latest_rev ? `<button type="button" class="po-linkbutton" data-download-rev="1" data-draft="${escapeHtml(c.draft_name)}" data-rev="${escapeHtml(String(dr.latest_rev))}">Download latest ↓</button>` : ''}
+      </div>`;
+  }
+  return `
+    <div class="pm-group">
+      <div class="pm-grouphead">
+        <div><h2>${label}</h2><p>${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}</p></div>
+        ${pill}
+      </div>
+      <div class="pm-facets">${specFacet}${mailFacet}${draftFacet}</div>
+    </div>`;
+}
+function runMailSync(btn) {
+  const wg = btn.dataset.wg;
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  fetch(`${PRISM_PREFIX}/api/corpora/mail-sync`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ list_name: wg }),
+  }).then((r) => r.json()).then((data) => {
+    setSourceQueueText(data.error ? `${wg}: ${data.error}` : `${wg}: mail sync triggered.`);
+    fetchSources();
+  }).catch(() => { setSourceQueueText(`${wg}: sync failed.`); fetchSources(); });
+}
+function runDraftDownload(btn) {
+  const draftName = btn.dataset.draft;
+  const rev = btn.dataset.rev;
+  btn.disabled = true;
+  btn.textContent = 'Downloading…';
+  fetch(`${PRISM_PREFIX}/api/corpora/draft-download`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft_name: draftName, revision: rev }),
+  }).then((r) => r.json()).then((data) => {
+    setSourceQueueText(data.error ? `${draftName}: ${data.error}` : `${draftName}-${rev}: downloaded.`);
+    fetchSources();
+  }).catch(() => { setSourceQueueText(`${draftName}: download failed.`); fetchSources(); });
+}
+function runLocalSync(draftName, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  setSourceQueueText(`Syncing ${draftName}…`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/local-sync?draft_name=${encodeURIComponent(draftName)}`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      setSourceQueueText(msg.message || `Syncing ${draftName}…`);
+    } else if (msg.type === 'result') {
+      source.close();
+      setSourceQueueText(msg.data.error ? `${draftName}: ${msg.data.error}` : `${draftName}: sync complete.`);
+      fetchSources();
+    } else if (msg.type === 'error') {
+      source.close();
+      setSourceQueueText(`${draftName}: ${msg.message}`);
+      fetchSources();
+    }
+  };
+  source.onerror = () => { source.close(); setSourceQueueText(`${draftName}: connection lost while syncing.`); fetchSources(); };
+}
+
+// Add-source typeahead against the sidecar's own real RFC/draft
+// suggestions (same lookup the Studio dataset-importer popup uses) --
+// deliberately not matchDocuments()'s local corpora catalog, since this
+// needs to find things that AREN'T a source yet at all.
+let sourceAddDebounce = null;
+const poSourceAddInputEl = document.getElementById('poSourceAddInput');
+const poSourceAddResultsEl = document.getElementById('poSourceAddResults');
+poSourceAddInputEl.addEventListener('input', () => {
+  clearTimeout(sourceAddDebounce);
+  const query = poSourceAddInputEl.value.trim();
+  sourceAddDebounce = setTimeout(() => {
+    fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}`).then((r) => r.json()).then((data) => {
+      const suggestions = (data.suggestions || []).slice(0, 8);
+      if (!suggestions.length) { poSourceAddResultsEl.hidden = true; return; }
+      poSourceAddResultsEl.innerHTML = suggestions.map((s) => `
+        <button type="button" data-draft="${escapeHtml(s.draft_base_name || (s.draft_names || [])[0] || '')}">
+          ${escapeHtml((s.doc_id || '').toUpperCase())}${s.title ? ' — ' + escapeHtml(s.title) : ''}<small>${escapeHtml(s.wg || s.stream || '')}</small>
+        </button>`).join('');
+      poSourceAddResultsEl.hidden = false;
+      poSourceAddResultsEl.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('click', () => {
+          poSourceAddResultsEl.hidden = true;
+          poSourceAddInputEl.value = '';
+          if (b.dataset.draft) runLocalSync(b.dataset.draft, null);
+        });
+      });
+    }).catch(() => {});
+  }, 300);
+});
+document.getElementById('poSourceAddForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const typed = poSourceAddInputEl.value.trim();
+  poSourceAddResultsEl.hidden = true;
+  if (typed.toLowerCase().startsWith('draft-')) {
+    poSourceAddInputEl.value = '';
+    runLocalSync(typed, null);
+  }
+  // A bare RFC number or WG name isn't itself a syncable draft name --
+  // pick one of the typeahead suggestions above instead.
+});
+document.addEventListener('click', (e) => {
+  if (!poSourceAddInputEl.contains(e.target) && !poSourceAddResultsEl.contains(e.target)) poSourceAddResultsEl.hidden = true;
+});
 </script>
 </body>
 </html>
