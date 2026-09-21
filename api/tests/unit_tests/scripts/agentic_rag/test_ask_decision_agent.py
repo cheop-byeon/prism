@@ -135,6 +135,13 @@ class TestFormatHits:
     def test_numbers_hits_from_one(self):
         assert _format_hits(["first", "second"]) == "[1] first\n\n[2] second"
 
+    def test_start_offsets_numbering_for_a_later_search_call(self):
+        # ask() passes start=len(numbered_evidence)+1 so a second search
+        # call's hits keep counting up from an earlier one instead of both
+        # restarting at [1] -- the model would otherwise write "[1]" in its
+        # final answer meaning two different, ambiguous things.
+        assert _format_hits(["third", "fourth"], start=3) == "[3] third\n\n[4] fourth"
+
 
 class TestFormatEvolutionHits:
     def test_empty_hits_reports_no_results_and_no_citations(self):
@@ -165,6 +172,10 @@ class TestFormatEvolutionHits:
         assert citations == [
             ("ietf-evolution draft:draft-ietf-example-thing from:05 to:06", "05", "06", expected_url)
         ]
+
+    def test_start_offsets_numbering_for_a_later_search_call(self):
+        text, _citations = _format_evolution_hits(["plain hit, no header"], start=5)
+        assert text == "[5] plain hit, no header"
 
 
 class TestIddiffPageUrl:

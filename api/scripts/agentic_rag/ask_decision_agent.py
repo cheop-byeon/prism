@@ -1051,10 +1051,14 @@ def _retrieve_documents(dataset, query: str, top_k: int) -> list:
     )
 
 
-def _format_hits(hits: list[str]) -> str:
+def _format_hits(hits: list[str], start: int = 1) -> str:
+    """start lets a caller keep citation numbers globally unique across
+    multiple search calls in the same ask() run (pass len(evidence-so-far)
+    + 1) -- defaults to 1 so every existing caller/test is unaffected.
+    """
     if not hits:
         return "(no results)"
-    return "\n\n".join(f"[{i}] {hit}" for i, hit in enumerate(hits, start=1))
+    return "\n\n".join(f"[{i}] {hit}" for i, hit in enumerate(hits, start=start))
 
 
 _EVOLUTION_HEADER_RE = re.compile(r"^ietf-evolution draft:(\S+) from:(\S+) to:(\S+)")
@@ -1079,7 +1083,7 @@ def _iddiff_page_url(draft_name: str, from_rev: str, to_rev: str) -> str:
     return f"{_IDDIFF_TOOL_BASE}?{urlencode(params)}"
 
 
-def _format_evolution_hits(hits: list[str]) -> tuple[str, list[tuple[str, str, str, str]]]:
+def _format_evolution_hits(hits: list[str], start: int = 1) -> tuple[str, list[tuple[str, str, str, str]]]:
     """Like _format_hits, but appends a cheap, always-available "Live diff"
     citation URL to each hit -- parsed straight from the hit's own
     self-describing header (draft:X from:A to:B), zero extra network calls.
@@ -1093,12 +1097,14 @@ def _format_evolution_hits(hits: list[str]) -> tuple[str, list[tuple[str, str, s
     than blindly citing rank [1] (confirmed necessary: a real run cited the
     correct revision pair inline in its own text while the top-ranked
     evolution hit for that query was a *different*, less relevant pair).
+
+    start: see _format_hits -- same global-numbering purpose.
     """
     if not hits:
         return "(no results)", []
     blocks = []
     citations: list[tuple[str, str, str, str]] = []
-    for i, hit in enumerate(hits, start=1):
+    for i, hit in enumerate(hits, start=start):
         match = _EVOLUTION_HEADER_RE.match(hit)
         if match:
             draft_name, from_rev, to_rev = match.groups()
@@ -1596,6 +1602,26 @@ def _verify_answer(
     return content if isinstance(content, str) else str(content)
 
 
+# Matches verify_skill.md's "CLAIM [N]: stated|inferred|unresolved" line
+# convention -- same regex-over-a-text-convention approach as
+# _extract_message_links elsewhere in this file, not a new architectural
+# pattern. There's no structured-output mode in play here, just a line
+# format the verifier is asked to follow.
+_CLAIM_LABEL_RE = re.compile(r"^CLAIM \[(\d+)\]:\s*(stated|inferred|unresolved)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _parse_claim_labels(verify_response: str) -> dict[int, str]:
+    """Extracts verify_answer's per-citation classification into
+    {citation_number: status}. A citation the verifier didn't emit a CLAIM
+    line for at all is simply absent from this dict -- the caller (ask())
+    defaults an unclassified citation to "unresolved" rather than this
+    function guessing, since failing toward under-claiming confidence is
+    the whole point of having three named states instead of a numeric
+    score.
+    """
+    return {int(n): status.lower() for n, status in _CLAIM_LABEL_RE.findall(verify_response)}
+
+
 def _tool(name: str, description: str, properties: dict, required: list[str]):
     from dify_graph.model_runtime.entities import PromptMessageTool
 
@@ -1996,6 +2022,8 @@ def ask(
     usage: list[dict] | None = None,
     cancel_event=None,
     model_tenant_id: str | None = None,
+    claim_labels: dict[int, str] | None = None,
+    evidence: list[dict] | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -2053,6 +2081,28 @@ def ask(
     nothing bespoke), that's what gets used, billed to their own key.
     None (the default, every existing caller) leaves model resolution
     exactly as before, against the dataset's own tenant.
+
+    claim_labels: optional out-param dict (same pattern as `trace`/`usage`)
+    -- populated with {citation_number: "stated"|"inferred"|"unresolved"},
+    parsed from verify_answer's own per-citation audit (see
+    _parse_claim_labels/verify_skill.md), for a caller that wants to show
+    each [N] citation's evidence strength rather than a bare bracket. A
+    citation verify_answer never classified is simply absent here -- the
+    caller should treat a missing entry the same as "unresolved" (fail
+    toward under-claiming confidence, not over-claiming it). None (the
+    default) skips this entirely; every existing caller is unaffected.
+
+    evidence: optional out-param list of {"text": str, "kind": "mail"|
+    "evolution"} (same pattern as `trace`/`usage`) -- populated with every
+    mailarchive/evolution search hit actually seen this call, un-truncated,
+    in the same globally-unique numbering the model itself cites (so entry
+    N-1 is what citation [N] in the answer refers to) -- for a caller that
+    wants to show a citation's real source text, not just trace's own
+    400-char observation_preview. Only these two tools' results are ever
+    numbered at all (every other tool's output is
+    unnumbered text the model can quote but never bracket-cite), so this is
+    not the same list as everything ask() retrieved overall. None (the
+    default) skips this entirely; every existing caller is unaffected.
     """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import (
@@ -2187,6 +2237,26 @@ def ask(
     evidence_log: list[str] = []  # every dataset/fetch observation, fed to verify_answer
     evolution_citations: list[tuple[str, str, str, str]] = []  # (header, from_rev, to_rev, url), every hit ever seen
     usage_log: list = []  # every LLMUsage seen this call (main loop + any verify_answer), summarized in _finish
+    # Reflects whichever verify_answer call was most recent when the loop
+    # exits -- if the model revises its draft again after that call without
+    # a further verify_answer pass (the safety net only guarantees at least
+    # one, not one on every subsequent edit), these labels can trail the
+    # exact final wording slightly. Citation numbers themselves stay valid
+    # regardless (numbered_evidence below is append-only, never renumbered),
+    # so this already-accepted gap in the verify-then-revise design is minor
+    # here.
+    last_verify_response = ""
+    # Flat, one-entry-per-hit list backing the [N] citations the model
+    # actually writes in its answer -- NOT the same as evidence_log above,
+    # which holds one entry per TOOL CALL (each internally containing
+    # possibly several hits) for verify_answer's own content-based fact-
+    # checking, which never needed numeric alignment with the answer's own
+    # citations. Only mailarchive/evolution search hits are ever numbered at
+    # all (see the shared dispatch branch below) -- every other tool
+    # (fetch_draft_text, search_wg_minutes, get_iesg_ballot_comments, ...)
+    # returns unnumbered text the model can quote but never bracket-cite, so
+    # there is nothing to track here for those.
+    numbered_evidence: list[dict] = []
 
     def _mentions_revision_pair(text: str, from_rev: str, to_rev: str) -> bool:
         def mentions(rev: str) -> bool:
@@ -2245,6 +2315,10 @@ def ask(
         final = _finalize_answer(content)
         if usage is not None:
             usage.append(_summarize_usage(usage_log))
+        if claim_labels is not None:
+            claim_labels.update(_parse_claim_labels(last_verify_response))
+        if evidence is not None:
+            evidence.extend(numbered_evidence)
         return final
 
     def _run_tool_call(tool_name: str, args: dict, iteration: int, forced: bool = False) -> str:
@@ -2301,6 +2375,7 @@ def ask(
         # ruff's FURB154 wants these merged, which would violate E501 instead.
         nonlocal mailarchive_called, last_evolution_call, verify_called, discovery_called  # noqa: FURB154
         nonlocal evolution_dataset_id_candidate, mailarchive_dataset_id_candidate
+        nonlocal last_verify_response
 
         if tool_name == discovery_tool_name:
             discovery_called = True
@@ -2333,15 +2408,22 @@ def ask(
                     file=sys.stderr,
                 )
             hits = _retrieve(dataset, refined_query, top_k=top_k)
+            # Global, ever-increasing start rather than each call restarting
+            # at 1 -- otherwise "[1]" from this search and "[1]" from an
+            # earlier one would both appear in the model's own answer text
+            # meaning two different things, with nothing to tell them apart.
+            citation_start = len(numbered_evidence) + 1
             if is_mailarchive:
-                observation = _format_hits(hits)
+                observation = _format_hits(hits, start=citation_start)
                 mailarchive_called = True
                 mailarchive_dataset_id_candidate = dataset_id
             else:
-                observation, citations = _format_evolution_hits(hits)
+                observation, citations = _format_evolution_hits(hits, start=citation_start)
                 evolution_citations.extend(citations)
                 last_evolution_call = (refined_query, observation)
                 evolution_dataset_id_candidate = dataset_id
+            kind = "mail" if is_mailarchive else "evolution"
+            numbered_evidence.extend({"text": h, "kind": kind} for h in hits)
             evidence_log.append(observation)
             return observation
 
@@ -2402,7 +2484,8 @@ def ask(
             if verbose:
                 print(f"[iter {iteration}] {tool_name} draft_answer_len={len(draft_answer)}", file=sys.stderr)
             verify_called = True
-            return _verify_answer(draft_answer, evidence_log, model_instance, usage_sink=usage_log)
+            last_verify_response = _verify_answer(draft_answer, evidence_log, model_instance, usage_sink=usage_log)
+            return last_verify_response
 
         if tool_name == minutes_tool_name:
             wg = args.get("wg", "")

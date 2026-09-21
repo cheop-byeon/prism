@@ -1384,6 +1384,8 @@ def main() -> None:
 
                 trace: list[dict] = []
                 usage: list[dict] = []
+                claim_labels: dict[int, str] = {}
+                evidence: list[dict] = []
                 answer = ask_decision_agent(
                     query=query,
                     draft=draft,
@@ -1395,6 +1397,8 @@ def main() -> None:
                     usage=usage,
                     cancel_event=cancel_event,
                     model_tenant_id=model_tenant_id,
+                    claim_labels=claim_labels,
+                    evidence=evidence,
                     **model_kwargs,
                 )
                 usage_summary = usage[0] if usage else None
@@ -1408,6 +1412,8 @@ def main() -> None:
                     usage=usage_summary,
                     model_provider=model_provider,
                     model_name=model_name,
+                    claim_labels=claim_labels,
+                    evidence=evidence,
                 )
                 # _summarize_usage's total_price is a Decimal -- fine for the
                 # DB column above, but the SSE payload below goes through a
@@ -1430,6 +1436,8 @@ def main() -> None:
                     "session_id": session_id,
                     "message_id": message_id,
                     "usage": usage_for_client,
+                    "claim_labels": claim_labels,
+                    "evidence": evidence,
                 }
             finally:
                 _ACTIVE_CANCEL_EVENTS.pop(request_id, None)
