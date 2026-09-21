@@ -1,0 +1,33 @@
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism</title>
+<style>
+  :root {
+    --po-bg: #0c1020; --po-paper: #151b30; --po-soft: #1d2540; --po-ink: #eff1ff;
+    --po-muted: #a5aecb; --po-line: #2d3656; --po-accent: #b5a3ff; --po-tint: #2b2450;
+    --po-purple: #e6a5ff; --po-warn: #dfbf7c; --po-shell: #0e1427; --po-cyan: #69e3e8;
+    --po-serif: Georgia, "Times New Roman", serif;
+    --po-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--po-bg); color: var(--po-ink); font-family: var(--po-sans); height: 100vh; overflow: hidden; }
+  .po-shell { display: flex; height: 100vh; }
+  .po-rail { width: 220px; flex-shrink: 0; background: var(--po-shell); border-right: 1px solid var(--po-line); padding: 18px 14px; }
+  .po-brand { font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+  .po-main { flex: 1; min-width: 0; overflow-y: auto; padding: 30px; }
+</style>
+</head>
+<body>
+<div class="po-shell">
+  <aside class="po-rail">
+    <div class="po-brand">prism</div>
+    <p style="color:var(--po-muted);font-size:12px;">Stage under construction -- serve_ui_spectrum_template.html</p>
+  </aside>
+  <div class="po-main">
+    <p>Placeholder -- real mockup-faithful build in progress.</p>
+  </div>
+</div>
+</body>
+</html>

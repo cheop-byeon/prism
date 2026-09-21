@@ -302,6 +302,15 @@ def _tool_info() -> list[dict]:
 
 _PAGE_HTML = (Path(__file__).parent / "serve_ui_template.html").read_text(encoding="utf-8")
 _LOGIN_PAGE_TEMPLATE = (Path(__file__).parent / "login_template.html").read_text(encoding="utf-8")
+# A separate, from-scratch page following the prism-spectrum mockup's own
+# design system (po-shell/po-rail/po-viewtabs, its own --po-* palette) --
+# deliberately not a variant of _PAGE_HTML, so the two never mix mid-
+# migration (see commit reverting the earlier in-place attempt). Served on
+# its own port (_SPECTRUM_PORT below) rather than a second route on 8765,
+# so it's a genuinely separate page to open side by side, not a mode
+# switch inside the existing one.
+_SPECTRUM_PAGE_HTML = (Path(__file__).parent / "serve_ui_spectrum_template.html").read_text(encoding="utf-8")
+_SPECTRUM_PORT = 8766
 # Resized/re-encoded from the original (1122x1402, 1.7MB) down to ~95KB --
 # this loads on every visit to the login page, unauthenticated, so size
 # matters here in a way it doesn't for the rest of this app.
@@ -388,6 +397,26 @@ def _render_index_page(account) -> str:
     initial = (account.email or "?")[0].upper()
     return (
         _PAGE_HTML.replace("__API_BASE__", api_base)
+        .replace("__CONSOLE_WEB_URL__", console_web_url)
+        .replace("__ACCOUNT_EMAIL__", account.email)
+        .replace("__ACCOUNT_INITIAL__", initial)
+        .replace("__PRISM_URL_PREFIX__", _URL_PREFIX)
+    )
+
+
+def _render_spectrum_page(account) -> str:
+    """Same placeholder-fill as _render_index_page, against
+    _SPECTRUM_PAGE_HTML instead -- kept as a separate function (not a
+    parameter on _render_index_page) since the two pages' placeholder needs
+    are expected to diverge as the spectrum page grows its own account/nav
+    chrome."""
+    from configs import dify_config
+
+    api_base = dify_config.CONSOLE_API_URL or "http://localhost:5001"
+    console_web_url = dify_config.CONSOLE_WEB_URL or "http://localhost:3000"
+    initial = (account.email or "?")[0].upper()
+    return (
+        _SPECTRUM_PAGE_HTML.replace("__API_BASE__", api_base)
         .replace("__CONSOLE_WEB_URL__", console_web_url)
         .replace("__ACCOUNT_EMAIL__", account.email)
         .replace("__ACCOUNT_INITIAL__", initial)
@@ -608,6 +637,12 @@ def main() -> None:
 
     @app.route(f"{_URL_PREFIX}/", methods=["GET"])
     def index():
+        # Same app/routes bound to two ports (see main()) -- request.host
+        # carries whichever port the browser actually connected to, so this
+        # is the one place the two pages fork, rather than duplicating every
+        # /api/* route under a second prefix.
+        if request.host.endswith(f":{_SPECTRUM_PORT}"):
+            return _render_spectrum_page(g.account)
         return _render_index_page(g.account)
 
     @app.route(f"{_URL_PREFIX}/api/models", methods=["GET"])
@@ -1655,6 +1690,19 @@ def main() -> None:
             return decision_thread(draft, query, on_event=on_event)
 
         return _sse_stream(app, work)
+
+    print(f"Prism spectrum UI running -- open http://0.0.0.0:{_SPECTRUM_PORT}/ in your browser")
+    # Same app object, same route table (including every /api/* route) bound
+    # to a second port in its own thread -- index() (above) is the only
+    # place that forks behavior between the two, by which port the request
+    # actually arrived on. This avoids standing up a second process, a
+    # second set of route registrations, or any cross-origin/CORS concern
+    # between the two pages, since each port serves its own page and APIs
+    # from the same origin.
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=_SPECTRUM_PORT, debug=False, threaded=True),
+        daemon=True,
+    ).start()
 
     print("Decision Rationale Agent UI running -- open http://0.0.0.0:8765/ in your browser")
     # threaded=True: an open SSE stream (ask/decision-thread) holds its
