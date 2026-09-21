@@ -54,14 +54,36 @@
     font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--po-muted);
     margin: 20px 4px 8px;
   }
+  input[type=text].po-sessionsearch {
+    width: 100%; background: var(--po-soft); border: 1px solid var(--po-line); color: var(--po-ink);
+    border-radius: 7px; padding: 6px 9px; font-size: 12px; font-family: inherit; margin-bottom: 6px;
+  }
+  .po-sessionsearch:focus-visible { outline: none; border-color: var(--po-accent); }
   .po-sessionlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
   .po-saved {
-    display: block; width: 100%; text-align: left; background: transparent; border: none;
-    border-radius: 7px; padding: 8px 10px; color: var(--po-ink); font-size: 12px;
+    display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: transparent;
+    border: none; border-radius: 7px; padding: 8px 10px; color: var(--po-ink); font-size: 12px; cursor: pointer;
   }
   .po-saved:hover { background: var(--po-soft); }
   .po-saved.active { background: var(--po-tint); }
   .po-saved small { display: block; color: var(--po-muted); font-size: 10px; margin-top: 2px; }
+  .po-saved-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .po-saved-rename, .po-saved-delete {
+    flex-shrink: 0; opacity: 0; background: transparent; border: none; color: var(--po-muted);
+    padding: 2px 4px; font-size: 11px;
+  }
+  .po-saved:hover .po-saved-rename, .po-saved:hover .po-saved-delete { opacity: 1; }
+  .po-saved-rename:hover { color: var(--po-ink); }
+  .po-saved-delete:hover { color: var(--po-warn); }
+  .po-rename-input {
+    flex: 1; min-width: 0; background: var(--po-paper); border: 1px solid var(--po-accent); color: var(--po-ink);
+    font-size: 12px; padding: 2px 4px; border-radius: 5px; font-family: inherit;
+  }
+  .po-loadmore {
+    width: 100%; background: transparent; color: var(--po-muted); border: 1px dashed var(--po-line);
+    font-size: 11px; padding: 6px; margin-top: 4px; border-radius: 7px;
+  }
+  .po-loadmore:hover { color: var(--po-ink); border-color: var(--po-muted); }
   .po-profile { display: flex; align-items: center; gap: 8px; padding: 10px 4px 0; border-top: 1px solid var(--po-line); margin-top: 10px; }
   .po-avatar {
     width: 26px; height: 26px; border-radius: 50%; background: var(--po-accent); color: var(--po-shell);
@@ -217,6 +239,16 @@
   .po-q { font-size: 15px; color: var(--po-muted); margin-bottom: 10px; }
   .po-q strong { color: var(--po-ink); }
   .po-error { background: var(--po-soft); border: 1px solid var(--po-warn); border-radius: 8px; padding: 12px 14px; color: var(--po-warn); font-size: 13px; }
+  .po-retry { margin-top: 8px; }
+  .po-usagebar { font-size: 11px; color: var(--po-muted); padding: 0 0 6px; min-height: 1em; }
+  .po-turnusage { font-size: 11px; color: var(--po-muted); margin-top: 8px; }
+  .po-feedbackrow { display: flex; gap: 4px; margin-top: 10px; }
+  .po-feedbackbtn, .po-copybtn {
+    background: transparent; border: 1px solid var(--po-line); color: var(--po-muted);
+    padding: 4px 8px; font-size: 12px; border-radius: 6px;
+  }
+  .po-feedbackbtn:hover, .po-copybtn:hover { color: var(--po-ink); border-color: var(--po-muted); }
+  .po-feedbackbtn.active { color: var(--po-accent); border-color: var(--po-accent); background: var(--po-tint); }
 
   /* Decision history -- same lane/chain visualization Track a Decision
      already had (real revision text, real diff links, real discussion
@@ -322,6 +354,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>Archive coverage</button>
     </nav>
     <div class="po-railcaption">Recent investigations</div>
+    <input id="poSessionSearch" type="text" class="po-sessionsearch" placeholder="Search sessions…">
     <div class="po-sessionlist" id="poSessionList"></div>
     <!-- Sources/Usage/RFC Graph/How it Works aren't rebuilt here -- each is
          its own large feature (add-source modals, a full observability
@@ -408,6 +441,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <input id="poQuery" type="text" placeholder="Why was INIT_CWND set to 4?">
         <button id="poAskBtn" class="po-primary" type="button">Ask</button>
       </div>
+      <div class="po-usagebar" id="poUsageBar"></div>
 
       <div class="po-viewtabs" aria-label="Investigation views">
         <button data-view="findings" aria-pressed="true">Findings</button>
@@ -569,8 +603,10 @@ document.getElementById('poNewBtn').addEventListener('click', () => {
   document.getElementById('poConversation').innerHTML = '';
   document.getElementById('poActivityLog').innerHTML = '';
   document.getElementById('poInvestPills').innerHTML = '';
+  document.getElementById('poUsageBar').textContent = '';
   document.getElementById('poInvestTitle').textContent = 'Ask a question about an RFC or draft';
-  loadSessionList();
+  poSessionSearchEl.value = '';
+  loadSessionList({ q: '' });
 });
 
 document.getElementById('poLogoutBtn').addEventListener('click', () => {
@@ -591,7 +627,7 @@ fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
   (data.models || []).forEach((m) => {
     const opt = document.createElement('option');
     opt.value = `${m.provider}|||${m.model}`;
-    opt.textContent = m.label || m.model;
+    opt.textContent = m.byok ? `${m.label} (your key)` : m.label;
     poModelEl.appendChild(opt);
   });
 }).catch(() => {});
@@ -648,30 +684,143 @@ let currentSessionId = null;
 // Archive coverage reads this -- set whenever a live run finishes or a
 // saved session is opened, not persisted anywhere new server-side.
 let lastInvestigation = null;
+const poSessionSearchEl = document.getElementById('poSessionSearch');
+const poSessionListEl = document.getElementById('poSessionList');
+let sessionListCursor = null;
 
-function loadSessionList() {
-  fetch(`${PRISM_PREFIX}/api/sessions`).then((r) => r.json()).then((data) => {
+function renderSessionRow(s) {
+  return `
+    <div class="po-saved${s.id === currentSessionId ? ' active' : ''}" data-session-id="${escapeHtml(s.id)}">
+      <span class="po-saved-title" data-session-id="${escapeHtml(s.id)}">${escapeHtml(s.title || s.id)}</span>
+      <button class="po-saved-rename" data-rename-id="${escapeHtml(s.id)}" title="Rename">&#9998;</button>
+      <button class="po-saved-delete" data-delete-id="${escapeHtml(s.id)}" title="Delete">&times;</button>
+    </div>`;
+}
+
+// Ported from serve_ui_template.html's loadSessionList/renderSessionList --
+// same q-vs-last_id contract the /api/sessions route already supports, just
+// rendered as po-saved rows instead of session-item ones.
+function loadSessionList(opts) {
+  opts = opts || {};
+  const q = opts.q !== undefined ? opts.q : poSessionSearchEl.value.trim();
+  const params = new URLSearchParams();
+  if (q) {
+    params.set('q', q);
+  } else if (opts.lastId) {
+    params.set('last_id', opts.lastId);
+  }
+  fetch(`${PRISM_PREFIX}/api/sessions?${params}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
     const sessions = data.sessions || [];
-    const listEl = document.getElementById('poSessionList');
-    if (!sessions.length) {
-      listEl.innerHTML = '<p class="corpora-hint" style="font-size:11px;padding:0 6px;">No sessions yet.</p>';
-      return;
+    if (!q && sessions.length) sessionListCursor = sessions[sessions.length - 1].id;
+    const existingLoadMore = poSessionListEl.querySelector('.po-loadmore');
+    if (existingLoadMore) existingLoadMore.remove();
+    if (!sessions.length && !opts.append) {
+      poSessionListEl.innerHTML = `<p class="corpora-hint" style="font-size:11px;padding:0 6px;">${q ? 'No matching sessions.' : 'No sessions yet.'}</p>`;
+    } else if (opts.append) {
+      poSessionListEl.insertAdjacentHTML('beforeend', sessions.map(renderSessionRow).join(''));
+    } else {
+      poSessionListEl.innerHTML = sessions.map(renderSessionRow).join('');
     }
-    listEl.innerHTML = sessions.map((s) => `
-      <button class="po-saved${s.id === currentSessionId ? ' active' : ''}" data-session-id="${escapeHtml(s.id)}">
-        ${escapeHtml(s.title || s.id)}
-      </button>
-    `).join('');
-    listEl.querySelectorAll('.po-saved').forEach((btn) => {
-      btn.addEventListener('click', () => openSession(btn.dataset.sessionId));
-    });
-  }).catch(() => {});
+    if (data.has_more) {
+      poSessionListEl.insertAdjacentHTML('beforeend', '<button type="button" class="po-loadmore">Load more</button>');
+    }
+  }).catch(() => {
+    if (!opts.append) poSessionListEl.innerHTML = '<p class="corpora-hint" style="font-size:11px;padding:0 6px;">Couldn’t load sessions.</p>';
+  });
   // Keeps Workspace's "Continue an investigation" cards in sync with the
   // rail's own list -- every existing call site that refreshes one now
   // refreshes both, rather than needing a second call added everywhere.
-  loadRecentInvestigations();
+  if (!opts.append) loadRecentInvestigations();
 }
 loadSessionList();
+
+let sessionSearchDebounce = null;
+poSessionSearchEl.addEventListener('input', () => {
+  clearTimeout(sessionSearchDebounce);
+  sessionSearchDebounce = setTimeout(() => loadSessionList({ q: poSessionSearchEl.value.trim() }), 300);
+});
+
+// Single delegated handler for the rail list: opening a session, "Load
+// more" pagination, inline rename, and delete -- ported from
+// serve_ui_template.html's sessionListEl click handler.
+poSessionListEl.addEventListener('click', (e) => {
+  const loadMoreBtn = e.target.closest('.po-loadmore');
+  if (loadMoreBtn) {
+    loadSessionList({ lastId: sessionListCursor, append: true });
+    return;
+  }
+  const delBtn = e.target.closest('.po-saved-delete');
+  if (delBtn) {
+    e.stopPropagation();
+    fetch(`${PRISM_PREFIX}/api/sessions/${delBtn.dataset.deleteId}`, { method: 'DELETE' })
+      .catch(() => {})
+      .finally(() => {
+        if (delBtn.dataset.deleteId === currentSessionId) {
+          currentSessionId = null;
+          document.getElementById('poConversation').innerHTML = '';
+          document.getElementById('poUsageBar').textContent = '';
+        }
+        loadSessionList();
+      });
+    return;
+  }
+  const renameBtn = e.target.closest('.po-saved-rename');
+  if (renameBtn) {
+    e.stopPropagation();
+    const id = renameBtn.dataset.renameId;
+    const titleEl = poSessionListEl.querySelector(`.po-saved-title[data-session-id="${id}"]`);
+    if (!titleEl || titleEl.tagName === 'INPUT') return;
+    const previousTitle = titleEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = previousTitle;
+    input.className = 'po-rename-input';
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      const newName = input.value.trim();
+      if (newName && newName !== previousTitle) {
+        fetch(`${PRISM_PREFIX}/api/sessions/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName }),
+        }).catch(() => {}).finally(() => loadSessionList());
+      } else {
+        loadSessionList();
+      }
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') input.blur();
+      if (ev.key === 'Escape') { committed = true; loadSessionList(); }
+    });
+    input.addEventListener('blur', commit);
+    return;
+  }
+  const item = e.target.closest('.po-saved');
+  if (item) openSession(item.dataset.sessionId);
+});
+
+// -- Running session-total usage bar -- recomputed from whatever
+// .po-turnusage nodes are actually in the DOM right now, not separately
+// tracked state, so it stays correct across session switches/retries.
+function updateSessionUsageBar() {
+  const barEl = document.getElementById('poUsageBar');
+  const nodes = document.getElementById('poConversation').querySelectorAll('.po-turnusage[data-tokens]');
+  if (!nodes.length) { barEl.textContent = ''; return; }
+  let tokens = 0;
+  let price = 0;
+  nodes.forEach((n) => {
+    tokens += Number(n.dataset.tokens) || 0;
+    price += Number(n.dataset.price) || 0;
+  });
+  const priceStr = price ? ` · $${price.toFixed(4)}` : '';
+  barEl.innerHTML = `Session total: ${tokens.toLocaleString()} tokens${priceStr}`;
+}
 
 function openSession(id) {
   fetch(`${PRISM_PREFIX}/api/sessions/${id}`).then((r) => r.json()).then((data) => {
@@ -683,6 +832,7 @@ function openSession(id) {
     const convEl = document.getElementById('poConversation');
     convEl.innerHTML = '';
     (data.turns || []).forEach((t) => convEl.appendChild(renderStaticTurn(t)));
+    updateSessionUsageBar();
     const lastTurn = (data.turns || [])[(data.turns || []).length - 1];
     if (lastTurn) {
       lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
@@ -814,6 +964,68 @@ function renderPlan(steps) {
   `).join('')}</div>`;
 }
 
+// -- Per-turn feedback/copy/usage, ported from serve_ui_template.html's
+// renderFeedback/renderUsage -- same backend (real Dify MessageFeedback via
+// POST /api/messages/<id>/feedback), restyled to po- classes. ------------
+function renderFeedback(messageId, rating, answerText) {
+  if (!messageId) return '';
+  const likeActive = rating === 'like' ? ' active' : '';
+  const dislikeActive = rating === 'dislike' ? ' active' : '';
+  return `
+    <div class="po-feedbackrow" data-message-id="${messageId}">
+      <button class="po-feedbackbtn${likeActive}" data-rating="like" title="Good answer">&#128077;</button>
+      <button class="po-feedbackbtn${dislikeActive}" data-rating="dislike" title="Not good">&#128078;</button>
+      <button class="po-copybtn" data-copy-text="${escapeHtml(answerText || '')}" title="Copy answer">&#128203;</button>
+    </div>`;
+}
+
+function renderUsage(usage) {
+  if (!usage || !usage.total_tokens) return '';
+  const price = usage.total_price || 0;
+  const priceStr = price ? ` · $${price.toFixed(4)}` : '';
+  const latencyStr = usage.latency ? ` · ${usage.latency.toFixed(1)}s` : '';
+  return `<div class="po-turnusage" data-tokens="${usage.total_tokens}" data-price="${price}">`
+    + `${usage.total_tokens.toLocaleString()} tokens${priceStr}${latencyStr}</div>`;
+}
+
+document.getElementById('poConversation').addEventListener('click', (e) => {
+  const copyBtn = e.target.closest('.po-copybtn');
+  if (copyBtn) {
+    const original = copyBtn.innerHTML;
+    navigator.clipboard.writeText(copyBtn.dataset.copyText)
+      .then(() => {
+        copyBtn.innerHTML = '&#10003;';
+        setTimeout(() => { copyBtn.innerHTML = original; }, 1200);
+      })
+      .catch(() => {});
+    return;
+  }
+  const btn = e.target.closest('.po-feedbackbtn');
+  if (!btn) return;
+  const row = btn.closest('.po-feedbackrow');
+  const messageId = row.dataset.messageId;
+  const clearing = btn.classList.contains('active');
+  const rating = clearing ? null : btn.dataset.rating;
+  fetch(`${PRISM_PREFIX}/api/messages/${messageId}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      if (result.error) throw new Error(result.error);
+      row.querySelectorAll('.po-feedbackbtn').forEach((b) => b.classList.remove('active'));
+      if (result.rating) {
+        const activeBtn = row.querySelector(`.po-feedbackbtn[data-rating="${result.rating}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
+      }
+    })
+    .catch(() => {
+      // Leaves the button state as it was before the click -- better than
+      // silently claiming a rating that wasn't actually saved.
+    });
+});
+
 // -- The real research flow, ported from runAgentFlow, restyled ----------
 let activeAskStop = null;
 
@@ -869,6 +1081,17 @@ function runAsk() {
     queryEl.value = '';
   };
 
+  const retryButtonHtml = '<button type="button" class="po-secondary po-retry">Retry</button>';
+  const wireRetryButton = () => {
+    const retryBtn = turn.querySelector('.po-retry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        queryEl.value = query;
+        runAsk();
+      });
+    }
+  };
+
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
@@ -891,7 +1114,10 @@ function runAsk() {
       render(
         `<div class="po-pill">${escapeHtml(scope)}</div>`
         + renderDecisionBrief(msg.data.answer, msg.data.claim_labels)
+        + renderFeedback(msg.data.message_id, null, msg.data.answer)
+        + renderUsage(msg.data.usage)
       );
+      updateSessionUsageBar();
       document.getElementById('poInvestPills').innerHTML = deriveStatusPills(msg.data.answer);
       document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
       lastInvestigation = { query, draft: draftVal, trace: msg.data.trace || [] };
@@ -902,14 +1128,16 @@ function runAsk() {
       stop();
     } else if (msg.type === 'error') {
       if (steps.length) steps[steps.length - 1].status = 'errored';
-      render(`<div class="po-error">${escapeHtml(msg.message)}</div>`);
+      render(`<div class="po-error">${escapeHtml(msg.message)}</div>${retryButtonHtml}`);
+      wireRetryButton();
       stop();
     }
   };
   source.onerror = () => {
     if (finished) return;
     if (steps.length) steps[steps.length - 1].status = 'errored';
-    render('<div class="po-error">Connection lost.</div>');
+    render(`<div class="po-error">Connection lost.</div>${retryButtonHtml}`);
+    wireRetryButton();
     stop();
   };
 }
@@ -942,7 +1170,9 @@ function renderStaticTurn(t) {
   const scope = scopeLabel(t.trace);
   turn.innerHTML = `<div class="po-q"><strong>Q:</strong> ${escapeHtml(t.query)}</div>`
     + `<div class="po-pill">${escapeHtml(scope)}</div>`
-    + renderDecisionBrief(t.answer, t.claim_labels);
+    + renderDecisionBrief(t.answer, t.claim_labels)
+    + renderFeedback(t.message_id, t.feedback || null, t.answer)
+    + renderUsage(t.usage);
   return turn;
 }
 
