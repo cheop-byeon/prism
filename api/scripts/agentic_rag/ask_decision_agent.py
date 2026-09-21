@@ -271,11 +271,13 @@ _MAX_ITERATIONS = 10
 _DEFAULT_MODEL_PROVIDER = "langgenius/openrouter/openrouter"
 _DEFAULT_MODEL_NAME = "google/gemini-2.5-flash"
 
-# Deep Dive tab: a genuinely more thorough pass, not just a different render
-# of the same events -- ask() takes both as optional overrides (see its
-# docstring), so the Ask/Investigate tabs' behavior is completely unaffected.
-_DEEP_DIVE_MAX_ITERATIONS = 20
-_DEEP_DIVE_ADDENDUM = (
+# The single Research entry point: one genuinely thorough pass that decides
+# its own scope, replacing the old Deep Dive/Panorama split -- ask() takes
+# both as optional overrides (see its docstring), so a direct ask() call
+# (eval/battery scripts, the old Ask/Investigate baseline) that omits them
+# is completely unaffected.
+_RESEARCH_MAX_ITERATIONS = 20
+_RESEARCH_ADDENDUM = (
     "Go deeper than usual on this question: don't settle for the first search "
     "result. If evidence looks thin, ambiguous, or contradictory, try at "
     "least one differently-phrased search before concluding there's nothing "
@@ -284,19 +286,11 @@ _DEEP_DIVE_ADDENDUM = (
     "evolution dataset's diff alone, and use diff_ietf_draft_revisions as an "
     "independent second opinion on a change that matters. Prioritize "
     "thoroughness over speed -- more tool calls are fine if they add real "
-    "evidence, not just repetition."
-)
-
-# Panorama tab: a third tier, not a modification of Deep Dive -- Deep Dive
-# stays exactly as it was (verify-one-RFC-deeply), tested and working;
-# Panorama is untested new ground for the opposite direction (find and
-# connect several RFCs), kept as a separate endpoint/addendum specifically
-# so it can be iterated on and even get it wrong without touching Deep
-# Dive's already-working behavior.
-_PANORAMA_MAX_ITERATIONS = 20
-_PANORAMA_ADDENDUM = (
-    "This question is about the WIDER RFC landscape, not just one draft or RFC's own history. "
-    "Proactively use get_rfc_relations, find_related_rfc_family, and search_rfc_corpus_bm25 to "
+    "evidence, not just repetition.\n\n"
+    "Early on, decide for yourself whether this question is scoped to one draft or RFC's own "
+    "history, or whether it's actually about the WIDER RFC landscape -- and proceed accordingly; "
+    "don't assume it's narrow just because it names one draft. When it needs the wider landscape, "
+    "proactively use get_rfc_relations, find_related_rfc_family, and search_rfc_corpus_bm25 to "
     "find other RFCs connected to the one in question -- structurally (obsoletes/updates), by "
     "citation (find_related_rfc_family), and by topic (search_rfc_corpus_bm25, which takes an RFC "
     "number directly as its query and searches using that RFC's own title+abstract). "
@@ -317,8 +311,8 @@ _PANORAMA_ADDENDUM = (
     "thread. So if the central RFCs you found span more than one WG (each add_local_source/"
     "list_available_ietf_corpora result names the WG), pull and search at least one representative "
     "draft from EACH distinct WG before concluding the discussion was narrow -- stopping at the first "
-    "WG that returns a hit, when the question is genuinely cross-WG, understates the very breadth this "
-    "tier exists to find."
+    "WG that returns a hit, when the question is genuinely cross-WG, understates the breadth a "
+    "wide-scope question actually needs."
 )
 
 _ARCHIVE_BASE = "https://www.ietf.org/archive/id/"

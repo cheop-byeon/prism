@@ -62,14 +62,14 @@ from libs.helper import RateLimiter
 # this change doesn't touch at all.
 _ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
 
-# Deep Dive/Panorama are the expensive tiers -- multi-iteration agent loops,
-# each iteration a real LLM call -- unlike Ask/Investigate's single-pass
-# budget. Reuses Dify's own generic Redis sliding-window limiter (already
-# used for things like password-reset throttling) rather than hand-rolling
-# one; keyed per-account now that these routes require real login. 20/hour
-# is a starting guess for a small-team internal tool, not a measured number.
-_DEEP_DIVE_RATE_LIMITER = RateLimiter(prefix="prism_deepdive", max_attempts=20, time_window=3600)
-_PANORAMA_RATE_LIMITER = RateLimiter(prefix="prism_panorama", max_attempts=20, time_window=3600)
+# Research is the single expensive path now -- a multi-iteration agent loop,
+# each iteration a real LLM call, always at the old Deep Dive/Panorama
+# budget (there's no cheaper tier left to fall back to). Reuses Dify's own
+# generic Redis sliding-window limiter (already used for things like
+# password-reset throttling) rather than hand-rolling one; keyed per-account
+# now that this route requires real login. 20/hour is a starting guess for a
+# small-team internal tool, not a measured number.
+_RESEARCH_RATE_LIMITER = RateLimiter(prefix="prism_research", max_attempts=20, time_window=3600)
 
 # Purely a visual grouping -- unlike the old uniform "custom" badge, this
 # actually varies per tool. Descriptions themselves come from
@@ -1324,11 +1324,11 @@ def main() -> None:
         model_provider=None,
         model_name=None,
     ):
-        """Shared body for /api/ask, /api/deep-dive, /api/panorama: resumes
-        (or creates) a Conversation owned by `account`, splices its prior
-        turns in as history, runs the agent, then persists the new turn as
-        a real Message -- so any of the three tiers can continue the same
-        saved conversation, and it's the same account on every message.
+        """Shared body for /api/research: resumes (or creates) a
+        Conversation owned by `account`, splices its prior turns in as
+        history, runs the agent, then persists the new turn as a real
+        Message -- so a session can be continued across multiple asks, and
+        it's the same account on every message.
 
         `account` is a plain argument, not read from flask.g inside work()
         -- flask.g is request-context-scoped, and work() runs in a
@@ -1444,91 +1444,37 @@ def main() -> None:
 
         return work
 
-    @app.route(f"{_URL_PREFIX}/api/ask", methods=["GET"])
-    def api_ask():
-        query = (request.args.get("query") or "").strip()
-        draft = request.args.get("draft") or None
-        session_id = request.args.get("session_id") or None
-        # Investigate is a different live-reasoning render of this same
-        # endpoint, not a separate route -- the tier tag persisted with the
-        # turn still needs to tell the two apart, so the caller passes it.
-        tier = request.args.get("tier") or "ask"
-        if tier not in ("ask", "investigate"):
-            tier = "ask"
-        if not query:
-            return jsonify({"error": "query is required"}), 400
-
-        work = _make_research_work(
-            tier=tier,
-            query=query,
-            draft=draft,
-            session_id=session_id,
-            account=g.account,
-            model_provider=request.args.get("model_provider") or None,
-            model_name=request.args.get("model_name") or None,
-        )
-        return _sse_stream(app, work)
-
-    @app.route(f"{_URL_PREFIX}/api/deep-dive", methods=["GET"])
-    def api_deep_dive():
-        """Same agent/tools/endpoint shape as /api/ask, but a genuinely more
-        thorough pass -- more iterations budgeted, and an addendum telling
-        the model to verify against primary sources and try a second query
-        rather than settle for the first result. Not just a different
-        render of the same events (that's what Investigate already is).
+    @app.route(f"{_URL_PREFIX}/api/research", methods=["GET"])
+    def api_research():
+        """The single research entry point: always the old Deep Dive/
+        Panorama iteration budget, with an addendum that also asks the
+        model to decide for itself, early in the run, whether the question
+        needs the wider RFC landscape -- no separate tier/endpoint for that
+        choice anymore (see _RESEARCH_ADDENDUM in ask_decision_agent.py).
+        The old Ask/Investigate single-pass, no-addendum behavior isn't
+        gone -- it's just ask()'s own default when max_iterations/
+        extra_instruction are omitted, still usable directly from Python
+        (eval/battery scripts) as a baseline, just no longer exposed here.
         """
-        from scripts.agentic_rag.ask_decision_agent import _DEEP_DIVE_ADDENDUM, _DEEP_DIVE_MAX_ITERATIONS
+        from scripts.agentic_rag.ask_decision_agent import _RESEARCH_ADDENDUM, _RESEARCH_MAX_ITERATIONS
 
         query = (request.args.get("query") or "").strip()
         draft = request.args.get("draft") or None
         session_id = request.args.get("session_id") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
-        if _DEEP_DIVE_RATE_LIMITER.is_rate_limited(g.account.id):
-            return jsonify({"error": "Deep Dive rate limit reached -- try again later."}), 429
-        _DEEP_DIVE_RATE_LIMITER.increment_rate_limit(g.account.id)
+        if _RESEARCH_RATE_LIMITER.is_rate_limited(g.account.id):
+            return jsonify({"error": "Research rate limit reached -- try again later."}), 429
+        _RESEARCH_RATE_LIMITER.increment_rate_limit(g.account.id)
 
         work = _make_research_work(
-            tier="deepdive",
+            tier="research",
             query=query,
             draft=draft,
             session_id=session_id,
             account=g.account,
-            max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
-            extra_instruction=_DEEP_DIVE_ADDENDUM,
-            model_provider=request.args.get("model_provider") or None,
-            model_name=request.args.get("model_name") or None,
-        )
-        return _sse_stream(app, work)
-
-    @app.route(f"{_URL_PREFIX}/api/panorama", methods=["GET"])
-    def api_panorama():
-        """Same agent/tools/endpoint shape as /api/ask and /api/deep-dive,
-        but a separate third tier pointed outward at the wider RFC
-        landscape -- deliberately not a modification of Deep Dive (which
-        stays exactly as it was, verified working for single-RFC depth) so
-        this untested new direction (finding and connecting SEVERAL RFCs)
-        can be iterated on independently.
-        """
-        from scripts.agentic_rag.ask_decision_agent import _PANORAMA_ADDENDUM, _PANORAMA_MAX_ITERATIONS
-
-        query = (request.args.get("query") or "").strip()
-        draft = request.args.get("draft") or None
-        session_id = request.args.get("session_id") or None
-        if not query:
-            return jsonify({"error": "query is required"}), 400
-        if _PANORAMA_RATE_LIMITER.is_rate_limited(g.account.id):
-            return jsonify({"error": "Panorama rate limit reached -- try again later."}), 429
-        _PANORAMA_RATE_LIMITER.increment_rate_limit(g.account.id)
-
-        work = _make_research_work(
-            tier="panorama",
-            query=query,
-            draft=draft,
-            session_id=session_id,
-            account=g.account,
-            max_iterations=_PANORAMA_MAX_ITERATIONS,
-            extra_instruction=_PANORAMA_ADDENDUM,
+            max_iterations=_RESEARCH_MAX_ITERATIONS,
+            extra_instruction=_RESEARCH_ADDENDUM,
             model_provider=request.args.get("model_provider") or None,
             model_name=request.args.get("model_name") or None,
         )
