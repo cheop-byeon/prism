@@ -4,30 +4,596 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prism</title>
 <style>
+  /* Prismatic palette, dark-only (this app has no light mode), taken
+     directly from the prism-spectrum mockup's own --po-* names and dark
+     values -- not translated into a different app's token names, per the
+     explicit direction to build this as its own page, not a migration of
+     the old one. */
   :root {
     --po-bg: #0c1020; --po-paper: #151b30; --po-soft: #1d2540; --po-ink: #eff1ff;
     --po-muted: #a5aecb; --po-line: #2d3656; --po-accent: #b5a3ff; --po-tint: #2b2450;
     --po-purple: #e6a5ff; --po-warn: #dfbf7c; --po-shell: #0e1427; --po-cyan: #69e3e8;
+    --po-added: #5fd6a3; --po-added-bg: #16332a; --po-modified: #f0bf6c; --po-modified-bg: #3a2f16;
     --po-serif: Georgia, "Times New Roman", serif;
     --po-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --po-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--po-bg); color: var(--po-ink); font-family: var(--po-sans); height: 100vh; overflow: hidden; }
+  body {
+    margin: 0; background: var(--po-bg); color: var(--po-ink); font-family: var(--po-sans);
+    height: 100vh; overflow: hidden; font-size: 14px;
+  }
+  button, input, select, textarea { font-family: inherit; color: inherit; }
+  button { cursor: pointer; }
+
   .po-shell { display: flex; height: 100vh; }
-  .po-rail { width: 220px; flex-shrink: 0; background: var(--po-shell); border-right: 1px solid var(--po-line); padding: 18px 14px; }
-  .po-brand { font-size: 15px; font-weight: 600; margin-bottom: 20px; }
-  .po-main { flex: 1; min-width: 0; overflow-y: auto; padding: 30px; }
+
+  /* Rail -- brand, one primary action, the 4 workspace pages, then real
+     session continuity (mockup's "PINNED INVESTIGATION" caption/button,
+     extended to a real recent-sessions list since there's no Workspace
+     page with its own "Continue an investigation" cards yet). */
+  .po-rail {
+    width: 232px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--po-shell); border-right: 1px solid var(--po-line); padding: 18px 14px;
+  }
+  .po-brand { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 18px; padding: 0 4px; }
+  .po-new {
+    display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 16px;
+    background: var(--po-tint); color: var(--po-accent); border: 1px solid var(--po-tint);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600;
+  }
+  .po-new:hover { background: var(--po-accent); color: var(--po-shell); }
+  .po-railnav { display: flex; flex-direction: column; gap: 2px; }
+  .po-railnav button {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: transparent;
+    border: none; border-radius: 7px; padding: 9px 10px; font-size: 13px; color: var(--po-muted);
+  }
+  .po-railnav button:hover { color: var(--po-ink); }
+  .po-railnav button[aria-current="page"] { background: var(--po-tint); color: var(--po-accent); }
+  .po-railcaption {
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--po-muted);
+    margin: 20px 4px 8px;
+  }
+  .po-sessionlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .po-saved {
+    display: block; width: 100%; text-align: left; background: transparent; border: none;
+    border-radius: 7px; padding: 8px 10px; color: var(--po-ink); font-size: 12px;
+  }
+  .po-saved:hover { background: var(--po-soft); }
+  .po-saved.active { background: var(--po-tint); }
+  .po-saved small { display: block; color: var(--po-muted); font-size: 10px; margin-top: 2px; }
+  .po-profile { display: flex; align-items: center; gap: 8px; padding: 10px 4px 0; border-top: 1px solid var(--po-line); margin-top: 10px; }
+  .po-avatar {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--po-accent); color: var(--po-shell);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0;
+    border: none;
+  }
+  .po-profile-email { font-size: 11px; color: var(--po-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .po-logout { font-size: 11px; color: var(--po-muted); background: none; border: none; padding: 0; text-decoration: underline; }
+  .po-logout:hover { color: var(--po-ink); }
+
+  /* Main column */
+  .po-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+  .po-top {
+    flex-shrink: 0; padding: 12px 30px; border-bottom: 1px solid var(--po-line);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; color: var(--po-muted);
+  }
+  .po-preview { font-size: 10px; letter-spacing: 0.04em; }
+
+  .po-page { flex: 1; min-height: 0; overflow-y: auto; padding: 30px; max-width: 900px; }
+  .po-page[hidden] { display: none; }
+  .po-eyebrow { color: var(--po-cyan); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .po-title { font: 500 30px/1.2 var(--po-serif); letter-spacing: -0.8px; margin: 10px 0 12px; }
+  .po-subtitle { font-size: 13px; color: var(--po-muted); margin-bottom: 20px; }
+
+  /* Investigation page chrome */
+  .po-context { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
+  .po-context code { background: var(--po-soft); padding: 3px 6px; border-radius: 4px; color: var(--po-ink); font-size: 11px; font-family: var(--po-mono); }
+  .po-invest-title { font: 500 26px/1.3 var(--po-serif); letter-spacing: -0.6px; max-width: 640px; margin-bottom: 12px; }
+  .po-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px;
+    background: var(--po-tint); color: var(--po-accent); font-size: 10px; margin-right: 6px;
+  }
+  .po-pill.po-warn { background: transparent; color: var(--po-warn); padding-left: 0; }
+  .po-viewtabs { display: flex; gap: 22px; border-bottom: 1px solid var(--po-line); margin: 16px 0 20px; flex-wrap: wrap; }
+  .po-viewtabs button { background: transparent; border: none; padding: 0 0 10px; font-size: 12px; color: var(--po-muted); border-bottom: 2px solid transparent; }
+  .po-viewtabs button[aria-pressed="true"] { border-color: var(--po-accent); color: var(--po-accent); }
+
+  /* Composer -- a real Investigations-page composer (the mockup puts this
+     on Workspace, which isn't built yet -- see plan; this is a deliberate
+     temporary bridge so the core research flow is actually usable now). */
+  .po-composer-bar { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+  .po-composer-bar select, .po-composer-bar input[type=text] {
+    background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px;
+    padding: 9px 10px; font-size: 13px; color: var(--po-ink);
+  }
+  .po-composer-bar input[type=text] { flex: 1; min-width: 220px; }
+  .po-primary {
+    background: linear-gradient(110deg, #6350ca, #a18af8); color: #fff; border: none; border-radius: 7px;
+    padding: 9px 16px; font-size: 13px; font-weight: 600;
+  }
+  .po-primary:hover { filter: brightness(1.08); }
+  .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
+  .po-secondary:hover { color: var(--po-ink); border-color: var(--po-muted); }
+
+  /* Live plan / activity steps */
+  .po-plan { margin-bottom: 16px; }
+  .po-planstep { display: flex; gap: 10px; padding: 6px 0; font-size: 12px; color: var(--po-muted); }
+  .po-planstep.done { color: var(--po-ink); }
+  .po-planstep.errored { color: var(--po-warn); }
+  .po-planmarker { width: 14px; flex-shrink: 0; }
+  .po-planreason { color: var(--po-muted); font-size: 11px; margin-top: 2px; }
+  .po-loading { color: var(--po-muted); font-size: 13px; }
+
+  /* Decision brief -- eyebrow + narrative sections, real data from the
+     existing 5-heading agent_skill.md convention (Decision/Rationale/
+     Alternatives/Evolution/Uncertainty), rendered with the mockup's own
+     po-brief/po-claim visual language rather than a plain answer block. */
+  .po-brief { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 26px; }
+  .po-brief-lede { font: 16px/1.7 var(--po-serif); margin: 8px 0 4px; }
+  .po-claim { border-top: 1px solid var(--po-line); margin-top: 18px; padding-top: 16px; }
+  .po-claim h3 { font-size: 12px; font-weight: 600; color: var(--po-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px; }
+  .po-claim p { font: 14px/1.75 var(--po-serif); margin: 0 0 10px; }
+  .po-cite {
+    padding: 1px 5px; border: 1px solid var(--po-line); border-radius: 5px; color: var(--po-accent);
+    background: var(--po-tint); font-size: 10px; font-family: var(--po-sans); white-space: nowrap; margin: 0 2px;
+  }
+  .po-claim-pill { font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 5px; border-radius: 4px; margin-left: 4px; }
+  .po-claim-pill-stated { background: var(--po-added-bg); color: var(--po-added); }
+  .po-claim-pill-inferred { background: var(--po-modified-bg); color: var(--po-modified); }
+  .po-claim-pill-unresolved { background: var(--po-soft); color: var(--po-muted); }
+  .po-gap {
+    display: flex; gap: 10px; padding: 14px; background: var(--po-soft); border-radius: 8px;
+    color: var(--po-muted); font-size: 12px; line-height: 1.6; margin-top: 18px;
+  }
+  .po-gap strong { color: var(--po-ink); display: block; margin-bottom: 3px; font-weight: 500; }
+
+  /* Evidence inspector -- slide-in from the right, same interaction as the
+     mockup's aside but as an overlay (this app's content column isn't a
+     fixed-width grid the way the mockup's Findings page is). */
+  .po-evidence {
+    position: fixed; top: 0; right: 0; width: 340px; height: 100vh; background: var(--po-paper);
+    border-left: 1px solid var(--po-line); padding: 20px; overflow-y: auto; transform: translateX(100%);
+    transition: transform 0.18s ease; z-index: 30;
+  }
+  .po-evidence.open { transform: translateX(0); }
+  .po-evidencehead { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--po-muted); margin-bottom: 14px; }
+  .po-close { background: none; border: none; color: var(--po-muted); font-size: 18px; line-height: 1; padding: 0; }
+  .po-close:hover { color: var(--po-ink); }
+  .po-evidencetitle { font: 500 16px var(--po-serif); margin: 10px 0 4px; }
+  .po-evidencemeta { font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
+  .po-evidenceexcerpt {
+    font: 13px/1.7 var(--po-serif); background: var(--po-soft); border-left: 2px solid var(--po-accent);
+    padding: 10px 12px; margin: 0 0 14px; white-space: pre-wrap;
+  }
+  .po-relation { font-size: 11px; padding: 10px 0; border-top: 1px solid var(--po-line); color: var(--po-muted); }
+  .po-relation strong { display: block; color: var(--po-ink); margin-top: 2px; font-weight: 500; }
+
+  .po-turn { margin-bottom: 30px; }
+  .po-q { font-size: 15px; color: var(--po-muted); margin-bottom: 10px; }
+  .po-q strong { color: var(--po-ink); }
+  .po-error { background: var(--po-soft); border: 1px solid var(--po-warn); border-radius: 8px; padding: 12px 14px; color: var(--po-warn); font-size: 13px; }
+
+  .corpora-hint { color: var(--po-muted); font-size: 13px; line-height: 1.6; }
 </style>
 </head>
 <body>
+<script>const CONSOLE_API_BASE = "__API_BASE__";
+const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 <div class="po-shell">
   <aside class="po-rail">
     <div class="po-brand">prism</div>
-    <p style="color:var(--po-muted);font-size:12px;">Stage under construction -- serve_ui_spectrum_template.html</p>
+    <button id="poNewBtn" class="po-new" type="button">+ New investigation</button>
+    <nav class="po-railnav" aria-label="Workspace">
+      <button data-goto="workspace"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 9l-2 6-6 2 2-6 6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Workspace</button>
+      <button data-goto="document"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Documents</button>
+      <button data-goto="investigation" aria-current="page"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Investigations</button>
+      <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>Archive coverage</button>
+    </nav>
+    <div class="po-railcaption">Recent investigations</div>
+    <div class="po-sessionlist" id="poSessionList"></div>
+    <div class="po-profile">
+      <span class="po-avatar" id="poAvatar">__ACCOUNT_INITIAL__</span>
+      <div style="min-width:0;">
+        <div class="po-profile-email" title="__ACCOUNT_EMAIL__">__ACCOUNT_EMAIL__</div>
+        <button class="po-logout" id="poLogoutBtn" type="button">Log out</button>
+      </div>
+    </div>
   </aside>
+
   <div class="po-main">
-    <p>Placeholder -- real mockup-faithful build in progress.</p>
+    <header class="po-top">
+      <span id="poBreadcrumb">Investigations</span>
+      <span class="po-preview">Prism</span>
+    </header>
+
+    <section class="po-page" data-page="workspace" hidden>
+      <div class="po-eyebrow">Clarity, across decades.</div>
+      <h1 class="po-title">Every protocol.<br>A spectrum of decisions.</h1>
+      <p class="corpora-hint">Workspace landing (composer, continue-an-investigation, reading desk) is not built yet -- ask a question from Investigations for now.</p>
+    </section>
+
+    <section class="po-page" data-page="document" hidden>
+      <div class="po-eyebrow">Reading view</div>
+      <h1 class="po-title">Read the rule.<br>Investigate the reason.</h1>
+      <p class="corpora-hint">Document reading + passage selection is not built yet.</p>
+    </section>
+
+    <!-- Investigations starts as the visible page (not Workspace, per the
+         mockup's own default) since it's the only page with real, working
+         content right now -- the rail's aria-current="page" already points
+         here, so the visible content must match, not default to a stub. -->
+    <section class="po-page" data-page="investigation">
+      <div class="po-context"><code id="poDraftBadge">(let the agent discover)</code><span id="poQuestionBadge"></span></div>
+      <h1 class="po-invest-title" id="poInvestTitle">Ask a question about an RFC or draft</h1>
+
+      <div class="po-composer-bar">
+        <select id="poDraft"><option value="">(let the agent discover)</option></select>
+        <select id="poModel"><option value="">(default model)</option></select>
+        <input id="poQuery" type="text" placeholder="Why was INIT_CWND set to 4?">
+        <button id="poAskBtn" class="po-primary" type="button">Ask</button>
+      </div>
+
+      <div class="po-viewtabs" aria-label="Investigation views">
+        <button data-view="findings" aria-pressed="true">Findings</button>
+        <button data-view="timeline" aria-pressed="false">Decision history</button>
+        <button data-view="activity" aria-pressed="false">Research activity</button>
+      </div>
+
+      <div data-panel="findings">
+        <div id="poConversation"></div>
+      </div>
+      <div data-panel="timeline" hidden>
+        <p class="corpora-hint">Decision history (the existing Track a Decision lane view, re-homed here) is not wired into this page yet.</p>
+      </div>
+      <div data-panel="activity" hidden>
+        <p class="corpora-hint">Research activity for the most recent question appears here once you ask one.</p>
+        <div id="poActivityLog"></div>
+      </div>
+    </section>
+
+    <section class="po-page" data-page="coverage" hidden>
+      <div class="po-eyebrow">Research boundaries</div>
+      <h1 class="po-title">Know what Prism<br>can see.</h1>
+      <p class="corpora-hint">Archive coverage (derived from the last investigation's real trace) is not built yet.</p>
+    </section>
   </div>
 </div>
+
+<aside class="po-evidence" id="poEvidence" aria-label="Evidence inspector">
+  <div class="po-evidencehead">
+    <span>Evidence <span id="poEvidenceNo"></span></span>
+    <button class="po-close" id="poEvidenceClose" type="button" aria-label="Close evidence">&times;</button>
+  </div>
+  <div id="poEvidenceBody"></div>
+</aside>
+
+<script>
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// -- Page + sub-view switching (mockup's go()/view() functions, ported
+// verbatim) --------------------------------------------------------------
+const BREADCRUMBS = {
+  workspace: 'Workspace / Overview', document: 'Documents',
+  investigation: 'Investigations', coverage: 'Archive / Coverage',
+};
+function go(name) {
+  document.querySelectorAll('[data-page]').forEach((p) => { p.hidden = p.dataset.page !== name; });
+  document.getElementById('poBreadcrumb').textContent = BREADCRUMBS[name] || '';
+  document.querySelectorAll('.po-railnav button').forEach((b) => {
+    if (b.dataset.goto === name) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+}
+document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
+
+function view(name) {
+  document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+  document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === name)));
+}
+document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
+
+document.getElementById('poNewBtn').addEventListener('click', () => {
+  go('investigation');
+  currentSessionId = null;
+  document.getElementById('poConversation').innerHTML = '';
+  document.getElementById('poActivityLog').innerHTML = '';
+  loadSessionList();
+});
+
+document.getElementById('poLogoutBtn').addEventListener('click', () => {
+  fetch(`${CONSOLE_API_BASE}/console/api/logout`, { method: 'POST', credentials: 'include' })
+    .finally(() => { window.location.href = `${PRISM_PREFIX}/login`; });
+});
+
+// -- Tool display names (for live step labels) ---------------------------
+let toolDisplayNames = {};
+fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()).then((data) => {
+  (data.tools || []).forEach((t) => { toolDisplayNames[t.name] = t.display_name || t.name; });
+}).catch(() => {});
+function toolLabel(name) { return toolDisplayNames[name] || name; }
+
+// -- Model picker ----------------------------------------------------------
+const poModelEl = document.getElementById('poModel');
+fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
+  (data.models || []).forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = `${m.provider}|||${m.model}`;
+    opt.textContent = m.label || m.model;
+    poModelEl.appendChild(opt);
+  });
+}).catch(() => {});
+
+// -- Draft picker ------------------------------------------------------
+const poDraftEl = document.getElementById('poDraft');
+fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
+  (data.catalog || []).forEach((c) => {
+    if (!c.draft_name) return;
+    const opt = document.createElement('option');
+    opt.value = c.draft_name;
+    opt.textContent = c.draft_name;
+    poDraftEl.appendChild(opt);
+  });
+}).catch(() => {});
+
+// -- Session list (rail) --------------------------------------------------
+let currentSessionId = null;
+
+function loadSessionList() {
+  fetch(`${PRISM_PREFIX}/api/sessions`).then((r) => r.json()).then((data) => {
+    const sessions = data.sessions || [];
+    const listEl = document.getElementById('poSessionList');
+    if (!sessions.length) {
+      listEl.innerHTML = '<p class="corpora-hint" style="font-size:11px;padding:0 6px;">No sessions yet.</p>';
+      return;
+    }
+    listEl.innerHTML = sessions.map((s) => `
+      <button class="po-saved${s.id === currentSessionId ? ' active' : ''}" data-session-id="${escapeHtml(s.id)}">
+        ${escapeHtml(s.title || s.id)}
+      </button>
+    `).join('');
+    listEl.querySelectorAll('.po-saved').forEach((btn) => {
+      btn.addEventListener('click', () => openSession(btn.dataset.sessionId));
+    });
+  }).catch(() => {});
+}
+loadSessionList();
+
+function openSession(id) {
+  fetch(`${PRISM_PREFIX}/api/sessions/${id}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    currentSessionId = data.id;
+    if (data.model_provider && data.model_id) {
+      poModelEl.value = `${data.model_provider}|||${data.model_id}`;
+    }
+    const convEl = document.getElementById('poConversation');
+    convEl.innerHTML = '';
+    (data.turns || []).forEach((t) => convEl.appendChild(renderStaticTurn(t)));
+    go('investigation');
+    view('findings');
+    loadSessionList();
+  }).catch(() => {
+    document.getElementById('poConversation').innerHTML = '<div class="po-error">Couldn’t load that session.</div>';
+  });
+}
+
+// -- Decision-brief rendering, ported from serve_ui_template.html's
+// renderDecisionBrief/renderClaimText, restyled with po-brief/po-claim/
+// po-cite instead of the old app's classes. Same 5-heading convention
+// (Decision/Rationale/Alternatives/Evolution/Uncertainty) since that's the
+// real backend format agent_skill.md already produces -- only the visual
+// presentation is new here, not the answer structure. --------------------
+function renderClaimText(text, claimLabels) {
+  let html = escapeHtml(text);
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  return html.replace(/\[(\d+)\]/g, (whole, n) => {
+    const status = (claimLabels || {})[n];
+    const pillHtml = status ? `<span class="po-claim-pill po-claim-pill-${status}">${status}</span>` : '';
+    return `<button type="button" class="po-cite" data-n="${n}">[${n}]${pillHtml}</button>`;
+  });
+}
+
+const _BRIEF_HEADINGS = ['Decision', 'Rationale', 'Alternatives', 'Evolution', 'Uncertainty'];
+const _BRIEF_HEADING_RE = new RegExp(`\\*\\*(${_BRIEF_HEADINGS.join('|')})\\*\\*:?`, 'g');
+
+function renderDecisionBrief(answerText, claimLabels) {
+  const parts = String(answerText || '').split(_BRIEF_HEADING_RE);
+  let html = '';
+  if (parts.length === 1) {
+    html = `<p class="po-brief-lede">${renderClaimText(answerText, claimLabels)}</p>`;
+  } else {
+    const lede = parts[0].trim();
+    if (lede) html += `<p class="po-brief-lede">${renderClaimText(lede, claimLabels)}</p>`;
+    for (let i = 1; i < parts.length; i += 2) {
+      const body = (parts[i + 1] || '').trim();
+      if (!body) continue;
+      html += `<div class="po-claim"><h3>${escapeHtml(parts[i])}</h3><p>${renderClaimText(body, claimLabels)}</p></div>`;
+    }
+  }
+  return `<div class="po-brief">${html}</div>`;
+}
+
+// -- Evidence inspector ----------------------------------------------------
+const poEvidenceEl = document.getElementById('poEvidence');
+const poEvidenceBodyEl = document.getElementById('poEvidenceBody');
+const poEvidenceNoEl = document.getElementById('poEvidenceNo');
+const EVIDENCE_KIND_LABELS = { mail: 'Mailing-list search', evolution: 'Draft evolution search' };
+
+function openEvidencePanel(n, item) {
+  poEvidenceNoEl.textContent = `/ ${n}`;
+  if (!item) {
+    poEvidenceBodyEl.innerHTML = `<p class="po-evidencemeta">No evidence recorded for citation [${escapeHtml(String(n))}].</p>`;
+  } else {
+    poEvidenceBodyEl.innerHTML = `
+      <div class="po-eyebrow">${escapeHtml(item.label)}</div>
+      <blockquote class="po-evidenceexcerpt">${escapeHtml(item.excerpt || '')}</blockquote>
+      <div class="po-relation">${escapeHtml(item.relation)}</div>
+    `;
+  }
+  poEvidenceEl.classList.add('open');
+}
+document.getElementById('poEvidenceClose').addEventListener('click', () => poEvidenceEl.classList.remove('open'));
+
+document.getElementById('poConversation').addEventListener('click', (e) => {
+  const citeBtn = e.target.closest('.po-cite');
+  if (!citeBtn) return;
+  const turn = citeBtn.closest('.po-turn');
+  const evidenceList = (turn && turn._prismEvidence) || [];
+  const claimLabels = (turn && turn._prismClaimLabels) || {};
+  const n = citeBtn.dataset.n;
+  const raw = evidenceList[parseInt(n, 10) - 1];
+  let item = null;
+  if (raw) {
+    const status = claimLabels[n];
+    item = {
+      label: EVIDENCE_KIND_LABELS[raw.kind] || 'Source',
+      excerpt: raw.text,
+      relation: (status === 'stated' || status === 'inferred') ? 'Supports' : 'Does not establish',
+    };
+  }
+  openEvidencePanel(n, item);
+});
+
+// -- Scope badge (trace-derived, same rule as the main app) ---------------
+const CROSS_WG_TOOLS = new Set(['get_rfc_relations', 'find_related_rfc_family', 'search_rfc_corpus_bm25']);
+function scopeLabel(trace) {
+  const expanded = (trace || []).some((t) => CROSS_WG_TOOLS.has(t.tool));
+  return expanded ? 'Scope: expanded' : 'Scope: this draft';
+}
+
+// -- Live plan / activity rendering ----------------------------------------
+function renderPlan(steps) {
+  if (!steps.length) return '';
+  return `<div class="po-plan">${steps.map((s) => `
+    <div class="po-planstep ${s.status}">
+      <span class="po-planmarker">${s.status === 'done' ? '✓' : (s.status === 'errored' ? '!' : '•')}</span>
+      <div>
+        <div>${escapeHtml(s.title)}${s.forced ? ' <em>(auto)</em>' : ''}</div>
+        ${s.reason ? `<div class="po-planreason">${escapeHtml(s.reason)}</div>` : ''}
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+// -- The real research flow, ported from runAgentFlow, restyled ----------
+let activeAskStop = null;
+
+function runAsk() {
+  const queryEl = document.getElementById('poQuery');
+  const query = queryEl.value.trim();
+  if (!query) return;
+  if (activeAskStop) { activeAskStop(); return; }
+
+  const convEl = document.getElementById('poConversation');
+  const btnEl = document.getElementById('poAskBtn');
+  const turn = document.createElement('div');
+  turn.className = 'po-turn';
+  const draftVal = poDraftEl.value;
+  const qHtml = `<div class="po-q"><strong>Q:</strong> ${escapeHtml(query)}${draftVal ? ` <em>(draft: ${escapeHtml(draftVal)})</em>` : ''}</div>`;
+  document.getElementById('poInvestTitle').textContent = query;
+  document.getElementById('poDraftBadge').textContent = draftVal || '(let the agent discover)';
+
+  const steps = [];
+  let pendingReason = null;
+  let requestId = null;
+  const render = (bodyHtml) => { turn.innerHTML = qHtml + renderPlan(steps) + bodyHtml; };
+
+  render('<div class="po-loading">Starting…</div>');
+  convEl.appendChild(turn);
+  turn.scrollIntoView({ behavior: 'smooth' });
+
+  const params = new URLSearchParams({ query });
+  if (draftVal) params.set('draft', draftVal);
+  if (currentSessionId) params.set('session_id', currentSessionId);
+  if (poModelEl.value) {
+    const [modelProvider, modelName] = poModelEl.value.split('|||');
+    params.set('model_provider', modelProvider);
+    params.set('model_name', modelName);
+  }
+  const source = new EventSource(`${PRISM_PREFIX}/api/research?${params}`);
+  let finished = false;
+  const originalBtnText = btnEl.textContent;
+  btnEl.textContent = 'Stop';
+
+  activeAskStop = () => {
+    if (!requestId) return;
+    btnEl.disabled = true;
+    btnEl.textContent = 'Stopping…';
+    fetch(`${PRISM_PREFIX}/api/research/${requestId}/cancel`, { method: 'POST' }).catch(() => {});
+  };
+  const stop = () => {
+    finished = true;
+    source.close();
+    activeAskStop = null;
+    btnEl.disabled = false;
+    btnEl.textContent = originalBtnText;
+    queryEl.value = '';
+  };
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      if (msg.stage === 'started' && msg.request_id) {
+        requestId = msg.request_id;
+      } else if (msg.stage === 'reasoning' && msg.message) {
+        pendingReason = msg.message;
+      } else if (msg.stage === 'tool_call') {
+        if (steps.length) steps[steps.length - 1].status = 'done';
+        steps.push({ title: toolLabel(msg.tool), reason: pendingReason, status: 'active', forced: msg.forced });
+        pendingReason = null;
+        document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+      }
+      render(steps.length ? '' : '<div class="po-loading">Starting…</div>');
+    } else if (msg.type === 'result') {
+      if (steps.length) steps[steps.length - 1].status = 'done';
+      turn._prismEvidence = msg.data.evidence || [];
+      turn._prismClaimLabels = msg.data.claim_labels || {};
+      const scope = scopeLabel(msg.data.trace);
+      render(
+        `<div class="po-pill">${escapeHtml(scope)}</div>`
+        + renderDecisionBrief(msg.data.answer, msg.data.claim_labels)
+      );
+      document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+      if (msg.data.session_id) {
+        currentSessionId = msg.data.session_id;
+        loadSessionList();
+      }
+      stop();
+    } else if (msg.type === 'error') {
+      if (steps.length) steps[steps.length - 1].status = 'errored';
+      render(`<div class="po-error">${escapeHtml(msg.message)}</div>`);
+      stop();
+    }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    if (steps.length) steps[steps.length - 1].status = 'errored';
+    render('<div class="po-error">Connection lost.</div>');
+    stop();
+  };
+}
+
+document.getElementById('poAskBtn').addEventListener('click', runAsk);
+document.getElementById('poQuery').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !activeAskStop) runAsk();
+});
+
+function renderStaticTurn(t) {
+  const turn = document.createElement('div');
+  turn.className = 'po-turn';
+  turn._prismEvidence = t.evidence || [];
+  turn._prismClaimLabels = t.claim_labels || {};
+  const scope = scopeLabel(t.trace);
+  turn.innerHTML = `<div class="po-q"><strong>Q:</strong> ${escapeHtml(t.query)}</div>`
+    + `<div class="po-pill">${escapeHtml(scope)}</div>`
+    + renderDecisionBrief(t.answer, t.claim_labels);
+  return turn;
+}
+</script>
 </body>
 </html>
