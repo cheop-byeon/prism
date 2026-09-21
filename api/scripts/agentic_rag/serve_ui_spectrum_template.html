@@ -257,6 +257,13 @@
   .po-modal-links a:hover { text-decoration: underline; }
   .po-modal-caveat { font-size: 11px; color: var(--po-muted); padding: 10px 18px; border-top: 1px solid var(--po-line); flex-shrink: 0; }
 
+  /* Archive coverage */
+  .po-context { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--po-muted); margin-bottom: 14px; }
+  .po-coverage-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--po-line); }
+  .po-coverage-row h3 { font-size: 14px; font-weight: 500; margin: 0; }
+  .po-coverage-row p { font-size: 12px; color: var(--po-muted); margin: 5px 0 0; }
+  .po-coverage-row .po-coveragestatus { font-size: 12px; color: var(--po-muted); }
+
   .corpora-hint { color: var(--po-muted); font-size: 13px; line-height: 1.6; }
 </style>
 </head>
@@ -374,7 +381,8 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     <section class="po-page" data-page="coverage" hidden>
       <div class="po-eyebrow">Research boundaries</div>
       <h1 class="po-title">Know what Prism<br>can see.</h1>
-      <p class="corpora-hint">Archive coverage (derived from the last investigation's real trace) is not built yet.</p>
+      <p class="po-subtitle">Coverage belongs beside the findings. Missing evidence should never look like a missing discussion.</p>
+      <div id="poCoverageBody"></div>
     </section>
   </div>
 </div>
@@ -417,6 +425,10 @@ function go(name) {
     if (b.dataset.goto === name) b.setAttribute('aria-current', 'page');
     else b.removeAttribute('aria-current');
   });
+  // renderCoverage is a hoisted function declaration defined further down
+  // -- safe to call here since go() itself only ever runs later, on a user
+  // click, well after the whole script has finished its first pass.
+  if (name === 'coverage') renderCoverage();
 }
 document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
 
@@ -533,6 +545,9 @@ fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
 
 // -- Session list (rail) --------------------------------------------------
 let currentSessionId = null;
+// Archive coverage reads this -- set whenever a live run finishes or a
+// saved session is opened, not persisted anywhere new server-side.
+let lastInvestigation = null;
 
 function loadSessionList() {
   fetch(`${PRISM_PREFIX}/api/sessions`).then((r) => r.json()).then((data) => {
@@ -568,6 +583,8 @@ function openSession(id) {
     const convEl = document.getElementById('poConversation');
     convEl.innerHTML = '';
     (data.turns || []).forEach((t) => convEl.appendChild(renderStaticTurn(t)));
+    const lastTurn = (data.turns || [])[(data.turns || []).length - 1];
+    if (lastTurn) lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
     go('investigation');
     view('findings');
     loadSessionList();
@@ -755,6 +772,7 @@ function runAsk() {
         + renderDecisionBrief(msg.data.answer, msg.data.claim_labels)
       );
       document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+      lastInvestigation = { query, draft: draftVal, trace: msg.data.trace || [] };
       if (msg.data.session_id) {
         currentSessionId = msg.data.session_id;
         loadSessionList();
@@ -941,6 +959,74 @@ poThreadBodyEl.addEventListener('click', (e) => {
     expandBtn.textContent = expanded ? 'Show less' : 'Show more';
   }
 });
+
+// -- Archive coverage -- derived from lastInvestigation's real trace, not
+// hardcoded like the mockup's own 3 rows (its own copy admits those are
+// aspirational: "the working product should expose searched lists..."). No
+// new backend route -- this is a client-side read of trace data already
+// sent to the browser for every completed turn, the same approach the
+// scope badge already uses. --------------------------------------------
+// Real tool names (must match the TOOL_NAME constants in
+// ask_decision_agent.py exactly -- fetch_ietf_draft_text/fetch_ietf_rfc_text,
+// not fetch_draft_text/fetch_rfc_text, caught live: the first version of
+// this used the wrong names and every row silently read "not searched"
+// even for a turn that clearly had searched).
+const COVERAGE_ROWS = [
+  {
+    title: 'This draft or RFC\'s own text', desc: 'The specification text itself',
+    tools: ['fetch_ietf_draft_text', 'fetch_ietf_rfc_text', 'diff_ietf_draft_revisions', 'cite_iddiff_url'],
+  },
+  {
+    title: 'Local-only source', desc: 'Not yet in the real mailarchive/evolution datasets -- pulled and searched locally instead',
+    tools: ['search_local_source', 'add_local_source'],
+  },
+  {
+    title: 'Draft evolution (revision history)', desc: 'What changed across revisions, and when',
+    tools: ['search_ietf_evolution_dataset'],
+  },
+  {
+    title: 'Mailing-list archive', desc: 'Original discussion and responses',
+    tools: ['search_ietf_mailarchive_dataset', 'get_iesg_ballot_comments', 'search_wg_minutes'],
+  },
+  {
+    title: 'Wider RFC landscape', desc: 'Other RFCs connected to this one -- structurally, by citation, or by topic',
+    tools: ['get_rfc_relations', 'find_related_rfc_family', 'search_rfc_corpus_bm25', 'find_similar_rfcs_by_meaning'],
+  },
+];
+
+function renderCoverage() {
+  const bodyEl = document.getElementById('poCoverageBody');
+  if (!lastInvestigation) {
+    bodyEl.innerHTML = '<p class="corpora-hint">Ask a question first -- coverage is shown for your most recent investigation.</p>';
+    return;
+  }
+  const trace = lastInvestigation.trace || [];
+  const rowsHtml = COVERAGE_ROWS.map((row) => {
+    const calls = trace.filter((t) => row.tools.includes(t.tool));
+    const status = calls.length
+      ? `<span class="po-pill">Searched for this question (${calls.length} call${calls.length === 1 ? '' : 's'})</span>`
+      : `<span class="po-coveragestatus">Not searched for this question</span>`;
+    return `
+      <div class="po-coverage-row">
+        <div><h3>${escapeHtml(row.title)}</h3><p>${escapeHtml(row.desc)}</p></div>
+        <div>${status}</div>
+      </div>`;
+  }).join('');
+  bodyEl.innerHTML = `
+    <div class="po-context"><code>${escapeHtml(lastInvestigation.draft || '(let the agent discover)')}</code><span>${escapeHtml(lastInvestigation.query)}</span></div>
+    ${rowsHtml}
+    <div class="po-gap">
+      <div><strong>&ldquo;Not searched&rdquo; is not &ldquo;never discussed.&rdquo;</strong>A row above being empty means the agent judged it unnecessary for this specific question, not that Prism can't see that source -- ask a follow-up if you want it checked directly.</div>
+    </div>
+    <div class="po-actions" style="margin-top:20px;">
+      <button type="button" class="po-primary" id="poCoverageReturnBtn">Return to findings →</button>
+    </div>
+  `;
+  document.getElementById('poCoverageReturnBtn').addEventListener('click', () => {
+    go('investigation');
+    view('findings');
+  });
+}
 </script>
 </body>
 </html>
