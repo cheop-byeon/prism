@@ -1193,14 +1193,25 @@ _SECTION_HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)[ \t]{2,}([A-Z][^\n]{0,78}
 _DOCUMENT_SECTION_MAX_CHARS = 4000
 
 
+def _cap_section_text(text: str) -> tuple[str, bool]:
+    """(possibly-truncated text, was it truncated) -- explicit about a cap
+    having been hit, matching the honesty convention _filter_primary_source_text
+    already uses elsewhere, rather than silently handing back a cut-off
+    section with no indication anything was left out."""
+    if len(text) <= _DOCUMENT_SECTION_MAX_CHARS:
+        return text, False
+    return text[:_DOCUMENT_SECTION_MAX_CHARS], True
+
+
 def _segment_document_text(text: str) -> list[dict]:
-    """Split raw RFC/draft plaintext into {number, title, text} sections on
-    its own numbered headings. Falls back to one whole-document section
-    (no number/title) if nothing matches -- an unusual format, not an
-    error -- rather than returning nothing for a real document."""
+    """Split raw RFC/draft plaintext into {number, title, text, truncated}
+    sections on its own numbered headings. Falls back to one whole-document
+    section (no number/title) if nothing matches -- an unusual format, not
+    an error -- rather than returning nothing for a real document."""
     matches = list(_SECTION_HEADING_RE.finditer(text))
     if not matches:
-        return [{"number": "", "title": "Full text", "text": text[:_DOCUMENT_SECTION_MAX_CHARS]}]
+        capped, truncated = _cap_section_text(text)
+        return [{"number": "", "title": "Full text", "text": capped, "truncated": truncated}]
 
     sections: list[dict] = []
     for i, m in enumerate(matches):
@@ -1209,14 +1220,19 @@ def _segment_document_text(text: str) -> list[dict]:
         body = text[body_start:body_end].strip()
         if not body:
             continue
+        capped, truncated = _cap_section_text(body)
         sections.append(
             {
                 "number": m.group(1).rstrip("."),
                 "title": m.group(2).strip(),
-                "text": body[:_DOCUMENT_SECTION_MAX_CHARS],
+                "text": capped,
+                "truncated": truncated,
             }
         )
-    return sections or [{"number": "", "title": "Full text", "text": text[:_DOCUMENT_SECTION_MAX_CHARS]}]
+    if sections:
+        return sections
+    capped, truncated = _cap_section_text(text)
+    return [{"number": "", "title": "Full text", "text": capped, "truncated": truncated}]
 
 
 def resolve_document_text(hint: str) -> dict | None:

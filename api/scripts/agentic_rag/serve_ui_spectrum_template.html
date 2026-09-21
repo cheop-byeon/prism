@@ -70,6 +70,8 @@
   }
   .po-profile-email { font-size: 11px; color: var(--po-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .po-logout { font-size: 11px; color: var(--po-muted); background: none; border: none; padding: 0; text-decoration: underline; }
+  .po-classiclink { display: block; font-size: 11px; color: var(--po-muted); padding: 8px 6px; text-decoration: none; border-top: 1px solid var(--po-line); margin-top: 8px; }
+  .po-classiclink:hover { color: var(--po-accent); }
   .po-logout:hover { color: var(--po-ink); }
 
   /* Main column */
@@ -257,6 +259,22 @@
   .po-modal-links a:hover { text-decoration: underline; }
   .po-modal-caveat { font-size: 11px; color: var(--po-muted); padding: 10px 18px; border-top: 1px solid var(--po-line); flex-shrink: 0; }
 
+  /* Live-filtered document lookup, shared by Documents' own composer bar
+     and Workspace's "Start from a document" tab. */
+  .po-lookup-wrap { position: relative; }
+  .po-lookup-results {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10;
+    background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 8px; overflow: hidden;
+  }
+  .po-lookup-results button {
+    display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left;
+    padding: 10px 14px; background: none; border: none; border-bottom: 1px solid var(--po-line);
+    font-size: 13px; color: var(--po-ink);
+  }
+  .po-lookup-results button:last-child { border-bottom: none; }
+  .po-lookup-results button:hover { background: var(--po-soft); }
+  .po-lookup-results button small { color: var(--po-muted); font-size: 11px; }
+
   /* Documents (reading view) */
   .po-document { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 26px; margin-top: 22px; }
   .po-toc { font-size: 11px; color: var(--po-muted); }
@@ -298,6 +316,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     </nav>
     <div class="po-railcaption">Recent investigations</div>
     <div class="po-sessionlist" id="poSessionList"></div>
+    <!-- Sources/Usage/RFC Graph/How it Works aren't rebuilt here -- each is
+         its own large feature (add-source modals, a full observability
+         dashboard, a vis-network graph, tool/skill browsers) out of scope
+         for this pass. Linked out to the original page rather than left
+         silently unreachable. -->
+    <a class="po-classiclink" id="poClassicLink" href="#" target="_blank" rel="noopener">Sources, Usage, RFC Graph, How it Works →</a>
     <div class="po-profile">
       <span class="po-avatar" id="poAvatar">__ACCOUNT_INITIAL__</span>
       <div style="min-width:0;">
@@ -335,26 +359,29 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
             <button class="po-primary" type="submit">Investigate</button>
           </div>
         </form>
-        <div class="po-doclookup" hidden>
-          <p class="corpora-hint">Starting from a specific document needs the Documents page, which isn't built yet.</p>
-          <button class="po-secondary" type="button" data-goto="document">Open Documents →</button>
+        <div class="po-doclookup po-lookup-wrap" hidden>
+          <input id="poWorkspaceDocQuery" type="text" placeholder="RFC number, draft name, or topic" autocomplete="off">
+          <div class="po-lookup-results" id="poWorkspaceDocResults" hidden></div>
         </div>
       </div>
 
       <div class="po-sectionhead"><h2>Continue an investigation</h2><small>Your recent sessions</small></div>
       <div id="poRecentList"><p class="corpora-hint">Loading…</p></div>
 
-      <div class="po-sectionhead"><h2>Reading desk</h2></div>
-      <p class="corpora-hint">Recently opened documents will appear here once the Documents page is built.</p>
+      <div class="po-sectionhead"><h2>Reading desk</h2><small>Recently opened documents</small></div>
+      <div id="poReadingDesk"><p class="corpora-hint">Nothing opened yet -- look up a document from Documents to start.</p></div>
     </section>
 
     <section class="po-page" data-page="document" hidden>
       <div class="po-eyebrow">Reading view</div>
       <h1 class="po-title">Read the rule.<br>Investigate the reason.</h1>
       <p class="po-subtitle">Select a passage to make it the starting point of an investigation.</p>
-      <div class="po-composer-bar">
-        <input id="poDocQuery" type="text" placeholder="RFC number or draft name, e.g. RFC 9000 or draft-ietf-quic-transport">
-        <button id="poDocLookupBtn" class="po-primary" type="button">Open</button>
+      <div class="po-lookup-wrap">
+        <div class="po-composer-bar">
+          <input id="poDocQuery" type="text" placeholder="RFC number or draft name, e.g. RFC 9000 or draft-ietf-quic-transport" autocomplete="off">
+          <button id="poDocLookupBtn" class="po-primary" type="button">Open</button>
+        </div>
+        <div class="po-lookup-results" id="poDocResults" hidden></div>
       </div>
       <div id="poDocBody"><p class="corpora-hint">Look up a document above to start reading it.</p></div>
     </section>
@@ -366,6 +393,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     <section class="po-page" data-page="investigation">
       <div class="po-context"><code id="poDraftBadge">(let the agent discover)</code><span id="poQuestionBadge"></span></div>
       <h1 class="po-invest-title" id="poInvestTitle">Ask a question about an RFC or draft</h1>
+      <div id="poInvestPills" style="margin-bottom:14px;"></div>
 
       <div class="po-composer-bar">
         <select id="poDraft"><option value="">(let the agent discover)</option></select>
@@ -382,6 +410,10 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 
       <div data-panel="findings">
         <div id="poConversation"></div>
+        <form class="po-composer-bar" id="poFollowupForm" style="margin-top:16px;">
+          <input id="poFollowupQuery" type="text" placeholder="Ask a follow-up, or challenge a claim…">
+          <button class="po-primary" type="submit">Follow up →</button>
+        </form>
       </div>
       <div data-panel="timeline" hidden>
         <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
@@ -429,6 +461,11 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 </div>
 
 <script>
+// Same host, same PRISM_PREFIX, just the original page's port -- both
+// pages are the same Flask app/routes bound to two ports (see serve_ui.py
+// main()), so this is a real, always-correct link, not a guessed URL.
+document.getElementById('poClassicLink').href = `${location.protocol}//${location.hostname}:8765${PRISM_PREFIX}/`;
+
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
@@ -450,6 +487,7 @@ function go(name) {
   // -- safe to call here since go() itself only ever runs later, on a user
   // click, well after the whole script has finished its first pass.
   if (name === 'coverage') renderCoverage();
+  if (name === 'workspace') renderReadingDesk();
 }
 document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
 
@@ -520,8 +558,11 @@ function loadRecentInvestigations() {
 document.getElementById('poNewBtn').addEventListener('click', () => {
   go('investigation');
   currentSessionId = null;
+  lastInvestigation = null;
   document.getElementById('poConversation').innerHTML = '';
   document.getElementById('poActivityLog').innerHTML = '';
+  document.getElementById('poInvestPills').innerHTML = '';
+  document.getElementById('poInvestTitle').textContent = 'Ask a question about an RFC or draft';
   loadSessionList();
 });
 
@@ -549,11 +590,15 @@ fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
 }).catch(() => {});
 
 // -- Draft pickers (Investigations' own + Decision history's separate
-// one, same catalog fetched once and used to populate both) -------------
+// one) + the raw catalog, fetched once and reused everywhere a document
+// needs to be looked up by name/topic (Documents page, Workspace's
+// "Start from a document" tab) -------------------------------------------
 const poDraftEl = document.getElementById('poDraft');
 const poThreadDraftEl = document.getElementById('poThreadDraft');
+let corporaCatalog = [];
 fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
-  (data.catalog || []).forEach((c) => {
+  corporaCatalog = data.catalog || [];
+  corporaCatalog.forEach((c) => {
     if (!c.draft_name) return;
     [poDraftEl, poThreadDraftEl].forEach((sel) => {
       const opt = document.createElement('option');
@@ -563,6 +608,33 @@ fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
     });
   });
 }).catch(() => {});
+
+// Shared by Documents' own lookup and Workspace's "Start from a document"
+// tab -- matches the mockup's own live-filtered doc-result, just against
+// the real catalog instead of one hardcoded fake entry. A bare RFC number
+// always matches too, even if it's not in the (draft-only) catalog, since
+// /api/document-text can fetch RFC text directly.
+function matchDocuments(hint) {
+  const needle = hint.trim().toLowerCase();
+  if (!needle) return [];
+  const results = corporaCatalog
+    .filter((c) => c.draft_name && (
+      c.draft_name.toLowerCase().includes(needle)
+      || (c.rfc_number && c.rfc_number.includes(needle))
+      || (c.wg && c.wg.toLowerCase().includes(needle))
+    ))
+    .slice(0, 6)
+    .map((c) => ({
+      id: c.draft_name,
+      label: c.draft_name,
+      meta: c.rfc_number ? `RFC ${c.rfc_number}` : (c.wg || ''),
+    }));
+  const bareRfc = needle.replace(/^rfc\s*/, '');
+  if (/^\d+$/.test(bareRfc) && !results.some((r) => r.meta === `RFC ${bareRfc}`)) {
+    results.unshift({ id: `RFC ${bareRfc}`, label: `RFC ${bareRfc}`, meta: 'Specification' });
+  }
+  return results;
+}
 
 // -- Session list (rail) --------------------------------------------------
 let currentSessionId = null;
@@ -605,7 +677,11 @@ function openSession(id) {
     convEl.innerHTML = '';
     (data.turns || []).forEach((t) => convEl.appendChild(renderStaticTurn(t)));
     const lastTurn = (data.turns || [])[(data.turns || []).length - 1];
-    if (lastTurn) lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
+    if (lastTurn) {
+      lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
+      document.getElementById('poInvestTitle').textContent = lastTurn.query;
+      document.getElementById('poInvestPills').innerHTML = deriveStatusPills(lastTurn.answer);
+    }
     go('investigation');
     view('findings');
     loadSessionList();
@@ -634,6 +710,23 @@ function renderClaimText(text, claimLabels) {
 
 const _BRIEF_HEADINGS = ['Decision', 'Rationale', 'Alternatives', 'Evolution', 'Uncertainty'];
 const _BRIEF_HEADING_RE = new RegExp(`\\*\\*(${_BRIEF_HEADINGS.join('|')})\\*\\*:?`, 'g');
+
+// Page-level status pills under the title -- derived from which headings
+// the model actually wrote (evidence-backed, per agent_skill.md, which
+// asks it to omit a heading entirely rather than write "none found"), not
+// the mockup's own fixed example copy ("Specification supported" /
+// "Historical decision not yet established" are that one demo's fake
+// state, not a real signal this app can compute the same way).
+function deriveStatusPills(answerText) {
+  const headings = new Set();
+  let m;
+  const re = new RegExp(_BRIEF_HEADING_RE.source, 'g');
+  while ((m = re.exec(answerText || ''))) headings.add(m[1]);
+  const pills = [];
+  if (headings.has('Decision')) pills.push('<span class="po-pill">Decision identified</span>');
+  if (headings.has('Uncertainty')) pills.push('<span class="po-pill po-warn">Open questions remain</span>');
+  return pills.join('');
+}
 
 function renderDecisionBrief(answerText, claimLabels) {
   const parts = String(answerText || '').split(_BRIEF_HEADING_RE);
@@ -792,6 +885,7 @@ function runAsk() {
         `<div class="po-pill">${escapeHtml(scope)}</div>`
         + renderDecisionBrief(msg.data.answer, msg.data.claim_labels)
       );
+      document.getElementById('poInvestPills').innerHTML = deriveStatusPills(msg.data.answer);
       document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
       lastInvestigation = { query, draft: draftVal, trace: msg.data.trace || [] };
       if (msg.data.session_id) {
@@ -816,6 +910,21 @@ function runAsk() {
 document.getElementById('poAskBtn').addEventListener('click', runAsk);
 document.getElementById('poQuery').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !activeAskStop) runAsk();
+});
+
+// Follow-up form at the bottom of Findings -- just relays into the same
+// runAsk()/currentSessionId flow the main composer uses, so a follow-up
+// genuinely continues the same session rather than being a separate
+// mechanism.
+document.getElementById('poFollowupForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (activeAskStop) return;
+  const followupEl = document.getElementById('poFollowupQuery');
+  const text = followupEl.value.trim();
+  if (!text) return;
+  followupEl.value = '';
+  document.getElementById('poQuery').value = text;
+  runAsk();
 });
 
 function renderStaticTurn(t) {
@@ -1077,6 +1186,7 @@ function renderDocSection(idx) {
       <article class="po-docpaper">
         <h2>${escapeHtml(section.number ? `${section.number}. ${section.title}` : section.title)}</h2>
         ${passagesHtml || '<p class="corpora-hint">No text in this section.</p>'}
+        ${section.truncated ? '<p class="po-tiny">[Section truncated -- long past what fits here. Ask a question about it instead of reading the rest.]</p>' : ''}
         <div class="po-selectionbar" id="poSelectionBar" hidden>
           <span class="po-tiny">Passage selected</span>
           <button type="button" class="po-primary" id="poExplainBtn">Explain this decision →</button>
@@ -1117,6 +1227,47 @@ function renderDocSection(idx) {
   });
 }
 
+// Recently-viewed documents -- per-viewer convenience, not shared state,
+// so localStorage rather than a new backend field/table. Newest first,
+// deduped by doc_id, capped so this can't grow without bound.
+const READING_DESK_KEY = 'prism.readingDesk';
+const READING_DESK_MAX = 8;
+
+function recordReadingDeskEntry(docId, title) {
+  let entries = [];
+  try {
+    entries = JSON.parse(localStorage.getItem(READING_DESK_KEY) || '[]');
+  } catch (e) { entries = []; }
+  entries = entries.filter((e) => e.doc_id !== docId);
+  entries.unshift({ doc_id: docId, title });
+  try {
+    localStorage.setItem(READING_DESK_KEY, JSON.stringify(entries.slice(0, READING_DESK_MAX)));
+  } catch (e) { /* private-window/quota -- Reading desk just won't persist this session, harmless */ }
+}
+
+function renderReadingDesk() {
+  const el = document.getElementById('poReadingDesk');
+  let entries = [];
+  try {
+    entries = JSON.parse(localStorage.getItem(READING_DESK_KEY) || '[]');
+  } catch (e) { entries = []; }
+  if (!entries.length) {
+    el.innerHTML = '<p class="corpora-hint">Nothing opened yet -- look up a document from Documents to start.</p>';
+    return;
+  }
+  el.innerHTML = entries.map((e) => `
+    <button type="button" class="po-recent" data-doc-id="${escapeHtml(e.doc_id)}"><strong>${escapeHtml(e.title)}</strong><small>${escapeHtml(e.doc_id)}</small></button>
+  `).join('');
+  el.querySelectorAll('.po-recent').forEach((b) => {
+    b.addEventListener('click', () => goToDocument(b.dataset.docId));
+  });
+}
+
+function goToDocument(id) {
+  go('document');
+  loadDocument(id);
+}
+
 function loadDocument(hint) {
   const bodyEl = document.getElementById('poDocBody');
   bodyEl.innerHTML = '<p class="po-loading">Looking up…</p>';
@@ -1126,22 +1277,65 @@ function loadDocument(hint) {
       return;
     }
     currentDocument = data;
+    recordReadingDeskEntry(data.doc_id, data.title);
     renderDocSection(0);
   }).catch(() => {
     bodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
   });
 }
 
-document.getElementById('poDocLookupBtn').addEventListener('click', () => {
-  const hint = document.getElementById('poDocQuery').value.trim();
-  if (hint) loadDocument(hint);
-});
-document.getElementById('poDocQuery').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') {
-    const hint = e.target.value.trim();
-    if (hint) loadDocument(hint);
-  }
-});
+// Shared between Documents' own lookup and Workspace's "Start from a
+// document" tab -- live-filters matchDocuments() as the user types
+// (matching the mockup's own live-filtered doc-result), Enter/button opens
+// either the picked result or, failing that, whatever was typed (so a
+// full exact draft name/RFC number still works without picking from the
+// list first).
+function wireDocLookup(inputEl, resultsEl, buttonEl, onSelect) {
+  // buttonEl is optional -- Workspace's compact lookup has no explicit
+  // "Open" button (result-click or Enter only), Documents' own does.
+  const renderResults = () => {
+    const matches = matchDocuments(inputEl.value);
+    if (!matches.length) {
+      resultsEl.hidden = true;
+      return;
+    }
+    resultsEl.innerHTML = matches.map((m) => `
+      <button type="button" data-id="${escapeHtml(m.id)}">${escapeHtml(m.label)}<small>${escapeHtml(m.meta)}</small></button>
+    `).join('');
+    resultsEl.hidden = false;
+    resultsEl.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        inputEl.value = b.dataset.id;
+        resultsEl.hidden = true;
+        onSelect(b.dataset.id);
+      });
+    });
+  };
+  inputEl.addEventListener('input', renderResults);
+  inputEl.addEventListener('focus', renderResults);
+  document.addEventListener('click', (e) => {
+    if (!inputEl.contains(e.target) && !resultsEl.contains(e.target)) resultsEl.hidden = true;
+  });
+  const openTyped = () => {
+    const hint = inputEl.value.trim();
+    if (hint) { resultsEl.hidden = true; onSelect(hint); }
+  };
+  if (buttonEl) buttonEl.addEventListener('click', openTyped);
+  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') openTyped(); });
+}
+
+wireDocLookup(
+  document.getElementById('poDocQuery'),
+  document.getElementById('poDocResults'),
+  document.getElementById('poDocLookupBtn'),
+  (id) => loadDocument(id)
+);
+wireDocLookup(
+  document.getElementById('poWorkspaceDocQuery'),
+  document.getElementById('poWorkspaceDocResults'),
+  null,
+  (id) => goToDocument(id)
+);
 </script>
 </body>
 </html>

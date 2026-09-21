@@ -344,3 +344,15 @@ class TestSegmentDocumentText:
         text = "1.  Introduction\n\n2.  Terminology\n\n   Term text here.\n"
         sections = _segment_document_text(text)
         assert [s["number"] for s in sections] == ["2"]
+
+    def test_oversized_section_is_capped_and_flagged_truncated(self):
+        body = "x" * 5000
+        text = f"1.  Introduction\n\n   {body}\n"
+        sections = _segment_document_text(text)
+        assert sections[0]["truncated"] is True
+        assert len(sections[0]["text"]) == 4000
+
+    def test_normal_sized_section_is_not_flagged_truncated(self):
+        text = "1.  Introduction\n\n   Short body.\n"
+        sections = _segment_document_text(text)
+        assert sections[0]["truncated"] is False
