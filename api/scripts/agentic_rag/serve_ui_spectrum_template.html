@@ -209,6 +209,54 @@
   .po-q strong { color: var(--po-ink); }
   .po-error { background: var(--po-soft); border: 1px solid var(--po-warn); border-radius: 8px; padding: 12px 14px; color: var(--po-warn); font-size: 13px; }
 
+  /* Decision history -- same lane/chain visualization Track a Decision
+     already had (real revision text, real diff links, real discussion
+     links), restyled to the Prismatic palette rather than rebuilt as the
+     mockup's simplified dashed rail -- see plan. */
+  .po-lane { margin: 20px 0 26px; }
+  .po-lanehead { font-family: var(--po-mono); font-size: 12px; color: var(--po-accent); margin-bottom: 10px; }
+  .po-chain { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 0; }
+  .po-dcard {
+    background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 10px;
+    padding: 14px 16px; width: 250px; flex-shrink: 0; display: flex; flex-direction: column;
+  }
+  .po-dcard .po-revlabel { font-family: var(--po-mono); font-size: 13px; font-weight: 600; color: var(--po-ink); }
+  .po-dcard .po-revtag { font-size: 10px; color: var(--po-muted); margin: 1px 0 8px; min-height: 12px; }
+  .po-dcard .po-para { font-size: 12px; line-height: 1.6; color: var(--po-ink); flex: 1; position: relative; }
+  .po-dcard .po-para mark { background: var(--po-modified-bg); color: var(--po-modified); font-weight: 600; padding: 0 2px; border-radius: 3px; }
+  .po-dcard.clamped .po-para { max-height: 200px; overflow: hidden; }
+  .po-dcard.clamped .po-para::after {
+    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 30px;
+    background: linear-gradient(to bottom, transparent, var(--po-soft));
+  }
+  .po-dcard.expanded .po-para { max-height: none; }
+  .po-dcard.expanded .po-para::after { display: none; }
+  .po-expandbtn { align-self: flex-start; margin-top: 8px; background: none; border: none; color: var(--po-accent); font-size: 12px; font-weight: 600; padding: 0; }
+  .po-expandbtn:hover { text-decoration: underline; }
+  .po-arrowgroup { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; width: 96px; padding: 0 4px; align-self: center; }
+  .po-arrowgroup .po-diffpill { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .po-diffpill.added { color: var(--po-added); background: var(--po-added-bg); }
+  .po-diffpill.removed { color: var(--po-warn); background: #3a2220; }
+  .po-diffpill.modified { color: var(--po-modified); background: var(--po-modified-bg); }
+  .po-arrowgroup .po-shaft { color: var(--po-line); }
+  .po-difflink { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--po-accent); text-decoration: none; font-weight: 500; white-space: nowrap; }
+  .po-difflink:hover { text-decoration: underline; }
+  .po-discussbtn { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--po-modified); background: var(--po-modified-bg); border: none; border-radius: 999px; padding: 2px 9px 2px 7px; font-weight: 500; }
+  .po-discussbtn:hover { filter: brightness(1.15); }
+  .po-tailnote { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--po-muted); margin-top: 12px; }
+  .po-tailnote b { color: var(--po-ink); font-family: var(--po-mono); font-weight: 600; }
+
+  .po-modal-overlay { position: fixed; inset: 0; background: rgba(6,7,11,0.6); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 40px; }
+  .po-modal-overlay[hidden] { display: none; }
+  .po-modal-box { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; width: min(600px, 100%); max-height: 80vh; display: flex; flex-direction: column; }
+  .po-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--po-line); flex-shrink: 0; }
+  .po-modal-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--po-modified); font-weight: 600; }
+  .po-modal-body { padding: 16px 18px; overflow-y: auto; font-size: 13px; color: var(--po-ink); line-height: 1.6; white-space: pre-wrap; }
+  .po-modal-links { display: flex; flex-direction: column; gap: 4px; padding: 0 18px 12px; flex-shrink: 0; }
+  .po-modal-links a { font-size: 12px; color: var(--po-accent); text-decoration: none; font-weight: 500; }
+  .po-modal-links a:hover { text-decoration: underline; }
+  .po-modal-caveat { font-size: 11px; color: var(--po-muted); padding: 10px 18px; border-top: 1px solid var(--po-line); flex-shrink: 0; }
+
   .corpora-hint { color: var(--po-muted); font-size: 13px; line-height: 1.6; }
 </style>
 </head>
@@ -308,7 +356,14 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <div id="poConversation"></div>
       </div>
       <div data-panel="timeline" hidden>
-        <p class="corpora-hint">Decision history (the existing Track a Decision lane view, re-homed here) is not wired into this page yet.</p>
+        <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
+        <div class="po-composer-bar">
+          <select id="poThreadDraft"><option value="">(let the agent discover)</option></select>
+          <input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'>
+          <button id="poThreadBtn" class="po-primary" type="button">Track</button>
+        </div>
+        <div id="poThreadStatus" class="po-loading"></div>
+        <div id="poThreadBody"></div>
       </div>
       <div data-panel="activity" hidden>
         <p class="corpora-hint">Research activity for the most recent question appears here once you ask one.</p>
@@ -331,6 +386,18 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
   </div>
   <div id="poEvidenceBody"></div>
 </aside>
+
+<div class="po-modal-overlay" id="poDiscussionModal" hidden>
+  <div class="po-modal-box">
+    <div class="po-modal-head">
+      <span class="po-modal-title" id="poDiscussionModalTitle">Possibly related discussion</span>
+      <button class="po-close" id="poDiscussionModalClose" type="button" aria-label="Close">&times;</button>
+    </div>
+    <div class="po-modal-body" id="poDiscussionModalBody"></div>
+    <div class="po-modal-links" id="poDiscussionModalLinks"></div>
+    <p class="po-modal-caveat">Found via keyword search and an LLM's best-effort judgment -- not a certainty that this is the actual reason for the change.</p>
+  </div>
+</div>
 
 <script>
 function escapeHtml(s) {
@@ -448,15 +515,19 @@ fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
   });
 }).catch(() => {});
 
-// -- Draft picker ------------------------------------------------------
+// -- Draft pickers (Investigations' own + Decision history's separate
+// one, same catalog fetched once and used to populate both) -------------
 const poDraftEl = document.getElementById('poDraft');
+const poThreadDraftEl = document.getElementById('poThreadDraft');
 fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
   (data.catalog || []).forEach((c) => {
     if (!c.draft_name) return;
-    const opt = document.createElement('option');
-    opt.value = c.draft_name;
-    opt.textContent = c.draft_name;
-    poDraftEl.appendChild(opt);
+    [poDraftEl, poThreadDraftEl].forEach((sel) => {
+      const opt = document.createElement('option');
+      opt.value = c.draft_name;
+      opt.textContent = c.draft_name;
+      sel.appendChild(opt);
+    });
   });
 }).catch(() => {});
 
@@ -719,6 +790,157 @@ function renderStaticTurn(t) {
     + renderDecisionBrief(t.answer, t.claim_labels);
   return turn;
 }
+
+// -- Decision history (Track a Decision, ported) --------------------------
+// Same backend (decision_thread(), the deterministic exact-phrase lookup
+// across every revision of one draft) and the same lane/chain visual
+// structure the old app had -- restyled to po- classes, not rebuilt, per
+// the plan's explicit call to keep this real content (revision text, live
+// diff links, resolved discussion links) rather than the mockup's
+// simplified dashed-rail wireframe.
+function highlight(text, needle) {
+  const escapedText = escapeHtml(text);
+  if (!needle) return escapedText;
+  const escapedNeedle = escapeHtml(needle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return escapedText.replace(new RegExp(escapedNeedle, 'ig'), (m) => `<mark>${m}</mark>`);
+}
+function arrowSvg() {
+  return '<svg class="po-shaft" width="76" height="14" viewBox="0 0 80 14" fill="none">'
+    + '<path d="M0 7H76M76 7L69 1M76 7L69 13" stroke="currentColor" stroke-width="1.6"/></svg>';
+}
+function diffIconSvg() {
+  return '<svg width="11" height="11" viewBox="0 0 16 16" fill="none">'
+    + '<path d="M6 2H2v12h12v-4M9 2h5v5M14 2L7 9" stroke="currentColor" stroke-width="1.4" '
+    + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+function chatIconSvg() {
+  return '<svg width="11" height="11" viewBox="0 0 16 16" fill="none">'
+    + '<path d="M2 3h12v8H6l-3 3v-3H2V3z" stroke="currentColor" stroke-width="1.4" '
+    + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+let currentThreadData = null;
+const poThreadStatusEl = document.getElementById('poThreadStatus');
+const poThreadBodyEl = document.getElementById('poThreadBody');
+
+function renderLaneChain(lane, laneIdx, query) {
+  let html = '<div class="po-chain">';
+  lane.nodes.forEach((node, i) => {
+    const isLong = (node.text || '').length > 420;
+    html += `
+      <div class="po-dcard${isLong ? ' clamped' : ''}">
+        <div class="po-revlabel">rev ${escapeHtml(node.rev)}</div>
+        <div class="po-revtag">${i === 0 ? 'earliest matching wording' : '&nbsp;'}</div>
+        <div class="po-para">${highlight(node.text, query)}</div>
+        ${isLong ? '<button class="po-expandbtn" type="button">Show more</button>' : ''}
+      </div>`;
+    if (i < lane.edges.length) {
+      const edge = lane.edges[i];
+      html += `
+        <div class="po-arrowgroup">
+          <span class="po-diffpill ${escapeHtml(edge.type)}">${escapeHtml(edge.type)}</span>
+          ${arrowSvg()}
+          <a class="po-difflink" href="${edge.diff_url}" target="_blank" rel="noopener">${diffIconSvg()} View diff</a>
+          ${edge.has_discussion ? `<button class="po-discussbtn" data-lane="${laneIdx}" data-edge="${i}">${chatIconSvg()} Discussion</button>` : ''}
+        </div>`;
+    }
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderThread(data) {
+  if (!data.lanes.length) {
+    poThreadBodyEl.innerHTML = '<p class="corpora-hint">No revision mentions that phrase. Try a more distinctive quote from the decision text.</p>';
+    return;
+  }
+  let html = '';
+  data.lanes.forEach((lane, laneIdx) => {
+    const lastRev = lane.nodes[lane.nodes.length - 1].rev;
+    html += `
+      <div class="po-lane">
+        <div class="po-lanehead">&sect; ${escapeHtml(lane.section)}${lane.title ? ' &middot; ' + escapeHtml(lane.title) : ''}</div>
+        ${renderLaneChain(lane, laneIdx, data.query)}
+        ${data.rfc_number ? `
+        <p class="po-tailnote">Unchanged from rev ${escapeHtml(lastRev)} through to publication as <b>RFC ${escapeHtml(data.rfc_number)}</b>, unless a later revision rephrased it away from this exact wording.</p>` : ''}
+      </div>`;
+  });
+  poThreadBodyEl.innerHTML = html;
+}
+
+function trackDecision() {
+  const draft = poThreadDraftEl.value;
+  const query = document.getElementById('poThreadQuery').value.trim();
+  if (!query) return;
+
+  poThreadStatusEl.textContent = 'Starting…';
+  poThreadBodyEl.innerHTML = '';
+
+  const params = new URLSearchParams({ query });
+  if (draft) params.set('draft', draft);
+  const source = new EventSource(`${PRISM_PREFIX}/api/decision-thread?${params}`);
+  let finished = false;
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      poThreadStatusEl.textContent = msg.message || 'Working…';
+    } else if (msg.type === 'result') {
+      finished = true;
+      source.close();
+      poThreadStatusEl.textContent = '';
+      currentThreadData = msg.data;
+      renderThread(msg.data);
+    } else if (msg.type === 'error') {
+      finished = true;
+      source.close();
+      poThreadStatusEl.textContent = '';
+      poThreadBodyEl.innerHTML = `<div class="po-error">${escapeHtml(msg.message)}</div>`;
+    }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    finished = true;
+    source.close();
+    poThreadStatusEl.textContent = '';
+    poThreadBodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
+  };
+}
+document.getElementById('poThreadBtn').addEventListener('click', trackDecision);
+document.getElementById('poThreadQuery').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') trackDecision();
+});
+
+const poDiscussionModalEl = document.getElementById('poDiscussionModal');
+function openDiscussionModal(edge) {
+  document.getElementById('poDiscussionModalTitle').textContent = `Possibly related discussion — rev ${edge.from_rev} → rev ${edge.to_rev}`;
+  document.getElementById('poDiscussionModalBody').textContent = edge.discussion;
+  const links = (edge.discussion_links || []).filter((l) => /^https?:\/\//.test(l.url));
+  document.getElementById('poDiscussionModalLinks').innerHTML = links.length
+    ? links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">View original email — ${escapeHtml(l.from)}, ${escapeHtml(l.date)} ↗</a>`).join('')
+    : '';
+  poDiscussionModalEl.hidden = false;
+}
+function closeDiscussionModal() { poDiscussionModalEl.hidden = true; }
+document.getElementById('poDiscussionModalClose').addEventListener('click', closeDiscussionModal);
+poDiscussionModalEl.addEventListener('click', (e) => { if (e.target === poDiscussionModalEl) closeDiscussionModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !poDiscussionModalEl.hidden) closeDiscussionModal(); });
+
+poThreadBodyEl.addEventListener('click', (e) => {
+  const discussBtn = e.target.closest('.po-discussbtn');
+  if (discussBtn && currentThreadData) {
+    const laneIdx = parseInt(discussBtn.dataset.lane, 10);
+    const edgeIdx = parseInt(discussBtn.dataset.edge, 10);
+    openDiscussionModal(currentThreadData.lanes[laneIdx].edges[edgeIdx]);
+    return;
+  }
+  const expandBtn = e.target.closest('.po-expandbtn');
+  if (expandBtn) {
+    const card = expandBtn.closest('.po-dcard');
+    const expanded = card.classList.toggle('expanded');
+    expandBtn.textContent = expanded ? 'Show less' : 'Show more';
+  }
+});
 </script>
 </body>
 </html>
