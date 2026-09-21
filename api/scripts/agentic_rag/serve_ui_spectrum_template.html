@@ -257,6 +257,22 @@
   .po-modal-links a:hover { text-decoration: underline; }
   .po-modal-caveat { font-size: 11px; color: var(--po-muted); padding: 10px 18px; border-top: 1px solid var(--po-line); flex-shrink: 0; }
 
+  /* Documents (reading view) */
+  .po-document { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 26px; margin-top: 22px; }
+  .po-toc { font-size: 11px; color: var(--po-muted); }
+  .po-toc button { display: block; width: 100%; text-align: left; padding: 7px 0; font-size: 11px; color: var(--po-muted); background: none; border: none; }
+  .po-toc button[aria-pressed="true"] { color: var(--po-accent); }
+  .po-docpaper { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 26px; min-width: 0; }
+  .po-docpaper h2 { font: 500 22px var(--po-serif); margin: 6px 0 18px; }
+  .po-passage {
+    display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 12px;
+    background: transparent; border: 0; border-left: 3px solid var(--po-line); border-radius: 0 6px 6px 0;
+    font: 14px/1.8 var(--po-serif); color: var(--po-ink);
+  }
+  .po-passage[aria-pressed="true"] { background: var(--po-tint); border-left-color: var(--po-accent); }
+  .po-selectionbar { margin-top: 8px; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .po-selectionbar[hidden] { display: none; }
+
   /* Archive coverage */
   .po-context { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--po-muted); margin-bottom: 14px; }
   .po-coverage-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--po-line); }
@@ -335,7 +351,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     <section class="po-page" data-page="document" hidden>
       <div class="po-eyebrow">Reading view</div>
       <h1 class="po-title">Read the rule.<br>Investigate the reason.</h1>
-      <p class="corpora-hint">Document reading + passage selection is not built yet.</p>
+      <p class="po-subtitle">Select a passage to make it the starting point of an investigation.</p>
+      <div class="po-composer-bar">
+        <input id="poDocQuery" type="text" placeholder="RFC number or draft name, e.g. RFC 9000 or draft-ietf-quic-transport">
+        <button id="poDocLookupBtn" class="po-primary" type="button">Open</button>
+      </div>
+      <div id="poDocBody"><p class="corpora-hint">Look up a document above to start reading it.</p></div>
     </section>
 
     <!-- Investigations starts as the visible page (not Workspace, per the
@@ -1027,6 +1048,100 @@ function renderCoverage() {
     view('findings');
   });
 }
+
+// -- Documents (reading view + passage selection) -------------------------
+// The one genuinely new page: /api/document-text does the real work
+// (resolve + fetch + segment); everything here is rendering that payload
+// and wiring "Explain this decision" into the exact same runAsk() flow
+// Workspace's composer already uses.
+let currentDocument = null;
+let currentDocSectionIdx = 0;
+let selectedPassageText = null;
+
+function renderDocSection(idx) {
+  currentDocSectionIdx = idx;
+  const section = currentDocument.sections[idx];
+  selectedPassageText = null;
+
+  const tocHtml = currentDocument.sections.map((s, i) => `
+    <button type="button" data-idx="${i}" aria-pressed="${i === idx}">${escapeHtml(s.number ? `${s.number}  ${s.title}` : s.title)}</button>
+  `).join('');
+
+  const paragraphs = section.text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const passagesHtml = paragraphs.map((p) => `<button type="button" class="po-passage">${escapeHtml(p)}</button>`).join('');
+
+  document.getElementById('poDocBody').innerHTML = `
+    <div class="po-context"><code>${escapeHtml(currentDocument.doc_id)}</code><span>${escapeHtml(currentDocument.title)}</span></div>
+    <div class="po-document">
+      <aside class="po-toc" aria-label="Document sections">${tocHtml}</aside>
+      <article class="po-docpaper">
+        <h2>${escapeHtml(section.number ? `${section.number}. ${section.title}` : section.title)}</h2>
+        ${passagesHtml || '<p class="corpora-hint">No text in this section.</p>'}
+        <div class="po-selectionbar" id="poSelectionBar" hidden>
+          <span class="po-tiny">Passage selected</span>
+          <button type="button" class="po-primary" id="poExplainBtn">Explain this decision →</button>
+        </div>
+      </article>
+    </div>
+  `;
+
+  document.querySelectorAll('#poDocBody .po-toc button').forEach((b) => {
+    b.addEventListener('click', () => renderDocSection(parseInt(b.dataset.idx, 10)));
+  });
+  document.querySelectorAll('#poDocBody .po-passage').forEach((b) => {
+    b.addEventListener('click', () => {
+      const wasSelected = b.getAttribute('aria-pressed') === 'true';
+      document.querySelectorAll('#poDocBody .po-passage').forEach((x) => x.setAttribute('aria-pressed', 'false'));
+      const bar = document.getElementById('poSelectionBar');
+      if (wasSelected) {
+        selectedPassageText = null;
+        bar.hidden = true;
+      } else {
+        b.setAttribute('aria-pressed', 'true');
+        selectedPassageText = b.textContent;
+        bar.hidden = false;
+      }
+    });
+  });
+  document.getElementById('poExplainBtn')?.addEventListener('click', () => {
+    if (!selectedPassageText) return;
+    document.getElementById('poQuery').value = `Why does ${currentDocument.doc_id} say: "${selectedPassageText}"`;
+    // Only a draft name is a real <option> in the picker (RFC text's
+    // doc_id, e.g. "RFC 9000", has no matching catalog entry) -- setting
+    // .value to something with no matching option is a harmless no-op,
+    // so this doesn't need its own draft-vs-RFC branch.
+    poDraftEl.value = currentDocument.doc_id;
+    go('investigation');
+    view('findings');
+    runAsk();
+  });
+}
+
+function loadDocument(hint) {
+  const bodyEl = document.getElementById('poDocBody');
+  bodyEl.innerHTML = '<p class="po-loading">Looking up…</p>';
+  fetch(`${PRISM_PREFIX}/api/document-text?q=${encodeURIComponent(hint)}`).then((r) => r.json()).then((data) => {
+    if (data.error) {
+      bodyEl.innerHTML = `<div class="po-error">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+    currentDocument = data;
+    renderDocSection(0);
+  }).catch(() => {
+    bodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
+  });
+}
+
+document.getElementById('poDocLookupBtn').addEventListener('click', () => {
+  const hint = document.getElementById('poDocQuery').value.trim();
+  if (hint) loadDocument(hint);
+});
+document.getElementById('poDocQuery').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    const hint = e.target.value.trim();
+    if (hint) loadDocument(hint);
+  }
+});
 </script>
 </body>
 </html>

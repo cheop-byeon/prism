@@ -12,6 +12,7 @@ from scripts.agentic_rag.ask_decision_agent import (
     _iddiff_page_url,
     _parse_evolution_body,
     _resolve_draft_hint,
+    _segment_document_text,
     _summarize_usage,
     tool_display_name,
 )
@@ -298,3 +299,48 @@ class TestToolDisplayName:
 
     def test_unknown_tool_falls_back_to_the_raw_name(self):
         assert tool_display_name("totally_unknown_tool") == "totally_unknown_tool"
+
+
+class TestSegmentDocumentText:
+    def test_splits_on_flush_left_numbered_headings(self):
+        text = (
+            "5.1.  Connection ID\n\n"
+            "   Each connection possesses a set of connection identifiers.\n\n"
+            "5.2.  Matching Packets to Connections\n\n"
+            "   When a packet is received, it is associated with a connection.\n"
+        )
+        sections = _segment_document_text(text)
+        assert [s["number"] for s in sections] == ["5.1", "5.2"]
+        assert sections[0]["title"] == "Connection ID"
+        assert "Each connection possesses" in sections[0]["text"]
+        assert sections[1]["title"] == "Matching Packets to Connections"
+
+    def test_body_text_stays_with_its_own_section_not_the_next_heading(self):
+        text = "1.  Introduction\n\n   Intro text here.\n\n2.  Terminology\n\n   Term text here.\n"
+        sections = _segment_document_text(text)
+        assert sections[0]["text"] == "Intro text here."
+        assert sections[1]["text"] == "Term text here."
+
+    def test_indented_line_that_looks_like_a_heading_is_not_matched(self):
+        # Body text is indented (IETF plaintext convention); a would-be
+        # heading pattern inside a paragraph shouldn't split it -- only a
+        # genuinely flush-left line counts.
+        text = "1.  Introduction\n\n   See 5.1.  Connection ID for details.\n\n2.  Terminology\n\n   More text.\n"
+        sections = _segment_document_text(text)
+        assert len(sections) == 2
+        assert "See 5.1.  Connection ID for details." in sections[0]["text"]
+
+    def test_no_headings_falls_back_to_one_whole_document_section(self):
+        text = "Just plain prose with no numbered section headings at all.\n"
+        sections = _segment_document_text(text)
+        assert len(sections) == 1
+        assert sections[0]["number"] == ""
+        assert sections[0]["title"] == "Full text"
+        assert sections[0]["text"] == text
+
+    def test_empty_section_body_is_dropped(self):
+        # Two headings back-to-back with nothing between them -- a real
+        # document wouldn't do this, but a malformed/truncated fetch might.
+        text = "1.  Introduction\n\n2.  Terminology\n\n   Term text here.\n"
+        sections = _segment_document_text(text)
+        assert [s["number"] for s in sections] == ["2"]

@@ -1164,6 +1164,98 @@ def _fetch_rfc_text(rfc_number: str, query: str | None) -> str:
     return _filter_primary_source_text(text, query, source_label=f"RFC{number}")
 
 
+def _resolve_latest_draft_revision(draft_name: str) -> str | None:
+    """Live lookup of a draft's current revision number ("09") via the same
+    Datatracker doc-record endpoint _resolve_wg_for_draft already uses --
+    its `rev` field is always the latest, unlike the evolution dataset
+    (which only has whichever revisions happened to get indexed). Returns
+    None on any lookup failure."""
+    import httpx
+
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(f"{_DATATRACKER_BASE}/api/v1/doc/document/{draft_name}/", params={"format": "json"})
+            if resp.status_code != 200:
+                return None
+            return resp.json().get("rev")
+    except httpx.HTTPError:
+        return None
+
+
+# Matches a flush-left "5.1.  Connection ID" style heading line -- IETF
+# plaintext convention indents body text (3 spaces) but never section
+# headings, so requiring no leading whitespace plus the numbered-dot
+# prefix is enough to tell a heading from a normal line without a real
+# document-structure parser. Two+ spaces before the title (also
+# convention) avoids matching a body sentence that happens to start with
+# "5.1 was...".
+_SECTION_HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)[ \t]{2,}([A-Z][^\n]{0,78})[ \t]*$", re.MULTILINE)
+_DOCUMENT_SECTION_MAX_CHARS = 4000
+
+
+def _segment_document_text(text: str) -> list[dict]:
+    """Split raw RFC/draft plaintext into {number, title, text} sections on
+    its own numbered headings. Falls back to one whole-document section
+    (no number/title) if nothing matches -- an unusual format, not an
+    error -- rather than returning nothing for a real document."""
+    matches = list(_SECTION_HEADING_RE.finditer(text))
+    if not matches:
+        return [{"number": "", "title": "Full text", "text": text[:_DOCUMENT_SECTION_MAX_CHARS]}]
+
+    sections: list[dict] = []
+    for i, m in enumerate(matches):
+        body_start = m.end()
+        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[body_start:body_end].strip()
+        if not body:
+            continue
+        sections.append(
+            {
+                "number": m.group(1).rstrip("."),
+                "title": m.group(2).strip(),
+                "text": body[:_DOCUMENT_SECTION_MAX_CHARS],
+            }
+        )
+    return sections or [{"number": "", "title": "Full text", "text": text[:_DOCUMENT_SECTION_MAX_CHARS]}]
+
+
+def resolve_document_text(hint: str) -> dict | None:
+    """The Documents page's one real lookup: given an RFC number, a draft
+    name, or a WG/topic hint, resolve it to a real document (reusing the
+    same catalog + _resolve_draft_hint every other draft-hint resolution
+    in this file already uses) and return its full text, segmented into
+    navigable sections. Returns None if the hint can't be resolved to
+    anything, or the resolved document's text can't be fetched.
+    """
+    bare_rfc = re.sub(r"^rfc\s*", "", hint.strip(), flags=re.IGNORECASE)
+    if bare_rfc.isdigit():
+        text = _http_get_text(f"{_RFC_EDITOR_BASE}rfc{bare_rfc}.txt")
+        if text is None:
+            return None
+        return {
+            "doc_id": f"RFC {bare_rfc}",
+            "title": f"RFC {bare_rfc}",
+            "sections": _segment_document_text(text),
+        }
+
+    _, catalog = _list_available_corpora()
+    entry = _resolve_draft_hint(hint, catalog)
+    if entry is None:
+        return None
+    draft_name = entry["draft_name"]
+    revision = _resolve_latest_draft_revision(draft_name)
+    if revision is None:
+        return None
+    text = _http_get_text(f"{_ARCHIVE_BASE}{draft_name}-{revision}.txt")
+    if text is None:
+        return None
+    return {
+        "doc_id": draft_name,
+        "title": f"{draft_name} (rev {revision})" + (f", RFC {entry['rfc_number']}" if entry.get("rfc_number") else ""),
+        "sections": _segment_document_text(text),
+    }
+
+
 # Where the Sources tab's "Add sources" downloads land (services/ietf_import_service.py
 # download_wg_resource_to_local) -- searched here as plain local files, not a Dify
 # dataset, since these are occasional cross-checks, not a corpus worth indexing.

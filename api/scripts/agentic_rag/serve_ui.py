@@ -733,6 +733,28 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    @app.route(f"{_URL_PREFIX}/api/document-text", methods=["GET"])
+    def api_document_text():
+        """The Documents page's one real backend need: given an RFC number,
+        draft name, or WG/topic hint, fetch that document's real text and
+        return it pre-segmented into sections -- everything else on that
+        page (the lookup itself, passage selection, "Explain this
+        decision") is client-side against this one payload.
+        """
+        from scripts.agentic_rag.ask_decision_agent import resolve_document_text
+
+        hint = (request.args.get("q") or "").strip()
+        if not hint:
+            return jsonify({"error": "q is required"}), 400
+        try:
+            result = resolve_document_text(hint)
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+        if result is None:
+            return jsonify({"error": f"Couldn't find or fetch a document for {hint!r}."}), 404
+        return jsonify(result)
+
     @app.route(f"{_URL_PREFIX}/api/corpora/freshness", methods=["GET"])
     def api_corpora_freshness():
         """Per-corpus live state for the Corpora tab -- what the sidecar/
