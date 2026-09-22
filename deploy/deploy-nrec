@@ -1,0 +1,402 @@
+#!/usr/bin/env bash
+# Deploys Prism (Dify) onto a fresh NREC (OpenStack) VM, end to end, in one
+# script. This is the NREC equivalent of deploy/deploy-azure + deploy/vm-setup
+# combined -- NREC has no CLI here for provisioning the instance itself (that
+# part is manual, via Horizon), so there's nothing to script before the VM
+# exists. Everything that CAN be scripted -- from "freshly booted VM" to
+# "https://<domain> serves the app" -- lives in this one file.
+#
+# Prerequisites (manual, done once, before running this script):
+#   1. Create the instance in NREC's Horizon dashboard, pasting the repo's
+#      root cloud-init.yaml in as the instance's "Customization Script" /
+#      user-data. That handles mounting the big Cinder volume at /data and
+#      pointing Docker's data-root there before Docker's first start.
+#   2. In Horizon -> Project -> Network -> Security Groups, open inbound
+#      TCP 80 and 443 on the security group attached to this instance.
+#      (There's no NREC CLI used in this repo to script this step.)
+#   3. Register a DuckDNS subdomain (duckdns.org, sign in with GitHub/Google,
+#      clear the reCAPTCHA gate first) and point it at this instance's
+#      floating IP. Overwrite the auto-filled IP -- DuckDNS defaults to
+#      whatever IP your own browser is coming from, not the VM's.
+#      NOTE: pick a subdomain that has never been used before. Safe
+#      Browsing / SmartScreen reputation is tied to the hostname STRING,
+#      not to who currently controls it in DuckDNS -- a previously-abused
+#      name stays flagged as "unsafe" no matter what you deploy there.
+#
+# Usage (on the VM, after the above):
+#   deploy/deploy-nrec
+set -euo pipefail
+
+# ---------------------------------------------------------------------------
+# FILL THESE IN before running
+# ---------------------------------------------------------------------------
+REPO_URL="git@github.com:cheop-byeon/dify.git"
+BRANCH="feature/ietf-mailarchive-import"
+DOMAIN="prism-rfc.duckdns.org"          # the DuckDNS name from prerequisite 3
+CERTBOT_EMAIL="jiebi@uio.no"            # Let's Encrypt expiry-notice address
+DATA_DIR="/data"                        # where cloud-init.yaml mounted the big volume
+REPO_DIR="${DATA_DIR}/dify"             # clone HERE, not $HOME -- see note below
+SETUP_OLLAMA=false                      # true only once the fine-tuned embedding
+                                         # model is actually needed; see phase 9
+ADMIN_USER="$(whoami)"
+# ---------------------------------------------------------------------------
+#
+# NOTE on REPO_DIR: the VM's root disk is a small OS-flavor disk (~20GB);
+# the actual data -- Postgres, Weaviate's vector index, downloaded IETF
+# mail/RFC archives, uploaded files -- all live under docker/volumes/
+# relative to wherever this repo is checked out, since docker-compose.yaml
+# bind-mounts them as host paths, not named Docker volumes. Cloning onto
+# /data instead of $HOME puts all of that on the big volume for free.
+
+echo "==> Waiting for cloud-init to finish"
+sudo cloud-init status --wait || true
+
+# ---------------------------------------------------------------------------
+# Phase 1 -- verify cloud-init actually did its job
+#
+# cloud-init.yaml assumes the data disk is /dev/vdb and the login user is
+# "prism"; neither is guaranteed (this VM's real user turned out to be
+# "ubuntu"). Rather than re-guess here, just verify the two things that
+# actually matter -- /data is mounted, and Docker is already pointed at
+# it -- and fail loudly with the fix if not, instead of silently filling
+# up the small OS disk during the build phase below.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Verifying /data is mounted and Docker is using it"
+if ! mountpoint -q "$DATA_DIR"; then
+  echo "ERROR: $DATA_DIR is not a mountpoint. Check 'lsblk' and cloud-init.yaml's DATA_DEV -- it assumes /dev/vdb." >&2
+  exit 1
+fi
+DOCKER_ROOT=$(docker info 2>/dev/null | grep "Docker Root Dir" | awk '{print $NF}')
+if [ "$DOCKER_ROOT" != "${DATA_DIR}/docker" ]; then
+  echo "ERROR: Docker Root Dir is '$DOCKER_ROOT', expected ${DATA_DIR}/docker. Check /etc/docker/daemon.json and restart docker." >&2
+  exit 1
+fi
+if ! groups "$ADMIN_USER" | grep -q docker; then
+  echo "ERROR: $ADMIN_USER is not in the docker group. Run: sudo usermod -aG docker $ADMIN_USER, then log out/in and re-run this script." >&2
+  exit 1
+fi
+echo "    Confirmed: /data mounted, Docker using ${DATA_DIR}/docker, $ADMIN_USER can run docker."
+
+# ---------------------------------------------------------------------------
+# Phase 2 -- this VM's own GitHub access (deploy key)
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Setting up a GitHub deploy key for this VM"
+SSH_KEY="$HOME/.ssh/prism_deploy_key"
+if [ ! -f "$SSH_KEY" ]; then
+  ssh-keygen -t ed25519 -C "$(hostname)" -f "$SSH_KEY" -N ""
+fi
+mkdir -p "$HOME/.ssh"
+if ! grep -q "^Host github.com$" "$HOME/.ssh/config" 2>/dev/null; then
+  cat >> "$HOME/.ssh/config" <<EOF
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ${SSH_KEY}
+  IdentitiesOnly yes
+EOF
+fi
+chmod 600 "$HOME/.ssh/config"
+
+if ! ssh -o StrictHostKeyChecking=accept-new -T git@github.com 2>&1 | grep -q "successfully authenticated"; then
+  echo ""
+  echo "    PAUSE: add this public key as a read-only Deploy Key on your repo"
+  echo "    (GitHub -> repo -> Settings -> Deploy keys -> Add deploy key):"
+  echo ""
+  cat "${SSH_KEY}.pub"
+  echo ""
+  read -rp "    Press Enter once the deploy key is added..." _
+  ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 3 -- clone the repo onto the data disk
+# ---------------------------------------------------------------------------
+echo ""
+if [ -d "$REPO_DIR/.git" ]; then
+  echo "==> $REPO_DIR already exists, pulling latest instead of cloning"
+  git -C "$REPO_DIR" fetch origin
+  git -C "$REPO_DIR" checkout "$BRANCH"
+  git -C "$REPO_DIR" pull --ff-only origin "$BRANCH"
+else
+  echo "==> Cloning $REPO_URL ($BRANCH) into $REPO_DIR"
+  sudo mkdir -p "$DATA_DIR"
+  sudo chown "$ADMIN_USER:$ADMIN_USER" "$DATA_DIR"
+  git clone "$REPO_URL" "$REPO_DIR"
+  git -C "$REPO_DIR" checkout "$BRANCH"
+fi
+cd "$REPO_DIR/docker"
+
+# ---------------------------------------------------------------------------
+# Phase 4 -- docker-compose.override.yaml
+#
+# Gitignored on purpose (it points at fork-specific local image names), so
+# a fresh clone never has it. Unlike a laptop-authored override, this one
+# is written straight for a from-source Linux build -- no Mac-only
+# pre-built .next/standalone step to patch around.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Writing docker-compose.override.yaml"
+cat > docker-compose.override.yaml <<'EOF'
+services:
+  api:
+    image: dify-local-api:dev
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+
+  worker:
+    image: dify-local-api:dev
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+
+  worker_beat:
+    image: dify-local-api:dev
+    build:
+      context: ../api
+      dockerfile: Dockerfile
+
+  web:
+    image: dify-local-web:dev
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+EOF
+
+# ---------------------------------------------------------------------------
+# Phase 5 -- root .dockerignore
+#
+# Without this, building `web` (context = repo root for some builds) tries
+# to tar up the whole repo as build context, including docker/volumes/ --
+# Postgres/Weaviate data and certbot's permission-locked Let's Encrypt
+# keys -- which fails the build outright.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Writing root .dockerignore"
+cat > ../.dockerignore <<'EOF'
+.git
+.gitignore
+docker/volumes/
+.env
+.env.*
+logs
+*.log*
+**/node_modules
+**/dist
+**/build
+**/coverage
+**/.next
+**/.pnpm-store
+.husky
+**/.venv
+**/__pycache__
+**/*.pyc
+.vscode
+.idea
+*.iml
+*.iws
+*.ipr
+EOF
+
+# ---------------------------------------------------------------------------
+# Phase 6 -- .env with generated secrets
+#
+# Leave CONSOLE_API_URL / APP_API_URL / APP_WEB_URL / FILES_URL blank --
+# nginx fronts everything on one origin, and blank (relative URLs) is the
+# correct default for that, not a placeholder waiting to be filled in.
+# ---------------------------------------------------------------------------
+echo ""
+if [ -f .env ]; then
+  echo "==> .env already exists, leaving it as-is"
+else
+  echo "==> Preparing .env"
+  cp .env.example .env
+
+  SECRET_KEY=$(openssl rand -base64 42)
+  DB_PASS=$(openssl rand -hex 16)
+  REDIS_PASS=$(openssl rand -hex 16)
+
+  sed -i "s|^SECRET_KEY=.*|SECRET_KEY=${SECRET_KEY}|" .env
+  sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=${DB_PASS}|" .env
+  sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" .env
+  sed -i "s|^CELERY_BROKER_URL=.*|CELERY_BROKER_URL=redis://:${REDIS_PASS}@redis:6379/1|" .env
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 7 -- storage directory ownership
+#
+# The api/worker containers run as uid 1001 (the "dify" user), not the
+# host's login user. Left at default ownership, the first dataset upload
+# fails with opendal.exceptions.PermissionDenied writing to
+# upload_files/... -- fix it before it's ever hit rather than after.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Fixing docker/volumes/app/storage ownership for the container's uid"
+mkdir -p volumes/app/storage
+sudo chown -R 1001:1001 volumes/app/storage
+
+# ---------------------------------------------------------------------------
+# Phase 8 -- build and start the stack
+#
+# COMPOSE_PROFILES is set in .env as
+# COMPOSE_PROFILES=${VECTOR_STORE:-weaviate},${DB_TYPE:-postgresql} and
+# Compose resolves that fine for a plain `up`/`build` with no --profile
+# flag. Passing --profile on the CLI does NOT merge with .env's
+# COMPOSE_PROFILES, it REPLACES it -- so any command in this script that
+# needs an extra profile (certbot, below) sets COMPOSE_PROFILES as an
+# inline env var instead of using --profile, to keep weaviate/postgresql
+# included alongside it.
+# ---------------------------------------------------------------------------
+COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.override.yaml)
+
+echo ""
+echo "==> Building api, worker, worker_beat, web (several minutes)"
+"${COMPOSE[@]}" build api worker worker_beat web
+
+echo ""
+echo "==> Bringing up the full stack"
+"${COMPOSE[@]}" up -d
+
+echo ""
+echo "==> Waiting for api to be healthy"
+for i in $(seq 1 60); do
+  if "${COMPOSE[@]}" exec -T api curl -sf -m 3 http://localhost:5001/console/api/system-features >/dev/null 2>&1; then
+    echo "    api is up."
+    break
+  fi
+  sleep 3
+done
+
+# ---------------------------------------------------------------------------
+# Phase 9 -- (optional) the fine-tuned embedding model via Ollama
+#
+# Off by default -- this is only needed for the fine-tuned RAG pipeline
+# specifically, not for a basic working Dify instance. Flip SETUP_OLLAMA=true
+# at the top of this script once you actually have the .gguf file staged
+# on this VM at /data/Models/, matching GGUF_FILENAME below.
+# ---------------------------------------------------------------------------
+if [ "$SETUP_OLLAMA" = true ]; then
+  GGUF_FILENAME="rfc-dralign-q8-pooled.gguf"
+  OLLAMA_NUM_THREAD=$(nproc)
+
+  echo ""
+  echo "==> Installing Ollama (listening on all interfaces, models on the data disk)"
+  curl -fsSL https://ollama.com/install.sh | sh
+
+  sudo mkdir -p "${DATA_DIR}/ollama-models"
+  sudo chown ollama:ollama "${DATA_DIR}/ollama-models"
+  sudo mkdir -p /etc/systemd/system/ollama.service.d
+  cat <<EOF | sudo tee /etc/systemd/system/ollama.service.d/override.conf
+[Service]
+Environment="OLLAMA_MODELS=${DATA_DIR}/ollama-models"
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+EOF
+  sudo systemctl daemon-reload
+  sudo systemctl restart ollama
+
+  mkdir -p "${DATA_DIR}/Models"
+  if [ ! -f "${DATA_DIR}/Models/${GGUF_FILENAME}" ]; then
+    echo ""
+    echo "    PAUSE: from your LAPTOP, copy the embedding model over:"
+    echo "      scp ~/Models/${GGUF_FILENAME} ${ADMIN_USER}@<this-vm-ip>:${DATA_DIR}/Models/"
+    echo ""
+    read -rp "    Press Enter once that copy has finished..." _
+  fi
+
+  cat > "${DATA_DIR}/Models/Modelfile" <<EOF
+FROM ${DATA_DIR}/Models/${GGUF_FILENAME}
+PARAMETER num_thread ${OLLAMA_NUM_THREAD}
+EOF
+  ollama create rfc-dralign-q8 -f "${DATA_DIR}/Models/Modelfile"
+
+  echo ""
+  echo "==> Adding host.docker.internal routing to api, worker, plugin_daemon (needed to reach Ollama)"
+  for svc in api worker plugin_daemon; do
+    if ! grep -A5 "^  ${svc}:\$" docker-compose.yaml | grep -q "host.docker.internal:host-gateway"; then
+      LINE=$(grep -n "^  ${svc}:\$" docker-compose.yaml | head -1 | cut -d: -f1)
+      RESTART_LINE=$((LINE + 2))
+      awk -v n="$RESTART_LINE" 'NR==n{print; print "    extra_hosts:"; print "      - \"host.docker.internal:host-gateway\""; next} {print}' \
+        docker-compose.yaml > /tmp/dc.yaml && mv /tmp/dc.yaml docker-compose.yaml
+      echo "    added to ${svc}"
+    fi
+  done
+  "${COMPOSE[@]}" config >/dev/null
+  "${COMPOSE[@]}" up -d --no-deps api worker plugin_daemon
+  echo "    Register it in the console afterward: Settings -> Model Provider -> Ollama,"
+  echo "    base_url http://host.docker.internal:11434, model rfc-dralign-q8 (Text Embedding, 4096 dims)."
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 10 -- domain + HTTPS
+#
+# Two gotchas discovered doing this by hand, both baked in below:
+#   1. Enabling NGINX_HTTPS_ENABLED before the cert exists crash-loops
+#      nginx (it tries to load a cert file that isn't there yet) -- so
+#      HTTPS is only switched on AFTER certbot succeeds, never before.
+#   2. Let's Encrypt's real output filenames (fullchain.pem/privkey.pem)
+#      don't match this compose file's manual-cert defaults
+#      (dify.crt/dify.key) -- both are overridden here.
+# ---------------------------------------------------------------------------
+echo ""
+echo "==> Checking DNS for $DOMAIN"
+RESOLVED_IP=$(dig +short "$DOMAIN" | tail -1)
+THIS_IP=$(curl -sS -4 --max-time 5 https://ifconfig.me || true)
+if [ -z "$RESOLVED_IP" ]; then
+  echo "WARNING: $DOMAIN doesn't resolve yet. Fix the DuckDNS record, then re-run this script -- it's idempotent." >&2
+elif [ -n "$THIS_IP" ] && [ "$RESOLVED_IP" != "$THIS_IP" ]; then
+  echo "WARNING: $DOMAIN resolves to $RESOLVED_IP, but this VM's public IP looks like $THIS_IP. Fix the DuckDNS record before continuing." >&2
+else
+  echo "    $DOMAIN -> $RESOLVED_IP, looks correct."
+fi
+
+sed -i "s|^NGINX_SERVER_NAME=.*|NGINX_SERVER_NAME=${DOMAIN}|" .env
+sed -i "s|^CERTBOT_DOMAIN=.*|CERTBOT_DOMAIN=${DOMAIN}|" .env
+sed -i "s|^CERTBOT_EMAIL=.*|CERTBOT_EMAIL=${CERTBOT_EMAIL}|" .env
+sed -i "s|^NGINX_ENABLE_CERTBOT_CHALLENGE=.*|NGINX_ENABLE_CERTBOT_CHALLENGE=true|" .env
+sed -i "s|^NGINX_SSL_CERT_FILENAME=.*|NGINX_SSL_CERT_FILENAME=fullchain.pem|" .env
+sed -i "s|^NGINX_SSL_CERT_KEY_FILENAME=.*|NGINX_SSL_CERT_KEY_FILENAME=privkey.pem|" .env
+
+echo ""
+echo "==> Starting nginx (challenge route only, HTTPS still off) and certbot"
+COMPOSE_PROFILES="weaviate,postgresql,certbot" "${COMPOSE[@]}" up -d --no-deps --force-recreate nginx certbot
+
+if [ ! -f "volumes/certbot/conf/live/${DOMAIN}/fullchain.pem" ]; then
+  echo ""
+  echo "==> Requesting the Let's Encrypt certificate for $DOMAIN"
+  "${COMPOSE[@]}" exec -T certbot /bin/sh /update-cert.sh
+else
+  echo "    Certificate for $DOMAIN already exists, skipping issuance."
+fi
+
+echo ""
+echo "==> Enabling HTTPS and restarting nginx"
+sed -i "s|^NGINX_HTTPS_ENABLED=.*|NGINX_HTTPS_ENABLED=true|" .env
+COMPOSE_PROFILES="weaviate,postgresql,certbot" "${COMPOSE[@]}" up -d --no-deps --force-recreate nginx
+
+sleep 3
+HTTPS_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "https://${DOMAIN}/install" || echo "000")
+echo ""
+if [ "$HTTPS_CODE" = "200" ]; then
+  echo "==> Done. https://${DOMAIN}/install returned 200."
+else
+  echo "WARNING: https://${DOMAIN}/install returned ${HTTPS_CODE}, not 200. Check: docker compose logs nginx" >&2
+fi
+
+echo ""
+echo "================================================================"
+echo " Next (manual, in the console at https://${DOMAIN}/install):"
+echo "================================================================"
+echo "  1. Create the admin account (first visit only)."
+echo "  2. Settings -> Model Provider: add at least one LLM provider."
+echo "  3. Confirm the 'Import from IETF or GitHub' option appears in"
+echo "     the dataset creation wizard -- the fork-specific feature this"
+echo "     deployment is for."
+echo ""
+echo " Cert renewal (not automated -- run this every ~60 days):"
+echo "   cd ${REPO_DIR}/docker"
+echo "   docker compose exec -T certbot /bin/sh /update-cert.sh"
+echo "   docker compose restart nginx"
+echo ""
+echo " To rebuild after pulling new code: deploy/rebuild"
