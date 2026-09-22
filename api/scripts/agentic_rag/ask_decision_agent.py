@@ -747,7 +747,10 @@ def _judge_lane_discussion(
                 SystemPromptMessage(content=_LANE_DISCUSSION_INSTRUCTION),
                 UserPromptMessage(content="\n".join(prompt_lines)),
             ],
-            model_parameters={"temperature": 0.1, "top_p": 1},
+            # top_p omitted: some model providers (e.g. Anthropic's newer
+            # Claude models) reject a request that sets both temperature
+            # and top_p, and top_p=1 was a no-op default anyway.
+            model_parameters={"temperature": 0.1},
             tools=[],
             stop=[],
             stream=False,
@@ -1586,7 +1589,10 @@ def _verify_answer(
                 )
             ),
         ],
-        model_parameters={"temperature": 0.1, "top_p": 1},
+        # top_p omitted: some model providers (e.g. Anthropic's newer Claude
+        # models) reject a request that sets both temperature and top_p,
+        # and top_p=1 was a no-op default anyway.
+        model_parameters={"temperature": 0.1},
         tools=[],
         stop=[],
         stream=False,
@@ -2509,11 +2515,32 @@ def ask(
             return _finish(f"Cancelled by user after {iteration - 1} step(s).")
         if on_event:
             on_event({"stage": "thinking"})
+        # is_last drops `tools` to [] alone to force a stop, but a weaker
+        # model (confirmed live: Haiku 4.5) can read the empty tool list as
+        # "no results this round" rather than "no tools exist anymore" and
+        # respond with more search narration instead of an answer. Spelling
+        # it out here as an explicit final message removes that ambiguity
+        # rather than relying on every model to infer it from an empty list.
+        call_messages = prompt_messages
+        if is_last:
+            call_messages = [
+                *prompt_messages,
+                UserPromptMessage(
+                    content=(
+                        "You have no more tool calls available -- this is your final turn. "
+                        "Do not describe a search you would run; write your complete answer to "
+                        "the original question now, using only the evidence already gathered above."
+                    )
+                ),
+            ]
         result = _invoke_llm_with_retry(
             model_instance,
             usage_sink=usage_log,
-            prompt_messages=prompt_messages,
-            model_parameters={"temperature": 0.3, "top_p": 1},
+            prompt_messages=call_messages,
+            # top_p omitted: some model providers (e.g. Anthropic's newer
+            # Claude models) reject a request that sets both temperature
+            # and top_p, and top_p=1 was a no-op default anyway.
+            model_parameters={"temperature": 0.3},
             tools=[] if is_last else tools,
             stop=[],
             stream=False,
