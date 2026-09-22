@@ -587,8 +587,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <button class="po-primary" type="submit"><span>+</span>Add source</button>
       </form>
       <div class="po-lookup-results" id="poSourceAddResults" hidden></div>
-      <div id="poSourcesList"><p class="corpora-hint">Loading…</p></div>
+      <!-- Right under the search bar, not after the source list -- that
+           list can run to 40+ cards, and a status message appended after
+           it read as "nothing happened" when Add source was clicked,
+           confirmed live. Always visible, no scrolling required. -->
       <div class="pm-queue" id="poSourceQueue" hidden aria-live="polite"><strong>Download queue</strong><div class="pm-queuetext" id="poSourceQueueText"></div></div>
+      <div id="poSourcesList"><p class="corpora-hint">Loading…</p></div>
     </section>
 
     <section class="po-page" data-page="usage" hidden>
@@ -1959,8 +1963,10 @@ function loadSourcesPage() {
   fetchSources();
 }
 function setSourceQueueText(text) {
-  document.getElementById('poSourceQueue').hidden = false;
+  const queueEl = document.getElementById('poSourceQueue');
+  queueEl.hidden = false;
   document.getElementById('poSourceQueueText').textContent = text;
+  queueEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 function fetchSources() {
   const listEl = document.getElementById('poSourcesList');
@@ -1979,6 +1985,8 @@ function fetchSources() {
     listEl.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
     listEl.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
     listEl.querySelectorAll('[data-wgres-toggle]').forEach((btn) => btn.addEventListener('click', () => toggleWgResources(Number(btn.dataset.wgresToggle))));
+    listEl.querySelectorAll('[data-local-index]').forEach((btn) => btn.addEventListener('click', () => runLocalIndex(btn)));
+    listEl.querySelectorAll('[data-local-embed]').forEach((btn) => btn.addEventListener('click', () => runLocalEmbed(btn)));
   }).catch((err) => {
     listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
   });
@@ -1996,6 +2004,7 @@ function renderSourceGroup(c, idx) {
     </div>`;
   let mailFacet;
   let draftFacet;
+  let indexFacetsHtml = '';
   if (c.is_local) {
     const ls = c.local_status || {};
     const mailMeta = c.wg ? `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}` : 'No WG for this draft';
@@ -2008,6 +2017,40 @@ function renderSourceGroup(c, idx) {
         <strong>Draft revisions</strong>
         <small>${draftMeta}</small>
         <button type="button" class="po-linkbutton" data-local-sync="${escapeHtml(c.draft_name)}">${ls.last_synced_at ? 'Re-sync' : 'Sync'} ↓</button>
+      </div>`;
+    // A local source downloads to disk but stays invisible to the agent's
+    // search_local_source tool until one of these is actually built --
+    // "download only" was never meant to mean "download and stop", but the
+    // first cut of this page only ever wired the download half, dropping
+    // the indexing classic's own local-index-table already has. Real same
+    // backend (POST local-index/local-embedding-index, GET .../status),
+    // not the disabled Extract-text/per-doctype variants that table also
+    // shows -- those aren't functional in classic either.
+    const idxStat = c.index_status || {};
+    const embStat = c.embedding_index_status || { status: 'not_started' };
+    const embRunning = embStat.status === 'queued' || embStat.status === 'running';
+    const sparseLabel = idxStat.built ? 'Rebuild' : 'Build';
+    const sparseMeta = idxStat.error
+      ? `<span class="po-error" style="display:inline;padding:2px 6px;">${escapeHtml(idxStat.error)}</span>`
+      : idxStat.built ? `${idxStat.total_documents} passages indexed` : 'Not indexed -- not searchable by the agent yet';
+    const denseLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild' : 'Build');
+    const denseMeta = embRunning
+      ? escapeHtml(embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…'))
+      : embStat.status === 'error'
+        ? `<span class="po-error" style="display:inline;padding:2px 6px;">${escapeHtml(embStat.message || 'Failed')}</span>`
+        : embStat.status === 'completed' ? 'Embeddings built' : 'Not built -- exact-keyword search only until built';
+    indexFacetsHtml = `
+      <div class="pm-facets">
+        <div class="pm-facet">
+          <strong>Sparse index (BM25)</strong>
+          <small>${sparseMeta}</small>
+          <button type="button" class="po-linkbutton" data-local-index="${escapeHtml(c.draft_name)}">${sparseLabel} index →</button>
+        </div>
+        <div class="pm-facet">
+          <strong>Dense index (embeddings)</strong>
+          <small>${denseMeta}</small>
+          <button type="button" class="po-linkbutton" data-local-embed="${escapeHtml(c.draft_name)}" ${embRunning ? 'disabled' : ''}>${denseLabel} index →</button>
+        </div>
       </div>`;
   } else {
     const ms = c.mail_status || {};
@@ -2049,8 +2092,64 @@ function renderSourceGroup(c, idx) {
         ${pill}
       </div>
       <div class="pm-facets">${specFacet}${mailFacet}${draftFacet}</div>
+      ${indexFacetsHtml}
       ${wgResourcesHtml}
     </div>`;
+}
+function runLocalIndex(btn) {
+  const draftName = btn.dataset.localIndex;
+  btn.disabled = true;
+  btn.textContent = 'Indexing…';
+  setSourceQueueText(`${draftName}: building sparse (BM25) index…`);
+  fetch(`${PRISM_PREFIX}/api/corpora/local-index`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft_name: draftName }),
+  }).then(async (r) => {
+    if (!r.ok) {
+      const result = await r.json().catch(() => ({}));
+      setSourceQueueText(`${draftName}: ${result.error || 'sparse index failed.'}`);
+    } else {
+      setSourceQueueText(`${draftName}: sparse index built.`);
+    }
+    fetchSources();
+  }).catch(() => { setSourceQueueText(`${draftName}: sparse index failed.`); fetchSources(); });
+}
+// The embedding build is fire-and-forget server-side (a Celery task, not a
+// blocking request) -- POST just returns the initial queued/running state,
+// so progress comes from polling the status route every 2s until it lands
+// on completed/error, same as classic's own startEmbedPollingIfNeeded.
+const activeEmbedPolls = new Set();
+function runLocalEmbed(btn) {
+  const draftName = btn.dataset.localEmbed;
+  btn.disabled = true;
+  btn.textContent = 'Building…';
+  setSourceQueueText(`${draftName}: starting embeddings build…`);
+  fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft_name: draftName }),
+  }).then((r) => r.json()).then((status) => {
+    setSourceQueueText(`${draftName}: ${status.message || status.status || 'embeddings build started.'}`);
+    pollEmbedStatus(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: couldn’t start embeddings build.`); fetchSources(); });
+}
+function pollEmbedStatus(draftName) {
+  if (activeEmbedPolls.has(draftName)) return;
+  activeEmbedPolls.add(draftName);
+  const poll = () => {
+    fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index/status?draft_name=${encodeURIComponent(draftName)}`).then((r) => r.json()).then((status) => {
+      if (status.status === 'queued' || status.status === 'running') {
+        setSourceQueueText(`${draftName}: ${status.message || status.status}…`);
+        setTimeout(poll, 2000);
+      } else {
+        activeEmbedPolls.delete(draftName);
+        setSourceQueueText(`${draftName}: embeddings ${status.status === 'completed' ? 'build complete.' : (status.message || 'build failed.')}`);
+        fetchSources();
+      }
+    }).catch(() => { activeEmbedPolls.delete(draftName); });
+  };
+  poll();
 }
 function toggleWgResources(idx) {
   const containerEl = document.getElementById(`pm-wgres-${idx}`);
