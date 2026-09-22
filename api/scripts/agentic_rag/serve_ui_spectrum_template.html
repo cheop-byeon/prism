@@ -185,6 +185,7 @@
   }
   .po-primary:hover { filter: brightness(1.08); }
   .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
+  .po-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .po-linkbutton { background: transparent; color: var(--po-accent); font-size: 12px; padding: 0; text-align: left; }
   .po-linkbutton:hover { text-decoration: underline; }
   .po-linkbutton:disabled { color: var(--po-muted); cursor: default; text-decoration: none; }
@@ -411,6 +412,88 @@
     .pm-facets { grid-template-columns: 1fr; }
     .pm-metrics { grid-template-columns: 1fr; }
   }
+
+  /* Sources -- collapsible per-source and per-resource <details> (ps-*,
+     ported from the prism-sources-v2 mockup's own toggle design) instead
+     of the always-expanded pm-group cards the first cut used, since a
+     40+ source library read as one enormous scroll with everything open
+     at once. */
+  .ps-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 21px; flex-wrap: wrap; }
+  .ps-head p { font-size: 13px; color: var(--po-muted); margin-top: 9px; }
+  .ps-boundary { font-size: 12px; color: var(--po-muted); padding: 13px 16px; border: 1px solid var(--po-line); border-radius: 9px; background: var(--po-paper); margin-bottom: 22px; }
+  .ps-boundary strong { color: var(--po-cyan); font-weight: 500; }
+  .ps-filters { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .ps-filters input { min-width: 0; flex: 1; padding: 11px 12px; border: 1px solid var(--po-line); border-radius: 7px; background: var(--po-paper); font-size: 13px; color: var(--po-ink); }
+  .ps-filters select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
+  .ps-source { border: 1px solid var(--po-line); border-radius: 11px; background: var(--po-paper); margin: 12px 0; overflow: hidden; }
+  .ps-source > summary { list-style: none; display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 17px; color: var(--po-ink); cursor: pointer; }
+  .ps-source > summary::-webkit-details-marker { display: none; }
+  .ps-source > summary:before { content: '›'; font-size: 23px; color: var(--po-accent); flex-shrink: 0; }
+  .ps-source[open] > summary:before { transform: rotate(90deg); }
+  .ps-source[open] > summary { background: linear-gradient(110deg, var(--po-tint), var(--po-paper)); border-bottom: 1px solid var(--po-line); }
+  .ps-source-title { flex: 1; min-width: 0; }
+  .ps-source-title strong { font-size: 14px; font-weight: 500; display: block; }
+  .ps-source-title small { font-size: 11px; color: var(--po-muted); display: block; margin-top: 3px; overflow-wrap: anywhere; }
+  .ps-body { padding: 18px; }
+  .ps-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-bottom: 21px; }
+  .ps-meta > div { padding: 12px; border: 1px solid var(--po-line); border-radius: 7px; font-size: 13px; }
+  .ps-meta small { display: block; font-size: 11px; color: var(--po-muted); margin-top: 5px; }
+  .ps-label { font-size: 11px; color: var(--po-muted); margin: 8px 0 12px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .ps-pipeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .ps-stage { background: var(--po-soft); border-radius: 9px; padding: 13px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+  .ps-stage .ps-number { font-size: 10px; color: var(--po-cyan); letter-spacing: 0.08em; }
+  .ps-stage h3 { font-size: 13px; font-weight: 500; margin: 0; }
+  .ps-stage p { font-size: 11px; color: var(--po-muted); line-height: 1.6; min-height: 35px; margin: 0; }
+  .ps-stage button { margin-top: auto; font-size: 12px; }
+  .ps-stage small { font-size: 10px; color: var(--po-muted); }
+  .ps-more { border-top: 1px solid var(--po-line); margin-top: 21px; padding-top: 14px; }
+  .ps-more > summary { font-size: 13px; color: var(--po-accent); cursor: pointer; }
+  .ps-resources-intro { font-size: 12px; color: var(--po-muted); margin: 14px 0; line-height: 1.7; }
+  .ps-resourcefilter { display: flex; gap: 14px; align-items: center; font-size: 11px; margin: 14px 0; color: var(--po-muted); flex-wrap: wrap; }
+  .ps-resourcefilter label { display: flex; gap: 6px; align-items: center; }
+  .ps-resource { border-bottom: 1px solid var(--po-line); margin: 0; padding: 0; }
+  .ps-resource > summary { display: flex; gap: 10px; justify-content: space-between; align-items: center; padding: 12px 0; list-style: none; color: var(--po-ink); font-size: 12px; cursor: pointer; }
+  .ps-resource > summary::-webkit-details-marker { display: none; }
+  .ps-resource > summary:before { content: '+'; color: var(--po-accent); }
+  .ps-resource[open] > summary:before { content: '−'; }
+  .ps-resource > summary strong { flex: 1; font-weight: 400; }
+  .ps-resource > summary span { font-size: 11px; color: var(--po-muted); }
+  .ps-resource-inside { padding: 5px 0 17px 20px; display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+  .ps-resource-inside > div { flex: 1; min-width: 150px; font-size: 11px; color: var(--po-muted); }
+  .ps-resource-inside p { margin: 7px 0; font-size: 11px; }
+  .ps-disabled { opacity: 0.55; cursor: not-allowed !important; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 5px; padding: 6px 9px; font-size: 11px; color: var(--po-muted); }
+  .ps-disabledgroup { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ps-status { margin: 0 0 20px; padding: 12px 15px; border-left: 2px solid var(--po-cyan); background: var(--po-soft); font-size: 12px; border-radius: 0 8px 8px 0; color: var(--po-muted); }
+  .ps-status strong { display: block; color: var(--po-ink); font-size: 12px; font-weight: 500; margin-bottom: 3px; }
+  .ps-empty { font-size: 12px; color: var(--po-muted); padding: 17px; }
+  .ps-dialog { background: var(--po-paper); color: var(--po-ink); border: 1px solid var(--po-line); border-radius: 16px; padding: 0; width: min(620px, 92%); max-height: 85%; box-shadow: 0 24px 80px #0006; }
+  .ps-dialog::backdrop { background: #080c1dcc; backdrop-filter: blur(5px); }
+  .ps-dialoghead { display: flex; justify-content: space-between; align-items: center; padding: 21px 23px; border-bottom: 1px solid var(--po-line); background: linear-gradient(100deg, var(--po-tint), var(--po-paper)); }
+  .ps-dialoghead h2 { font-size: 20px; font-weight: 500; margin: 0; }
+  .ps-dialogbody { padding: 23px; overflow-y: auto; }
+  .ps-dialogtabs { display: flex; gap: 8px; background: var(--po-soft); padding: 4px; border-radius: 8px; margin-bottom: 20px; }
+  .ps-dialogtabs button { flex: 1; padding: 9px; background: transparent; color: var(--po-muted); border-radius: 5px; font-size: 13px; }
+  .ps-dialogtabs button[aria-pressed=true] { background: var(--po-paper); color: var(--po-accent); }
+  .ps-formlabel { display: block; color: var(--po-muted); font-size: 12px; margin: 15px 0 7px; }
+  .ps-field { display: block; width: 100%; padding: 11px 12px; border: 1px solid var(--po-line); background: var(--po-bg); border-radius: 7px; font-size: 13px; color: var(--po-ink); box-sizing: border-box; }
+  .ps-dialog p { font-size: 12px; color: var(--po-muted); margin: 0; }
+  .ps-topicsearch { display: flex; gap: 9px; margin-top: 13px; }
+  .ps-topicsearch input { min-width: 0; flex: 1; }
+  .ps-topicresult { display: flex; align-items: flex-start; gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--po-line); font-size: 13px; }
+  .ps-topicresult small { display: block; font-size: 11px; color: var(--po-muted); }
+  .ps-dialogfoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; font-size: 12px; flex-wrap: wrap; }
+  .ps-dialogfoot label { display: flex; align-items: center; gap: 6px; }
+  .ps-miniheading { color: var(--po-cyan); font-size: 11px; margin: 18px 0 5px; }
+  @media (max-width: 600px) {
+    .ps-pipeline { grid-template-columns: 1fr; }
+    .ps-stage p { min-height: 0; }
+    .ps-meta { grid-template-columns: 1fr; }
+    .ps-head { flex-direction: column; }
+    .ps-source > summary { flex-wrap: wrap; }
+    .ps-source-title { flex-basis: 70%; }
+    .ps-dialogbody { padding: 16px; }
+    .ps-dialoghead { padding: 16px; }
+  }
 </style>
 </head>
 <body>
@@ -581,19 +664,54 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 
     <section class="po-page" data-page="sources" hidden>
       <div class="po-eyebrow">Library / Sources</div>
-      <div class="pm-pagehead"><div><h1 class="po-title">Build the evidence base.</h1><p>Everything here is a download-only local copy -- mail, draft text, WG resources. Attaching or indexing into a real Dify dataset is still a manual Studio step.</p></div></div>
-      <form class="pm-toolbar pm-sourceform" id="poSourceAddForm">
-        <input id="poSourceAddInput" type="text" placeholder="Search an RFC, draft, or working group…" aria-label="Find source" autocomplete="off">
-        <button class="po-primary" type="submit"><span>+</span>Add source</button>
-      </form>
-      <div class="po-lookup-results" id="poSourceAddResults" hidden></div>
-      <!-- Right under the search bar, not after the source list -- that
-           list can run to 40+ cards, and a status message appended after
-           it read as "nothing happened" when Add source was clicked,
+      <div class="ps-head">
+        <div><h1 class="po-title">From archive to evidence.</h1><p>Manage downloaded content and the indexes that make it searchable.</p></div>
+        <button class="po-primary" type="button" id="poSourceAddOpenBtn"><span>+</span>Add source</button>
+      </div>
+      <div class="ps-boundary"><strong>Local library ≠ Dify dataset.</strong> Downloads and local indexes are managed here. Attaching material to a Dify dataset is still a separate Studio step.</div>
+      <div class="ps-filters">
+        <input id="poSourceFilterText" class="ps-librarysearch" placeholder="Filter by RFC, draft, or working group…" aria-label="Filter sources">
+        <select id="poSourceFilterKind" class="ps-libraryfilter" aria-label="Source type">
+          <option value="all">All sources</option>
+          <option value="local">Local library</option>
+          <option value="dataset">Dify datasets</option>
+        </select>
+      </div>
+      <!-- Right under the filters, not after the source list -- that list
+           can run to 40+ cards, and a status message appended after it
+           read as "nothing happened" when Add source was clicked,
            confirmed live. Always visible, no scrolling required. -->
-      <div class="pm-queue" id="poSourceQueue" hidden aria-live="polite"><strong>Download queue</strong><div class="pm-queuetext" id="poSourceQueueText"></div></div>
+      <div class="ps-status" id="poSourceQueue" hidden aria-live="polite"><strong>Operation status</strong><span id="poSourceQueueText"></span></div>
       <div id="poSourcesList"><p class="corpora-hint">Loading…</p></div>
+      <p class="ps-empty" id="poSourceEmpty" hidden>No matching sources.</p>
     </section>
+
+    <dialog class="ps-dialog" id="poSourceAddDialog" aria-labelledby="poSourceAddTitle">
+      <div class="ps-dialoghead"><h2 id="poSourceAddTitle">Expand your source library</h2><button type="button" class="po-close" id="poSourceAddCloseBtn" aria-label="Close">&times;</button></div>
+      <div class="ps-dialogbody">
+        <div class="ps-dialogtabs">
+          <button type="button" data-addmode="one" aria-pressed="true">Find one</button>
+          <button type="button" data-addmode="topic" aria-pressed="false">Discover a topic</button>
+        </div>
+        <form class="ps-oneform" id="poSourceOneForm">
+          <p>Start with a working group, RFC number, or draft name.</p>
+          <label class="ps-formlabel" for="poSourceOneSearch">Search</label>
+          <input class="ps-field" id="poSourceOneSearch" placeholder="Try RFC 4033 or dnsext" autocomplete="off">
+          <div class="po-lookup-results" id="poSourceOneResults" hidden></div>
+          <label class="ps-formlabel" for="poSourceDraftName">Draft name</label>
+          <input class="ps-field" id="poSourceDraftName" placeholder="draft-ietf-…" required>
+          <div class="ps-dialogfoot"><span class="po-tiny">Registers the source and syncs its revisions, RFC, and mail.</span><button class="po-primary" type="submit">Add source</button></div>
+        </form>
+        <div class="ps-topicpanel" id="poSourceTopicPanel" hidden>
+          <p>Search the whole RFC corpus by topic (BM25 + semantic, no LLM for this part). When a roadmap RFC exists, its family and each member's role are shown.</p>
+          <form class="ps-topicform" id="poSourceTopicForm">
+            <label class="ps-formlabel" for="poSourceTopicInput">Topic</label>
+            <div class="ps-topicsearch"><input class="ps-field" id="poSourceTopicInput" placeholder="e.g. DNSSEC" required><button class="po-primary" type="submit">Search</button></div>
+          </form>
+          <div class="ps-topicresults" id="poSourceTopicResults" hidden></div>
+        </div>
+      </div>
+    </dialog>
 
     <section class="po-page" data-page="usage" hidden>
       <div class="po-eyebrow">Operations / Usage</div>
@@ -1968,13 +2086,28 @@ function setSourceQueueText(text) {
   document.getElementById('poSourceQueueText').textContent = text;
   queueEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
+// Sync/build timestamps say WHAT happened but not WHEN -- ported from
+// classic's own formatRelativeTime so "synced 13d ago" reads the same way
+// here as it does there.
+function formatRelativeTime(unixSeconds) {
+  if (!unixSeconds) return null;
+  const diffSeconds = Math.max(0, Date.now() / 1000 - unixSeconds);
+  if (diffSeconds < 60) return 'just now';
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
 function fetchSources() {
   const listEl = document.getElementById('poSourcesList');
   fetch(`${PRISM_PREFIX}/api/corpora/freshness`).then((r) => r.json()).then((data) => {
     if (data.error) throw new Error(data.error);
     const corpora = data.corpora || [];
     if (!corpora.length) {
-      listEl.innerHTML = '<p class="corpora-hint">No sources yet -- search above to add one.</p>';
+      listEl.innerHTML = '<p class="corpora-hint">No sources yet -- use "+ Add source" above to add one.</p>';
+      document.getElementById('poSourceEmpty').hidden = true;
       return;
     }
     sourceCorpora = corpora;
@@ -1984,117 +2117,136 @@ function fetchSources() {
     listEl.querySelectorAll('[data-download-rev]').forEach((btn) => btn.addEventListener('click', () => runDraftDownload(btn)));
     listEl.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
     listEl.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
-    listEl.querySelectorAll('[data-wgres-toggle]').forEach((btn) => btn.addEventListener('click', () => toggleWgResources(Number(btn.dataset.wgresToggle))));
     listEl.querySelectorAll('[data-local-index]').forEach((btn) => btn.addEventListener('click', () => runLocalIndex(btn)));
     listEl.querySelectorAll('[data-local-embed]').forEach((btn) => btn.addEventListener('click', () => runLocalEmbed(btn)));
+    listEl.querySelectorAll('.ps-more').forEach((el) => {
+      el.addEventListener('toggle', () => {
+        const idx = Number(el.dataset.idx);
+        if (el.open && !wgResourceState[idx]) { wgResourceState[idx] = { loading: true }; loadWgResources(idx); }
+      });
+    });
+    listEl.querySelectorAll('.ps-onlyavailable').forEach((cb) => {
+      cb.addEventListener('change', () => renderWgResources(Number(cb.dataset.idx)));
+    });
+    applySourceFilter();
   }).catch((err) => {
     listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
   });
 }
 let sourceCorpora = [];
 let wgResourceState = {};
+// Real per-source status pill -- "Indexed" only once both the sparse
+// (BM25) and dense (embeddings) indexes are actually built, "BM25
+// indexed" for the common in-between state, "Not indexed" (warn) for a
+// downloaded-but-unsearchable source, "Ready for research" for a real
+// Dify-dataset corpus (indexed through the existing Studio pipeline, not
+// this page's local-index routes at all).
+function sourceStatusPill(c) {
+  if (!c.is_local) return '<span class="po-pill">Ready for research</span>';
+  const idxStat = c.index_status || {};
+  const embStat = c.embedding_index_status || {};
+  if (idxStat.built && embStat.status === 'completed') return '<span class="po-pill">Indexed</span>';
+  if (idxStat.built) return '<span class="po-pill">BM25 indexed</span>';
+  return '<span class="po-pill po-warn">Not indexed</span>';
+}
 function renderSourceGroup(c, idx) {
   const label = c.rfc_number ? `RFC ${escapeHtml(String(c.rfc_number))}` : escapeHtml(c.draft_name || 'Untitled source');
-  const pill = c.is_local ? '<span class="po-pill po-warn">Local source</span>' : '<span class="po-pill">Ready for research</span>';
-  const specFacet = `
-    <div class="pm-facet">
-      <strong>Specification</strong>
-      <small>${c.rfc_number ? 'Published RFC' : 'Not yet published as an RFC'}</small>
-      ${c.rfc_number ? `<button type="button" class="po-linkbutton" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}
-    </div>`;
-  let mailFacet;
-  let draftFacet;
-  let indexFacetsHtml = '';
+  const searchText = [c.draft_name, c.rfc_number, c.wg].filter(Boolean).join(' ').toLowerCase();
+  const subtitle = `${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''} &middot; ${c.is_local ? 'Local library' : 'Dify dataset'}`;
+  let bodyHtml;
   if (c.is_local) {
     const ls = c.local_status || {};
     const mailMeta = c.wg ? `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}` : 'No WG for this draft';
-    mailFacet = `<div class="pm-facet"><strong>Mailing-list archive</strong><small>${escapeHtml(mailMeta)}</small></div>`;
     const draftMeta = ls.revisions_downloaded
-      ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} downloaded (latest ${escapeHtml(String(ls.latest_revision_downloaded || '?'))})`
+      ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${escapeHtml(String(ls.latest_revision_downloaded || '?'))})${c.rfc_number ? (ls.rfc_downloaded ? ` &middot; RFC ${escapeHtml(String(c.rfc_number))} ✓` : ` &middot; RFC ${escapeHtml(String(c.rfc_number))} pending`) : ''}`
       : 'No revisions downloaded yet';
-    draftFacet = `
-      <div class="pm-facet">
-        <strong>Draft revisions</strong>
-        <small>${draftMeta}</small>
-        <button type="button" class="po-linkbutton" data-local-sync="${escapeHtml(c.draft_name)}">${ls.last_synced_at ? 'Re-sync' : 'Sync'} ↓</button>
-      </div>`;
     // A local source downloads to disk but stays invisible to the agent's
     // search_local_source tool until one of these is actually built --
-    // "download only" was never meant to mean "download and stop", but the
-    // first cut of this page only ever wired the download half, dropping
-    // the indexing classic's own local-index-table already has. Real same
-    // backend (POST local-index/local-embedding-index, GET .../status),
-    // not the disabled Extract-text/per-doctype variants that table also
-    // shows -- those aren't functional in classic either.
+    // "download only" was never meant to mean "download and stop". Real
+    // same backend as classic's own local-index-table (POST local-index/
+    // local-embedding-index, GET .../status), reframed as a 3-stage
+    // content -> BM25 -> embeddings pipeline per the v2 mockup, not the
+    // disabled Extract-text/per-doctype variants that table also shows --
+    // those aren't functional in classic either.
     const idxStat = c.index_status || {};
     const embStat = c.embedding_index_status || { status: 'not_started' };
     const embRunning = embStat.status === 'queued' || embStat.status === 'running';
-    const sparseLabel = idxStat.built ? 'Rebuild' : 'Build';
-    const sparseMeta = idxStat.error
-      ? `<span class="po-error" style="display:inline;padding:2px 6px;">${escapeHtml(idxStat.error)}</span>`
-      : idxStat.built ? `${idxStat.total_documents} passages indexed` : 'Not indexed -- not searchable by the agent yet';
+    const syncCaption = ls.last_synced_at ? `Synced ${formatRelativeTime(ls.last_synced_at)}` : 'Never synced';
+    const sparseCaption = idxStat.error ? idxStat.error : (idxStat.built ? `${idxStat.total_documents} passages indexed${idxStat.built_at ? ' &middot; built ' + formatRelativeTime(idxStat.built_at) : ''}` : 'Not built');
+    let denseCaption;
+    if (embRunning) denseCaption = escapeHtml(embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…'));
+    else if (embStat.status === 'error') denseCaption = escapeHtml(embStat.message || 'Failed');
+    else if (embStat.status === 'completed') denseCaption = `Built${embStat.updated_at ? ' ' + formatRelativeTime(embStat.updated_at) : ''}`;
+    else denseCaption = 'Not built';
     const denseLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild' : 'Build');
-    const denseMeta = embRunning
-      ? escapeHtml(embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…'))
-      : embStat.status === 'error'
-        ? `<span class="po-error" style="display:inline;padding:2px 6px;">${escapeHtml(embStat.message || 'Failed')}</span>`
-        : embStat.status === 'completed' ? 'Embeddings built' : 'Not built -- exact-keyword search only until built';
-    indexFacetsHtml = `
-      <div class="pm-facets">
-        <div class="pm-facet">
-          <strong>Sparse index (BM25)</strong>
-          <small>${sparseMeta}</small>
-          <button type="button" class="po-linkbutton" data-local-index="${escapeHtml(c.draft_name)}">${sparseLabel} index →</button>
+    bodyHtml = `
+      <div class="ps-meta">
+        <div>Email${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}<small>${escapeHtml(mailMeta)}</small></div>
+        <div>Drafts &amp; RFC<small>${draftMeta}</small>${c.rfc_number ? `<button type="button" class="po-linkbutton" style="margin-top:6px;" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}</div>
+      </div>
+      <div class="ps-label"><span>Source-wide operations</span><span>Each action includes both email and draft text.</span></div>
+      <div class="ps-pipeline">
+        <div class="ps-stage">
+          <span class="ps-number">01 / CONTENT</span>
+          <h3>Sync local copy</h3>
+          <p>Refresh the downloaded source material.</p>
+          <button type="button" class="po-secondary" data-local-sync="${escapeHtml(c.draft_name)}">${ls.last_synced_at ? 'Re-sync' : 'Sync'}</button>
+          <small>${escapeHtml(syncCaption)}</small>
         </div>
-        <div class="pm-facet">
-          <strong>Dense index (embeddings)</strong>
-          <small>${denseMeta}</small>
-          <button type="button" class="po-linkbutton" data-local-embed="${escapeHtml(c.draft_name)}" ${embRunning ? 'disabled' : ''}>${denseLabel} index →</button>
+        <div class="ps-stage">
+          <span class="ps-number">02 / KEYWORD SEARCH</span>
+          <h3>Sparse index &middot; BM25</h3>
+          <p>Find exact terms and protocol identifiers.</p>
+          <button type="button" class="po-secondary" data-local-index="${escapeHtml(c.draft_name)}">${idxStat.built ? 'Rebuild' : 'Build'}</button>
+          <small>${sparseCaption}</small>
         </div>
-      </div>`;
+        <div class="ps-stage">
+          <span class="ps-number">03 / SEMANTIC SEARCH</span>
+          <h3>Dense index &middot; embeddings</h3>
+          <p>Find related meaning beyond exact words.</p>
+          <button type="button" class="${embStat.status === 'completed' ? 'po-secondary' : 'po-primary'}" data-local-embed="${escapeHtml(c.draft_name)}" ${embRunning ? 'disabled' : ''}>${denseLabel}</button>
+          <small>${denseCaption}</small>
+        </div>
+      </div>
+      ${c.wg ? `
+      <details class="ps-more" data-idx="${idx}">
+        <summary>Additional working-group materials</summary>
+        <p class="ps-resources-intro">Download meeting and administrative resources by type. Text extraction isn't built yet, so their own BM25/embedding indexes stay unavailable -- same real boundary classic's page has.</p>
+        <div class="ps-resourcefilter">
+          <label><input type="checkbox" class="ps-onlyavailable" data-idx="${idx}" checked>Only show available materials</label>
+          <span class="ps-resourcecount" id="ps-rescount-${idx}"></span>
+        </div>
+        <div class="ps-resourcelist" id="pm-wgres-${idx}"><p class="po-loading">Checking agenda, minutes, slides, charter, …</p></div>
+      </details>` : ''}
+    `;
   } else {
     const ms = c.mail_status || {};
     const mailValue = c.wg
       ? (ms.error ? escapeHtml(ms.error) : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages`)
       : 'No WG for this draft';
-    mailFacet = `
-      <div class="pm-facet">
-        <strong>Mailing-list archive</strong>
-        <small>${mailValue}</small>
-        ${c.wg ? `<button type="button" class="po-linkbutton" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}">Sync now ↓</button>` : ''}
-      </div>`;
     const dr = c.draft_relations || {};
     const draftValue = dr.error ? escapeHtml(dr.error) : (dr.latest_rev ? `Latest: rev ${escapeHtml(String(dr.latest_rev))}` : 'Unknown');
-    draftFacet = `
-      <div class="pm-facet">
-        <strong>Draft revisions</strong>
-        <small>${draftValue}</small>
-        ${dr.latest_rev ? `<button type="button" class="po-linkbutton" data-download-rev="1" data-draft="${escapeHtml(c.draft_name)}" data-rev="${escapeHtml(String(dr.latest_rev))}">Download latest ↓</button>` : ''}
-      </div>`;
+    bodyHtml = `
+      <div class="ps-meta">
+        <div>Email${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}<small>${mailValue}</small></div>
+        <div>Drafts &amp; RFC<small>${draftValue}</small></div>
+      </div>
+      <p class="po-tiny">Registered Dify dataset -- keep its dataset status separate from local download and index status above.</p>
+      <div class="po-actions" style="margin-top:14px;">
+        ${c.wg ? `<button type="button" class="po-secondary" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}">Sync mail</button>` : ''}
+        ${c.rfc_number ? `<button type="button" class="po-secondary" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}
+        ${dr.latest_rev ? `<button type="button" class="po-secondary" data-download-rev="1" data-draft="${escapeHtml(c.draft_name)}" data-rev="${escapeHtml(String(dr.latest_rev))}">Download latest rev</button>` : ''}
+      </div>
+    `;
   }
-  // WG resources -- every non-draft/RFC/mailarchive Datatracker doctype
-  // (agenda, minutes, slides, charter, recording, ...), the third real
-  // content type this page's own hint text already promises ("mail, draft
-  // text, WG resources") but the first cut of this page only ever
-  // rendered the first two. Counts are fetched lazily on first expand
-  // (15 doctypes x every corpus would mean dozens of requests before the
-  // page even finishes loading), same reasoning as classic's own version.
-  const wgResourcesHtml = c.wg
-    ? `<div class="pm-groupfoot">
-        <button type="button" class="po-linkbutton" data-wgres-toggle="${idx}">+ WG resources (agenda, minutes, slides, charter, …)</button>
-      </div>
-      <div id="pm-wgres-${idx}" hidden></div>`
-    : '';
   return `
-    <div class="pm-group">
-      <div class="pm-grouphead">
-        <div><h2>${label}</h2><p>${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}</p></div>
-        ${pill}
-      </div>
-      <div class="pm-facets">${specFacet}${mailFacet}${draftFacet}</div>
-      ${indexFacetsHtml}
-      ${wgResourcesHtml}
-    </div>`;
+    <details class="ps-source" data-kind="${c.is_local ? 'local' : 'dataset'}" data-search="${escapeHtml(searchText)}">
+      <summary>
+        <span class="ps-source-title"><strong>${label}</strong><small>${subtitle}</small></span>
+        ${sourceStatusPill(c)}
+      </summary>
+      <div class="ps-body">${bodyHtml}</div>
+    </details>`;
 }
 function runLocalIndex(btn) {
   const draftName = btn.dataset.localIndex;
@@ -2151,23 +2303,10 @@ function pollEmbedStatus(draftName) {
   };
   poll();
 }
-function toggleWgResources(idx) {
-  const containerEl = document.getElementById(`pm-wgres-${idx}`);
-  const toggleBtn = document.querySelector(`[data-wgres-toggle="${idx}"]`);
-  const isHidden = containerEl.hidden;
-  containerEl.hidden = !isHidden;
-  if (toggleBtn) toggleBtn.textContent = isHidden
-    ? '− WG resources (agenda, minutes, slides, charter, …)'
-    : '+ WG resources (agenda, minutes, slides, charter, …)';
-  if (isHidden && !wgResourceState[idx]) {
-    wgResourceState[idx] = { loading: true };
-    loadWgResources(idx);
-  }
-}
 function loadWgResources(idx) {
-  const containerEl = document.getElementById(`pm-wgres-${idx}`);
+  const listEl = document.getElementById(`pm-wgres-${idx}`);
   const wg = sourceCorpora[idx].wg;
-  containerEl.innerHTML = '<p class="po-loading">Checking agenda, minutes, slides, charter, …</p>';
+  listEl.innerHTML = '<p class="po-loading">Checking agenda, minutes, slides, charter, …</p>';
   fetch(`${PRISM_PREFIX}/api/sources/types`).then((r) => r.json()).then((typesData) => {
     const types = typesData.types || [];
     return Promise.all(types.map((t) =>
@@ -2180,40 +2319,67 @@ function loadWgResources(idx) {
     wgResourceState[idx] = { loading: false, resources };
     renderWgResources(idx);
   }).catch((err) => {
-    containerEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load WG resources.')}</div>`;
+    listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load WG resources.')}</div>`;
   });
 }
+// Per-type disclosure (ps-resource), each with a real Sync action and a
+// disabled Extract-text/Build-BM25/Build-embeddings group -- those three
+// aren't functional in classic's own table either (WG-resource downloads
+// are PDF/PPTX/etc., and nothing in this backend converts them to plain
+// text yet), so the honest move is a labeled disabled state, not silently
+// omitting them.
 function renderWgResources(idx) {
-  const containerEl = document.getElementById(`pm-wgres-${idx}`);
+  const listEl = document.getElementById(`pm-wgres-${idx}`);
   const state = wgResourceState[idx];
   if (!state || state.loading) return;
-  const rows = (state.resources || []).filter((r) => (r.count || 0) > 0 || r.downloaded_count || r.error);
-  if (!rows.length) {
-    containerEl.innerHTML = '<p class="corpora-hint">No agenda, minutes, slides, charter, or other WG documents found.</p>';
+  const resources = state.resources || [];
+  const onlyAvailableEl = document.querySelector(`.ps-onlyavailable[data-idx="${idx}"]`);
+  const onlyAvailable = onlyAvailableEl ? onlyAvailableEl.checked : true;
+  const availableCount = resources.filter((r) => (r.count || 0) > 0).length;
+  const countEl = document.getElementById(`ps-rescount-${idx}`);
+  if (countEl) countEl.textContent = `${availableCount} of ${resources.length} types`;
+  const visible = resources.filter((r) => !onlyAvailable || (r.count || 0) > 0 || r.error);
+  if (!visible.length) {
+    listEl.innerHTML = '<p class="corpora-hint">No materials match this filter.</p>';
     return;
   }
-  containerEl.innerHTML = `
-    <div class="pm-tablewrap"><table class="pm-table"><thead><tr><th>Type</th><th>Downloaded</th><th></th></tr></thead><tbody>
-      ${rows.map((r) => {
-        const meta = r.error
-          ? `<span class="po-error" style="display:inline;padding:2px 6px;">${escapeHtml(r.error)}</span>`
-          : `${r.downloaded_count || 0} of ${r.count || 0}`;
-        const canDownload = !r.error && r.count && r.key !== 'recording';
-        return `<tr>
-          <td>${escapeHtml(r.label)}</td>
-          <td>${meta}</td>
-          <td>${canDownload ? `<button type="button" class="po-linkbutton" data-wgres-download="${idx}" data-type="${escapeHtml(r.key)}">Download ↓</button>` : ''}</td>
-        </tr>`;
-      }).join('')}
-    </tbody></table></div>`;
-  containerEl.querySelectorAll('[data-wgres-download]').forEach((btn) => {
-    btn.addEventListener('click', () => runWgResourceDownload(Number(btn.dataset.wgresDownload), btn.dataset.type, btn));
+  listEl.innerHTML = visible.map((r) => {
+    const available = (r.count || 0) > 0;
+    const meta = r.error
+      ? escapeHtml(r.error)
+      : available ? `${r.downloaded_count || 0} / ${r.count} downloaded` : (r.key === 'recording' ? 'External links only' : 'No materials found');
+    const syncDisabled = r.error || !available || r.key === 'recording';
+    const syncCaption = r.key === 'recording' ? 'Recording links are not downloaded.' : (r.downloaded_count ? `Synced ${r.last_synced_at ? formatRelativeTime(r.last_synced_at) : ''}` : 'Never synced');
+    return `
+      <details class="ps-resource" data-available="${available}">
+        <summary><strong>${escapeHtml(r.label)}</strong><span>${meta}</span></summary>
+        <div class="ps-resource-inside">
+          <div>
+            <button type="button" class="po-secondary" data-wgres-download="${idx}" data-type="${escapeHtml(r.key)}" ${syncDisabled ? 'disabled' : ''}>Sync</button>
+            <p>${syncCaption}</p>
+          </div>
+          <div>
+            <div class="ps-disabledgroup">
+              <button type="button" class="ps-disabled" disabled>Extract text</button>
+              <button type="button" class="ps-disabled" disabled>Build BM25</button>
+              <button type="button" class="ps-disabled" disabled>Build embeddings</button>
+            </div>
+            <p>Text extraction is not built yet. Both indexes depend on extracted text.</p>
+          </div>
+        </div>
+      </details>`;
+  }).join('');
+  listEl.querySelectorAll('[data-wgres-download]:not(:disabled)').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      runWgResourceDownload(Number(btn.dataset.wgresDownload), btn.dataset.type, btn);
+    });
   });
 }
 function runWgResourceDownload(idx, docType, btn) {
   const wg = sourceCorpora[idx].wg;
   btn.disabled = true;
-  btn.textContent = 'Downloading…';
+  btn.textContent = 'Syncing…';
   setSourceQueueText(`${wg}/${docType}: downloading…`);
   const source = new EventSource(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(wg)}/${encodeURIComponent(docType)}/download`);
   source.onmessage = (ev) => {
@@ -2230,14 +2396,14 @@ function runWgResourceDownload(idx, docType, btn) {
       source.close();
       setSourceQueueText(`${wg}/${docType}: ${msg.message}`);
       btn.disabled = false;
-      btn.textContent = 'Download ↓';
+      btn.textContent = 'Sync';
     }
   };
   source.onerror = () => {
     source.close();
     setSourceQueueText(`${wg}/${docType}: connection lost while downloading.`);
     btn.disabled = false;
-    btn.textContent = 'Download ↓';
+    btn.textContent = 'Sync';
   };
 }
 function runMailSync(btn) {
@@ -2284,10 +2450,46 @@ function runLocalSync(draftName, btn) {
   source.onerror = () => { source.close(); setSourceQueueText(`${draftName}: connection lost while syncing.`); fetchSources(); };
 }
 
-// Add-source typeahead against the sidecar's own real RFC/draft
-// suggestions (same lookup the Studio dataset-importer popup uses) --
-// deliberately not matchDocuments()'s local corpora catalog, since this
-// needs to find things that AREN'T a source yet at all.
+// -- Filter bar -- client-side over the already-fetched list, matching
+// each <details class="ps-source">'s own data-search/data-kind rather
+// than re-fetching, same as the v2 mockup's own filter() function. -------
+let sourceFilterText = '';
+let sourceFilterKind = 'all';
+document.getElementById('poSourceFilterText').addEventListener('input', (e) => {
+  sourceFilterText = e.target.value.trim().toLowerCase();
+  applySourceFilter();
+});
+document.getElementById('poSourceFilterKind').addEventListener('change', (e) => {
+  sourceFilterKind = e.target.value;
+  applySourceFilter();
+});
+function applySourceFilter() {
+  const listEl = document.getElementById('poSourcesList');
+  const sources = listEl.querySelectorAll('.ps-source');
+  let visible = 0;
+  sources.forEach((el) => {
+    const show = (!sourceFilterText || (el.dataset.search || '').includes(sourceFilterText))
+      && (sourceFilterKind === 'all' || sourceFilterKind === el.dataset.kind);
+    el.hidden = !show;
+    if (show) visible++;
+  });
+  document.getElementById('poSourceEmpty').hidden = sources.length === 0 || visible !== 0;
+}
+
+// -- Add-source dialog -- a real <dialog> with two tabs, matching classic's
+// own modal-based flow (and the v2 mockup's) instead of the inline search
+// bar the first cut used. ---------------------------------------------
+const poSourceAddDialogEl = document.getElementById('poSourceAddDialog');
+document.getElementById('poSourceAddOpenBtn').addEventListener('click', () => poSourceAddDialogEl.showModal());
+document.getElementById('poSourceAddCloseBtn').addEventListener('click', () => poSourceAddDialogEl.close());
+poSourceAddDialogEl.querySelectorAll('[data-addmode]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    poSourceAddDialogEl.querySelectorAll('[data-addmode]').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+    document.getElementById('poSourceOneForm').hidden = btn.dataset.addmode !== 'one';
+    document.getElementById('poSourceTopicPanel').hidden = btn.dataset.addmode !== 'topic';
+  });
+});
+
 // The sidecar's suggestions search is picky about an "RFC " prefix --
 // "RFC 9114" (a natural way to type a lookup) returns zero results where
 // "9114" alone finds it, confirmed live. Stripping the prefix before
@@ -2296,65 +2498,149 @@ function runLocalSync(draftName, btn) {
 function normalizeSourceQuery(q) {
   return q.replace(/^rfc\s*/i, '').trim() || q;
 }
-let sourceAddDebounce = null;
-const poSourceAddInputEl = document.getElementById('poSourceAddInput');
-const poSourceAddResultsEl = document.getElementById('poSourceAddResults');
-poSourceAddInputEl.addEventListener('input', () => {
-  clearTimeout(sourceAddDebounce);
-  const query = normalizeSourceQuery(poSourceAddInputEl.value.trim());
-  sourceAddDebounce = setTimeout(() => {
+function resolveDraftNameFromRfcSuggestion(s) {
+  return s.draft_base_name || (s.draft_names && s.draft_names[0]) || s.doc_id || '';
+}
+
+// "Find one" tab -- typeahead fills an explicit, editable Draft name
+// field (same real UX classic's own Add-source modal has) rather than
+// resolving on submit against whatever was typed, since a real field the
+// user can see and correct beats a guess made at submit time.
+let sourceOneDebounce = null;
+const poSourceOneSearchEl = document.getElementById('poSourceOneSearch');
+const poSourceOneResultsEl = document.getElementById('poSourceOneResults');
+const poSourceDraftNameEl = document.getElementById('poSourceDraftName');
+poSourceOneSearchEl.addEventListener('input', () => {
+  clearTimeout(sourceOneDebounce);
+  const query = normalizeSourceQuery(poSourceOneSearchEl.value.trim());
+  if (!query) { poSourceOneResultsEl.hidden = true; return; }
+  sourceOneDebounce = setTimeout(() => {
     fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}`).then((r) => r.json()).then((data) => {
       const suggestions = (data.suggestions || []).slice(0, 8);
-      if (!suggestions.length) { poSourceAddResultsEl.hidden = true; return; }
-      poSourceAddResultsEl.innerHTML = suggestions.map((s) => `
-        <button type="button" data-draft="${escapeHtml(resolveDraftNameFromRfcSuggestion(s))}">
+      if (!suggestions.length) { poSourceOneResultsEl.hidden = true; return; }
+      poSourceOneResultsEl.innerHTML = suggestions.map((s) => `
+        <button type="button" data-draft="${escapeHtml(resolveDraftNameFromRfcSuggestion(s))}" data-label="${escapeHtml((s.doc_id || '').toUpperCase())}${s.title ? ' — ' + escapeHtml(s.title) : ''}">
           ${escapeHtml((s.doc_id || '').toUpperCase())}${s.title ? ' — ' + escapeHtml(s.title) : ''}<small>${escapeHtml(s.wg || s.stream || '')}</small>
         </button>`).join('');
-      poSourceAddResultsEl.hidden = false;
-      poSourceAddResultsEl.querySelectorAll('button').forEach((b) => {
+      poSourceOneResultsEl.hidden = false;
+      poSourceOneResultsEl.querySelectorAll('button').forEach((b) => {
         b.addEventListener('click', () => {
-          poSourceAddResultsEl.hidden = true;
-          poSourceAddInputEl.value = '';
-          if (b.dataset.draft) runLocalSync(b.dataset.draft, null);
+          poSourceOneResultsEl.hidden = true;
+          poSourceDraftNameEl.value = b.dataset.draft;
+          poSourceOneSearchEl.value = b.dataset.label;
         });
       });
     }).catch(() => {});
   }, 300);
 });
-function resolveDraftNameFromRfcSuggestion(s) {
-  return s.draft_base_name || (s.draft_names && s.draft_names[0]) || s.doc_id || '';
-}
-// Submitting (Enter, or clicking "Add source") always does something --
-// previously this only handled a literal "draft-..." name typed exactly,
-// so typing an RFC number, a WG acronym, or a topic and hitting the
-// button was a silent no-op. Now it resolves whatever was typed through
-// the same real rfc-suggestions lookup the dropdown uses and adds the
-// best match, with visible feedback in the download-queue line either way
-// -- never nothing happening.
-document.getElementById('poSourceAddForm').addEventListener('submit', (e) => {
+document.getElementById('poSourceOneForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const typed = poSourceAddInputEl.value.trim();
-  poSourceAddResultsEl.hidden = true;
-  if (!typed) return;
-  if (typed.toLowerCase().startsWith('draft-')) {
-    poSourceAddInputEl.value = '';
-    runLocalSync(typed, null);
+  const draftName = poSourceDraftNameEl.value.trim();
+  if (!draftName) return;
+  poSourceAddDialogEl.close();
+  runLocalSync(draftName, null);
+});
+
+// "Discover a topic" tab -- real /api/corpora/topic-discover (BM25 +
+// semantic over the whole RFC corpus, plus best-effort roadmap/family
+// detection) and /api/corpora/topic-pull (each selected RFC synced +
+// indexed), not the mockup's own fabricated illustrative family. -------
+document.getElementById('poSourceTopicForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const topic = document.getElementById('poSourceTopicInput').value.trim();
+  if (!topic) return;
+  const resultsEl = document.getElementById('poSourceTopicResults');
+  resultsEl.hidden = false;
+  resultsEl.innerHTML = '<p class="po-loading">Searching the RFC corpus…</p>';
+  fetch(`${PRISM_PREFIX}/api/corpora/topic-discover?query=${encodeURIComponent(topic)}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    renderTopicResults(data);
+  }).catch((err) => {
+    resultsEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Topic search failed.')}</div>`;
+  });
+});
+function topicResultRow(rfc, title, role, alreadyLocal) {
+  return `<label class="ps-topicresult">
+    <input type="checkbox" class="ps-topiccheck" value="${escapeHtml(rfc)}" ${alreadyLocal ? 'disabled checked' : ''}>
+    <span>RFC ${escapeHtml(rfc)}${title ? ' &middot; ' + escapeHtml(title) : ''}${alreadyLocal ? ' <em>(already added)</em>' : ''}<small>${escapeHtml(role || '')}</small></span>
+  </label>`;
+}
+function renderTopicResults(data) {
+  const resultsEl = document.getElementById('poSourceTopicResults');
+  const rows = [];
+  if (data.roadmap) {
+    rows.push(`<div class="ps-miniheading">${escapeHtml(data.roadmap.title || ('RFC ' + data.roadmap.rfc))} family</div>`);
+    data.roadmap.family.forEach((m) => rows.push(topicResultRow(m.rfc, m.title, m.role, m.already_local)));
+  }
+  if (data.other && data.other.length) {
+    if (data.roadmap) rows.push('<div class="ps-miniheading">Other matches</div>');
+    data.other.slice(0, 15).forEach((m) => rows.push(topicResultRow(m.rfc, m.title, null, m.already_local)));
+  }
+  if (!rows.length) {
+    resultsEl.innerHTML = '<p class="corpora-hint">No matching RFCs found for this topic.</p>';
     return;
   }
-  setSourceQueueText(`Looking up “${typed}”…`);
-  fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(normalizeSourceQuery(typed))}&limit=5`).then((r) => r.json()).then((data) => {
-    const suggestion = (data.suggestions || [])[0];
-    const draftName = suggestion && resolveDraftNameFromRfcSuggestion(suggestion);
-    if (!draftName) {
-      setSourceQueueText(`No draft found for “${typed}”. Try a more specific RFC number, draft name, or working group.`);
-      return;
+  resultsEl.innerHTML = rows.join('') + `
+    <div class="ps-dialogfoot">
+      <label><input type="checkbox" class="ps-selectall">Select all</label>
+      <button type="button" class="po-primary ps-pull" disabled>Pull selected (0)</button>
+    </div>`;
+  wireTopicSelection();
+}
+function wireTopicSelection() {
+  const resultsEl = document.getElementById('poSourceTopicResults');
+  const checks = () => [...resultsEl.querySelectorAll('.ps-topiccheck:not(:disabled)')];
+  const update = () => {
+    const selected = checks().filter((c) => c.checked);
+    const pullBtn = resultsEl.querySelector('.ps-pull');
+    pullBtn.disabled = selected.length === 0;
+    pullBtn.textContent = `Pull selected (${selected.length})`;
+    const all = resultsEl.querySelector('.ps-selectall');
+    all.checked = checks().length > 0 && selected.length === checks().length;
+    all.indeterminate = selected.length > 0 && selected.length < checks().length;
+  };
+  checks().forEach((c) => c.addEventListener('change', update));
+  resultsEl.querySelector('.ps-selectall').addEventListener('change', (e) => {
+    checks().forEach((c) => { c.checked = e.target.checked; });
+    update();
+  });
+  resultsEl.querySelector('.ps-pull').addEventListener('click', () => {
+    const selected = checks().filter((c) => c.checked).map((c) => c.value);
+    if (!selected.length) return;
+    poSourceAddDialogEl.close();
+    runTopicPull(selected);
+  });
+  update();
+}
+function runTopicPull(rfcNumbers) {
+  setSourceQueueText(`Pulling ${rfcNumbers.length} RFC${rfcNumbers.length === 1 ? '' : 's'}…`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/topic-pull?rfc_numbers=${encodeURIComponent(rfcNumbers.join(','))}`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      setSourceQueueText(msg.message || 'Pulling…');
+    } else if (msg.type === 'result') {
+      source.close();
+      const results = msg.data.results || [];
+      const ok = results.filter((r) => r.ok).length;
+      setSourceQueueText(`Pulled ${ok}/${results.length}.`);
+      fetchSources();
+    } else if (msg.type === 'error') {
+      source.close();
+      setSourceQueueText(msg.message || 'Pull failed.');
+      fetchSources();
     }
-    poSourceAddInputEl.value = '';
-    runLocalSync(draftName, null);
-  }).catch(() => setSourceQueueText(`Couldn’t look up “${typed}”.`));
-});
-document.addEventListener('click', (e) => {
-  if (!poSourceAddInputEl.contains(e.target) && !poSourceAddResultsEl.contains(e.target)) poSourceAddResultsEl.hidden = true;
+  };
+  source.onerror = () => { source.close(); setSourceQueueText('Connection lost while pulling.'); fetchSources(); };
+}
+// Reset both tabs' transient state whenever the dialog closes, so
+// reopening it never shows a stale search or a previous topic's results.
+poSourceAddDialogEl.addEventListener('close', () => {
+  poSourceOneSearchEl.value = '';
+  poSourceDraftNameEl.value = '';
+  poSourceOneResultsEl.hidden = true;
+  document.getElementById('poSourceTopicInput').value = '';
+  document.getElementById('poSourceTopicResults').hidden = true;
 });
 </script>
 </body>
