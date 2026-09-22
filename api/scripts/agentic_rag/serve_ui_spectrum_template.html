@@ -465,7 +465,6 @@
   .ps-disabledgroup { display: flex; flex-wrap: wrap; gap: 6px; }
   .ps-status { margin: 0 0 20px; padding: 12px 15px; border-left: 2px solid var(--po-cyan); background: var(--po-soft); font-size: 12px; border-radius: 0 8px 8px 0; color: var(--po-muted); }
   .ps-status strong { display: block; color: var(--po-ink); font-size: 12px; font-weight: 500; margin-bottom: 3px; }
-  .ps-empty { font-size: 12px; color: var(--po-muted); padding: 17px; }
   .ps-dialog { background: var(--po-paper); color: var(--po-ink); border: 1px solid var(--po-line); border-radius: 16px; padding: 0; width: min(620px, 92%); max-height: 85%; box-shadow: 0 24px 80px #0006; }
   .ps-dialog::backdrop { background: #080c1dcc; backdrop-filter: blur(5px); }
   .ps-dialoghead { display: flex; justify-content: space-between; align-items: center; padding: 21px 23px; border-bottom: 1px solid var(--po-line); background: linear-gradient(100deg, var(--po-tint), var(--po-paper)); }
@@ -484,6 +483,7 @@
   .ps-dialogfoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; font-size: 12px; flex-wrap: wrap; }
   .ps-dialogfoot label { display: flex; align-items: center; gap: 6px; }
   .ps-miniheading { color: var(--po-cyan); font-size: 11px; margin: 18px 0 5px; }
+  .ps-loadmore { display: block; width: 100%; margin: 14px 0; text-align: center; }
   @media (max-width: 600px) {
     .ps-pipeline { grid-template-columns: 1fr; }
     .ps-stage p { min-height: 0; }
@@ -683,7 +683,6 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
            confirmed live. Always visible, no scrolling required. -->
       <div class="ps-status" id="poSourceQueue" hidden aria-live="polite"><strong>Operation status</strong><span id="poSourceQueueText"></span></div>
       <div id="poSourcesList"><p class="corpora-hint">Loading…</p></div>
-      <p class="ps-empty" id="poSourceEmpty" hidden>No matching sources.</p>
     </section>
 
     <dialog class="ps-dialog" id="poSourceAddDialog" aria-labelledby="poSourceAddTitle">
@@ -2100,41 +2099,108 @@ function formatRelativeTime(unixSeconds) {
   const diffDays = Math.round(diffHours / 24);
   return `${diffDays}d ago`;
 }
+// Paged, filtered fetch -- confirmed live that pulling all ~45 registered
+// + local sources in one request took 1-2 minutes (each local-only entry
+// alone costs 2 live Datatracker calls just to resolve its own wg/rfc
+// number, before the per-entry mail/draft-relations lookups even start).
+// /api/corpora/freshness now takes page_size/offset/q/kind and only pays
+// that live-lookup cost for the page actually being shown -- fetchSources()
+// always means "reset to page 1 with the current filter" (initial load,
+// filter changes, and refreshes after a bulk action like a topic pull);
+// loadSourcesChunk() is the one that actually hits the network, appending
+// one page at a time via "Load more" rather than re-fetching everything.
+const SOURCE_PAGE_SIZE = 12;
+let sourceCorpora = [];
+let wgResourceState = {};
+let sourceOffset = 0;
 function fetchSources() {
+  sourceOffset = 0;
+  sourceCorpora = [];
+  wgResourceState = {};
+  document.getElementById('poSourcesList').innerHTML = '<p class="corpora-hint">Loading…</p>';
+  loadSourcesChunk();
+}
+function loadSourcesChunk() {
   const listEl = document.getElementById('poSourcesList');
-  fetch(`${PRISM_PREFIX}/api/corpora/freshness`).then((r) => r.json()).then((data) => {
+  const q = document.getElementById('poSourceFilterText').value.trim();
+  const kind = document.getElementById('poSourceFilterKind').value;
+  const params = new URLSearchParams({ page_size: String(SOURCE_PAGE_SIZE), offset: String(sourceOffset) });
+  if (q) params.set('q', q);
+  if (kind !== 'all') params.set('kind', kind);
+  fetch(`${PRISM_PREFIX}/api/corpora/freshness?${params}`).then((r) => r.json()).then((data) => {
     if (data.error) throw new Error(data.error);
     const corpora = data.corpora || [];
-    if (!corpora.length) {
-      listEl.innerHTML = '<p class="corpora-hint">No sources yet -- use "+ Add source" above to add one.</p>';
-      document.getElementById('poSourceEmpty').hidden = true;
-      return;
-    }
-    sourceCorpora = corpora;
-    wgResourceState = {};
-    listEl.innerHTML = corpora.map((c, idx) => renderSourceGroup(c, idx)).join('');
-    listEl.querySelectorAll('[data-sync-mail]').forEach((btn) => btn.addEventListener('click', () => runMailSync(btn)));
-    listEl.querySelectorAll('[data-download-rev]').forEach((btn) => btn.addEventListener('click', () => runDraftDownload(btn)));
-    listEl.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
-    listEl.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
-    listEl.querySelectorAll('[data-local-index]').forEach((btn) => btn.addEventListener('click', () => runLocalIndex(btn)));
-    listEl.querySelectorAll('[data-local-embed]').forEach((btn) => btn.addEventListener('click', () => runLocalEmbed(btn)));
-    listEl.querySelectorAll('.ps-more').forEach((el) => {
-      el.addEventListener('toggle', () => {
-        const idx = Number(el.dataset.idx);
-        if (el.open && !wgResourceState[idx]) { wgResourceState[idx] = { loading: true }; loadWgResources(idx); }
+    const startIdx = sourceCorpora.length;
+    sourceCorpora = sourceCorpora.concat(corpora);
+    if (sourceOffset === 0) listEl.innerHTML = '';
+    const existingLoadMore = listEl.querySelector('.ps-loadmore');
+    if (existingLoadMore) existingLoadMore.remove();
+    // Wire listeners inside a detached fragment first, then move its
+    // children into the real list -- querying/wiring listEl directly
+    // would re-bind every earlier page's already-wired buttons too,
+    // firing their handlers twice on the next click.
+    const frag = document.createElement('div');
+    frag.innerHTML = corpora.map((c, i) => renderSourceGroup(c, startIdx + i)).join('');
+    wireSourceCardsIn(frag);
+    while (frag.firstChild) listEl.appendChild(frag.firstChild);
+    sourceOffset += corpora.length;
+    if (data.has_more) {
+      const remaining = (data.total || 0) - sourceOffset;
+      listEl.insertAdjacentHTML('beforeend', `<button type="button" class="ps-loadmore po-secondary">Load more (${remaining} remaining)</button>`);
+      listEl.querySelector('.ps-loadmore').addEventListener('click', (e) => {
+        e.target.disabled = true;
+        e.target.textContent = 'Loading…';
+        loadSourcesChunk();
       });
-    });
-    listEl.querySelectorAll('.ps-onlyavailable').forEach((cb) => {
-      cb.addEventListener('change', () => renderWgResources(Number(cb.dataset.idx)));
-    });
-    applySourceFilter();
+    }
+    if (!sourceCorpora.length) {
+      listEl.innerHTML = sourceOffset === corpora.length && !q && kind === 'all'
+        ? '<p class="corpora-hint">No sources yet -- use "+ Add source" above to add one.</p>'
+        : '<p class="corpora-hint">No sources match this filter.</p>';
+    }
   }).catch((err) => {
     listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
   });
 }
-let sourceCorpora = [];
-let wgResourceState = {};
+function wireSourceCardsIn(root) {
+  root.querySelectorAll('[data-sync-mail]').forEach((btn) => btn.addEventListener('click', () => runMailSync(btn)));
+  root.querySelectorAll('[data-download-rev]').forEach((btn) => btn.addEventListener('click', () => runDraftDownload(btn)));
+  root.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
+  root.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
+  root.querySelectorAll('[data-local-index]').forEach((btn) => btn.addEventListener('click', () => runLocalIndex(btn)));
+  root.querySelectorAll('[data-local-embed]').forEach((btn) => btn.addEventListener('click', () => runLocalEmbed(btn)));
+  root.querySelectorAll('.ps-more').forEach((el) => {
+    el.addEventListener('toggle', () => {
+      const idx = Number(el.dataset.idx);
+      if (el.open && !wgResourceState[idx]) { wgResourceState[idx] = { loading: true }; loadWgResources(idx); }
+    });
+  });
+  root.querySelectorAll('.ps-onlyavailable').forEach((cb) => {
+    cb.addEventListener('change', () => renderWgResources(Number(cb.dataset.idx)));
+  });
+}
+// Refreshes exactly one already-loaded card in place (a single-entry
+// q= fetch, not a full re-page) after a mutating action -- re-running the
+// whole paged fetchSources() would reset the list back to page 1 and lose
+// however many "Load more" pages the caller had already pulled in.
+function refreshSingleSource(draftName) {
+  const idx = sourceCorpora.findIndex((c) => c.draft_name === draftName);
+  if (idx === -1) { fetchSources(); return; }
+  fetch(`${PRISM_PREFIX}/api/corpora/freshness?q=${encodeURIComponent(draftName)}&page_size=5`).then((r) => r.json()).then((data) => {
+    const updated = (data.corpora || []).find((c) => c.draft_name === draftName);
+    if (!updated) return;
+    sourceCorpora[idx] = updated;
+    const oldEl = document.querySelectorAll('.ps-source')[idx];
+    if (!oldEl) return;
+    const wasOpen = oldEl.open;
+    const frag = document.createElement('div');
+    frag.innerHTML = renderSourceGroup(updated, idx);
+    const newEl = frag.firstElementChild;
+    if (wasOpen) newEl.open = true;
+    wireSourceCardsIn(frag);
+    oldEl.replaceWith(newEl);
+  }).catch(() => {});
+}
 // Real per-source status pill -- "Indexed" only once both the sparse
 // (BM25) and dense (embeddings) indexes are actually built, "BM25
 // indexed" for the common in-between state, "Not indexed" (warn) for a
@@ -2151,7 +2217,6 @@ function sourceStatusPill(c) {
 }
 function renderSourceGroup(c, idx) {
   const label = c.rfc_number ? `RFC ${escapeHtml(String(c.rfc_number))}` : escapeHtml(c.draft_name || 'Untitled source');
-  const searchText = [c.draft_name, c.rfc_number, c.wg].filter(Boolean).join(' ').toLowerCase();
   const subtitle = `${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''} &middot; ${c.is_local ? 'Local library' : 'Dify dataset'}`;
   let bodyHtml;
   if (c.is_local) {
@@ -2233,14 +2298,14 @@ function renderSourceGroup(c, idx) {
       </div>
       <p class="po-tiny">Registered Dify dataset -- keep its dataset status separate from local download and index status above.</p>
       <div class="po-actions" style="margin-top:14px;">
-        ${c.wg ? `<button type="button" class="po-secondary" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}">Sync mail</button>` : ''}
+        ${c.wg ? `<button type="button" class="po-secondary" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}" data-draft="${escapeHtml(c.draft_name)}">Sync mail</button>` : ''}
         ${c.rfc_number ? `<button type="button" class="po-secondary" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}
         ${dr.latest_rev ? `<button type="button" class="po-secondary" data-download-rev="1" data-draft="${escapeHtml(c.draft_name)}" data-rev="${escapeHtml(String(dr.latest_rev))}">Download latest rev</button>` : ''}
       </div>
     `;
   }
   return `
-    <details class="ps-source" data-kind="${c.is_local ? 'local' : 'dataset'}" data-search="${escapeHtml(searchText)}">
+    <details class="ps-source" data-kind="${c.is_local ? 'local' : 'dataset'}">
       <summary>
         <span class="ps-source-title"><strong>${label}</strong><small>${subtitle}</small></span>
         ${sourceStatusPill(c)}
@@ -2264,8 +2329,8 @@ function runLocalIndex(btn) {
     } else {
       setSourceQueueText(`${draftName}: sparse index built.`);
     }
-    fetchSources();
-  }).catch(() => { setSourceQueueText(`${draftName}: sparse index failed.`); fetchSources(); });
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: sparse index failed.`); refreshSingleSource(draftName); });
 }
 // The embedding build is fire-and-forget server-side (a Celery task, not a
 // blocking request) -- POST just returns the initial queued/running state,
@@ -2284,7 +2349,7 @@ function runLocalEmbed(btn) {
   }).then((r) => r.json()).then((status) => {
     setSourceQueueText(`${draftName}: ${status.message || status.status || 'embeddings build started.'}`);
     pollEmbedStatus(draftName);
-  }).catch(() => { setSourceQueueText(`${draftName}: couldn’t start embeddings build.`); fetchSources(); });
+  }).catch(() => { setSourceQueueText(`${draftName}: couldn’t start embeddings build.`); refreshSingleSource(draftName); });
 }
 function pollEmbedStatus(draftName) {
   if (activeEmbedPolls.has(draftName)) return;
@@ -2297,7 +2362,7 @@ function pollEmbedStatus(draftName) {
       } else {
         activeEmbedPolls.delete(draftName);
         setSourceQueueText(`${draftName}: embeddings ${status.status === 'completed' ? 'build complete.' : (status.message || 'build failed.')}`);
-        fetchSources();
+        refreshSingleSource(draftName);
       }
     }).catch(() => { activeEmbedPolls.delete(draftName); });
   };
@@ -2408,14 +2473,15 @@ function runWgResourceDownload(idx, docType, btn) {
 }
 function runMailSync(btn) {
   const wg = btn.dataset.wg;
+  const draftName = btn.dataset.draft;
   btn.disabled = true;
   btn.textContent = 'Syncing…';
   fetch(`${PRISM_PREFIX}/api/corpora/mail-sync`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ list_name: wg }),
   }).then((r) => r.json()).then((data) => {
     setSourceQueueText(data.error ? `${wg}: ${data.error}` : `${wg}: mail sync triggered.`);
-    fetchSources();
-  }).catch(() => { setSourceQueueText(`${wg}: sync failed.`); fetchSources(); });
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${wg}: sync failed.`); refreshSingleSource(draftName); });
 }
 function runDraftDownload(btn) {
   const draftName = btn.dataset.draft;
@@ -2426,8 +2492,8 @@ function runDraftDownload(btn) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft_name: draftName, revision: rev }),
   }).then((r) => r.json()).then((data) => {
     setSourceQueueText(data.error ? `${draftName}: ${data.error}` : `${draftName}-${rev}: downloaded.`);
-    fetchSources();
-  }).catch(() => { setSourceQueueText(`${draftName}: download failed.`); fetchSources(); });
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: download failed.`); refreshSingleSource(draftName); });
 }
 function runLocalSync(draftName, btn) {
   if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
@@ -2440,41 +2506,26 @@ function runLocalSync(draftName, btn) {
     } else if (msg.type === 'result') {
       source.close();
       setSourceQueueText(msg.data.error ? `${draftName}: ${msg.data.error}` : `${draftName}: sync complete.`);
-      fetchSources();
+      refreshSingleSource(draftName);
     } else if (msg.type === 'error') {
       source.close();
       setSourceQueueText(`${draftName}: ${msg.message}`);
-      fetchSources();
+      refreshSingleSource(draftName);
     }
   };
-  source.onerror = () => { source.close(); setSourceQueueText(`${draftName}: connection lost while syncing.`); fetchSources(); };
+  source.onerror = () => { source.close(); setSourceQueueText(`${draftName}: connection lost while syncing.`); refreshSingleSource(draftName); };
 }
 
-// -- Filter bar -- client-side over the already-fetched list, matching
-// each <details class="ps-source">'s own data-search/data-kind rather
-// than re-fetching, same as the v2 mockup's own filter() function. -------
-let sourceFilterText = '';
-let sourceFilterKind = 'all';
-document.getElementById('poSourceFilterText').addEventListener('input', (e) => {
-  sourceFilterText = e.target.value.trim().toLowerCase();
-  applySourceFilter();
+// -- Filter bar -- now a real server-side query (q/kind on
+// /api/corpora/freshness) rather than hiding already-rendered cards,
+// since the whole point of paging is to never have the full library
+// loaded client-side to filter over in the first place.
+let sourceFilterDebounce = null;
+document.getElementById('poSourceFilterText').addEventListener('input', () => {
+  clearTimeout(sourceFilterDebounce);
+  sourceFilterDebounce = setTimeout(fetchSources, 300);
 });
-document.getElementById('poSourceFilterKind').addEventListener('change', (e) => {
-  sourceFilterKind = e.target.value;
-  applySourceFilter();
-});
-function applySourceFilter() {
-  const listEl = document.getElementById('poSourcesList');
-  const sources = listEl.querySelectorAll('.ps-source');
-  let visible = 0;
-  sources.forEach((el) => {
-    const show = (!sourceFilterText || (el.dataset.search || '').includes(sourceFilterText))
-      && (sourceFilterKind === 'all' || sourceFilterKind === el.dataset.kind);
-    el.hidden = !show;
-    if (show) visible++;
-  });
-  document.getElementById('poSourceEmpty').hidden = sources.length === 0 || visible !== 0;
-}
+document.getElementById('poSourceFilterKind').addEventListener('change', fetchSources);
 
 // -- Add-source dialog -- a real <dialog> with two tabs, matching classic's
 // own modal-based flow (and the v2 mockup's) instead of the inline search

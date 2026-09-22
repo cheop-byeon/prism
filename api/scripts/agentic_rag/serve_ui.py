@@ -770,6 +770,21 @@ def main() -> None:
         same way, just flagged `is_local` so the frontend can add the
         raw-download actions a real corpus doesn't need (it already has an
         indexed dataset; a local source only has whatever's on disk).
+
+        Pagination (page_size/offset) and filtering (q/kind) are opt-in via
+        query params -- confirmed live that a full unpaginated fetch across
+        ~45 registered+local entries takes 1-2 minutes (each local-only
+        entry alone costs 2 live Datatracker calls just to resolve its own
+        wg/rfc_number, on top of the per-entry mail/draft-relations lookups
+        below), which is what actually made the Prism-Spectrum Sources page
+        slow enough to prompt paging it. Omitting every one of these params
+        reproduces the
+        original unpaginated behavior exactly, so the classic page's own
+        call site (which passes none) is unaffected. When page_size is
+        given, the expensive local-only wg/rfc_number resolution itself
+        also only runs for that page's entries -- slicing after building
+        the enrichment rows would still pay that cost for every local
+        source up front, defeating the point.
         """
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
         from services.ietf_import_service import IetfImportService
@@ -781,23 +796,69 @@ def main() -> None:
             return jsonify({"error": str(exc)}), 500
 
         registered_names = {entry["draft_name"] for entry in catalog}
-        entries = list(catalog)
+        # Identity only at this point -- catalog entries already carry a
+        # real rfc_number/wg with no live lookup; local-only entries defer
+        # that live resolution until after paging/filtering below, since
+        # it's the expensive part.
+        identities = [{**entry, "is_local": False} for entry in catalog]
         for draft_name in IetfImportService.list_local_source_names():
             if draft_name in registered_names:
                 continue
-            entries.append(
-                {
-                    "draft_name": draft_name,
-                    "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
-                    "wg": IetfImportService.resolve_wg_for_draft(draft_name),
-                    "evolution_dataset_id": None,
-                    "mailarchive_dataset_id": None,
-                    "is_local": True,
-                }
-            )
+            identities.append({"draft_name": draft_name, "is_local": True})
 
-        corpora = []
-        for entry in entries:
+        query = (request.args.get("q") or "").strip().lower()
+        kind = (request.args.get("kind") or "").strip().lower()
+        if query:
+            identities = [
+                e
+                for e in identities
+                if query in e["draft_name"].lower()
+                or query in str(e.get("rfc_number") or "").lower()
+                or query in str(e.get("wg") or "").lower()
+            ]
+        if kind in ("local", "dataset"):
+            identities = [e for e in identities if e["is_local"] == (kind == "local")]
+
+        # Stable order so paging through "load more" never reshuffles
+        # already-seen rows underneath the caller.
+        import operator
+
+        identities.sort(key=operator.itemgetter("is_local", "draft_name"))
+        total = len(identities)
+
+        page_size_param = request.args.get("page_size")
+        offset_param = request.args.get("offset")
+        paginated = page_size_param is not None or offset_param is not None
+        if paginated:
+            try:
+                page_size = max(1, min(50, int(page_size_param or 12)))
+            except ValueError:
+                page_size = 12
+            try:
+                offset = max(0, int(offset_param or 0))
+            except ValueError:
+                offset = 0
+            identities = identities[offset : offset + page_size]
+        else:
+            offset = 0
+            page_size = total
+
+        def _enrich(entry: dict) -> dict:
+            # Identity resolution AND enrichment for one entry, run off the
+            # main thread below -- confirmed live that even a single local
+            # entry's full cost (2 live calls just to resolve its own wg/
+            # rfc_number, plus mail/draft-relations/local-status lookups)
+            # is several real Datatracker round trips; doing that
+            # sequentially for a 12-entry page still took ~2 minutes.
+            # Independent per entry, so running the whole page concurrently
+            # instead cuts total time to roughly the slowest single entry.
+            if entry["is_local"]:
+                entry = dict(entry)
+                entry["rfc_number"] = IetfImportService.resolve_rfc_number_for_draft(entry["draft_name"])
+                entry["wg"] = IetfImportService.resolve_wg_for_draft(entry["draft_name"])
+                entry["evolution_dataset_id"] = None
+                entry["mailarchive_dataset_id"] = None
+
             row = dict(entry)
             wg = entry.get("wg")
             if wg:
@@ -832,8 +893,21 @@ def main() -> None:
                     }
                 except Exception as exc:
                     row["embedding_index_status"] = {"status": "error", "message": str(exc)}
-            corpora.append(row)
-        return jsonify({"corpora": corpora})
+            return row
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(12, max(1, len(identities)))) as pool:
+            corpora = list(pool.map(_enrich, identities))
+        return jsonify(
+            {
+                "corpora": corpora,
+                "total": total,
+                "offset": offset,
+                "page_size": page_size,
+                "has_more": paginated and offset + page_size < total,
+            }
+        )
 
     @app.route(f"{_URL_PREFIX}/api/corpora/rfc-suggestions", methods=["GET"])
     def api_corpora_rfc_suggestions():
