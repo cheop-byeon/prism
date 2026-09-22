@@ -849,18 +849,36 @@ def decision_thread(
         if on_event:
             on_event({"stage": stage, "message": message})
 
+    # _list_available_corpora() only covers drafts registered as a real Dify
+    # dataset (an evolution_dataset_id to query DocumentSegment rows from) --
+    # a locally-downloaded-only source (see IetfImportService.
+    # register_local_source, and the Sources page's own "Local library" vs
+    # "Dify dataset" distinction) has no such table, so it can never resolve
+    # here no matter how the hint is spelled. Both ValueErrors below say so
+    # explicitly rather than just naming the query/hint, since "no known
+    # draft" reads as a bug report otherwise -- confirmed live this is
+    # genuinely confusing without the reason spelled out.
     _, catalog = _list_available_corpora()
     if draft_hint and draft_hint.strip():
         _emit("resolving", f"Resolving draft {draft_hint!r}…")
         resolved = _resolve_draft_hint(draft_hint, catalog)
         if not resolved:
-            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none found)"
-            raise ValueError(f"{draft_hint!r} did not match exactly one known draft. Known drafts: {known}")
+            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
+            raise ValueError(
+                f"{draft_hint!r} did not match exactly one draft registered as a Dify dataset. "
+                f"Track a Decision only searches drafts imported that way, not locally-downloaded-only "
+                f"sources -- see the Sources page for which is which. Registered drafts: {known}"
+            )
     else:
         _emit("resolving", f"No draft given -- searching every known draft for {query!r}…")
         matching_drafts = _drafts_with_matches(query, catalog)
         if not matching_drafts:
-            raise ValueError(f"No known draft has any revision mentioning {query!r}.")
+            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
+            raise ValueError(
+                f"No draft registered as a Dify dataset has any revision mentioning {query!r}. "
+                f"Track a Decision only searches drafts imported that way, not locally-downloaded-only "
+                f"sources -- see the Sources page for which is which. Registered drafts: {known}"
+            )
         if len(matching_drafts) > 1:
             raise ValueError(
                 f"{query!r} matches more than one draft ({', '.join(matching_drafts)}) -- pick one specific draft."
