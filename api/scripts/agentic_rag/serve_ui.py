@@ -1722,14 +1722,13 @@ def main() -> None:
         from dify_graph.model_runtime.entities.model_entities import ModelType
         from extensions.ext_database import db
         from models.account import Tenant
-        from scripts.agentic_rag.ask_decision_agent import _DEFAULT_MODEL_NAME, _DEFAULT_MODEL_PROVIDER
 
         tenant_id = db.session.query(Tenant).first().id
         return ModelManager().get_model_instance(
             tenant_id=tenant_id,
-            provider=_DEFAULT_MODEL_PROVIDER,
+            provider="langgenius/openrouter/openrouter",
             model_type=ModelType.LLM,
-            model=_DEFAULT_MODEL_NAME,
+            model="google/gemini-2.5-flash",
         )
 
     @app.route(f"{_URL_PREFIX}/api/family-search-demo/roots", methods=["GET"])

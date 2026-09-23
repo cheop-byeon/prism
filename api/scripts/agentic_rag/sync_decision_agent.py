@@ -159,7 +159,7 @@ def _build_model_config(
         "more_like_this": {"enabled": False},
         "external_data_tools": [],
         "model": {
-            "provider": "langgenius/anthropic/anthropic",
+            "provider": "langgenius/openrouter/openrouter",
             "name": model_name,
             "mode": "chat",
             "completion_params": {"temperature": 0.3, "top_p": 1},
@@ -299,11 +299,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--model",
-        default="claude-sonnet-5",
-        help=(
-            "Anthropic model id, via the direct langgenius/anthropic/anthropic provider "
-            "(must support function calling)"
-        ),
+        default="google/gemini-2.5-flash",
+        help="OpenRouter model id (must support function calling)",
     )
     args = parser.parse_args()
 

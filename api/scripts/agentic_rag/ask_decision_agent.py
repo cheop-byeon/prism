@@ -268,14 +268,8 @@ _MAX_ITERATIONS = 10
 # decision_thread() each used to hardcode this pair as their own default
 # parameter values, which could silently drift out of sync on a future
 # edit to just one of them.
-#
-# Direct Anthropic provider (not Claude-via-OpenRouter) -- per explicit
-# instruction to default all LLM usage to Anthropic while there's budget
-# there. claude-sonnet-5 is the current flagship general-purpose model,
-# a reasonable default for an agent loop that needs both capability and
-# per-call latency (see _MAX_ITERATIONS/_RESEARCH_MAX_ITERATIONS below).
-_DEFAULT_MODEL_PROVIDER = "langgenius/anthropic/anthropic"
-_DEFAULT_MODEL_NAME = "claude-sonnet-5"
+_DEFAULT_MODEL_PROVIDER = "langgenius/openrouter/openrouter"
+_DEFAULT_MODEL_NAME = "google/gemini-2.5-flash"
 
 # The single Research entry point: one genuinely thorough pass that decides
 # its own scope, replacing the old Deep Dive/Panorama split -- ask() takes
@@ -2842,8 +2836,8 @@ def main() -> None:
             "of those are given. Omit to let the agent discover it from the question itself."
         ),
     )
-    parser.add_argument("--model", default=_DEFAULT_MODEL_NAME)
-    parser.add_argument("--model-provider", default=_DEFAULT_MODEL_PROVIDER)
+    parser.add_argument("--model", default="google/gemini-2.5-flash")
+    parser.add_argument("--model-provider", default="langgenius/openrouter/openrouter")
     parser.add_argument("--mail-top-k", type=int, default=50)
     parser.add_argument(
         "--verbose", action="store_true", help="print each tool call (seeded and self-directed) to stderr"
