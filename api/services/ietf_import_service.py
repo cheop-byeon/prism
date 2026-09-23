@@ -270,9 +270,24 @@ class IetfImportService:
 
     @staticmethod
     def resolve_wg_for_draft(draft_name: str) -> str | None:
-        """Live lookup of a draft's owning WG acronym via IETF Datatracker
-        (draft -> group -> acronym) -- not cached, matching the pattern used
-        by every other live-fetch tool. Returns None on any lookup failure.
+        """Live lookup of a draft's owning WG's real mailing-list name via
+        IETF Datatracker (draft -> group -> list_email's local-part) -- not
+        cached, matching the pattern used by every other live-fetch tool.
+        Returns None on any lookup failure.
+
+        Deliberately prefers list_email's local-part over the bare group
+        acronym, and falls back to the acronym only when list_email is
+        absent/unparseable: every caller of this function (sync_local_source,
+        get_local_download_status, get_mailarchive_sync_status,
+        LocalSourceIndexService) uses the return value both to talk to
+        mailarchive.ietf.org (via the ietfdata sidecar) AND to name/glob the
+        resulting local mbox/thread files -- and confirmed live that several
+        WGs' actual list differs from their acronym (ipsecme -> ipsec,
+        6man -> ipv6, dhc -> dhcwg, httpstate -> http-state, httpauth ->
+        http-auth, intarea -> int-area, ...). Passing the acronym straight
+        through silently 404'd against the real IMAP list for every one of
+        these (measured: 65 of 69 successful RFC/draft pulls in one bulk-pull
+        session got zero mail because of exactly this, before this fix).
         """
         try:
             with httpx.Client(timeout=15.0, follow_redirects=True) as client:
@@ -287,7 +302,11 @@ class IetfImportService:
                 group_resp = client.get(f"https://datatracker.ietf.org{group_url}", params={"format": "json"})
                 if group_resp.status_code != 200:
                     return None
-                return group_resp.json().get("acronym")
+                group_data = group_resp.json()
+                list_email = group_data.get("list_email")
+                if list_email and "@" in list_email:
+                    return list_email.split("@", 1)[0]
+                return group_data.get("acronym")
         except httpx.HTTPError:
             return None
 
@@ -2854,6 +2873,27 @@ class IetfImportService:
             return str(value)
 
     @staticmethod
+    def _decode_payload(payload: bytes, charset: str | None) -> str:
+        """Decode a message payload, tolerating a garbled/unregistered charset
+        name -- not just bad bytes within a real one.
+
+        `errors="replace"` only covers the second case: it has no effect on
+        `LookupError` from an invalid codec name reaching Python's decode
+        machinery at all. Confirmed live: a single message in a decades-old
+        WG mailing list (ipsecme's) declared charset "iso-6134-1" -- not a
+        real codec, presumably a transcription slip for "iso-8859-1" -- and
+        that one message's LookupError propagated out of the whole
+        per-year ThreadPoolExecutor fetch, silently discarding an otherwise
+        good multi-decade mail import for the entire list, not just that
+        message. utf-8 with errors="replace" can decode any byte sequence,
+        so it's a safe fallback when the declared charset itself is bogus.
+        """
+        try:
+            return payload.decode(charset or "utf-8", errors="replace")
+        except LookupError:
+            return payload.decode("utf-8", errors="replace")
+
+    @staticmethod
     def _extract_text_body(msg: email_lib.message.Message) -> str | None:
         """Return the decoded text/plain body, or None if not available."""
         if msg.is_multipart():
@@ -2861,15 +2901,13 @@ class IetfImportService:
                 if part.get_content_type() == "text/plain":
                     payload = part.get_payload(decode=True)
                     if payload:
-                        charset = part.get_content_charset() or "utf-8"
-                        return payload.decode(charset, errors="replace")  # type: ignore[union-attr]
+                        return IetfImportService._decode_payload(payload, part.get_content_charset())  # type: ignore[arg-type]
             return None
 
         if msg.get_content_type() == "text/plain":
             payload = msg.get_payload(decode=True)
             if payload:
-                charset = msg.get_content_charset() or "utf-8"
-                return payload.decode(charset, errors="replace")  # type: ignore[union-attr]
+                return IetfImportService._decode_payload(payload, msg.get_content_charset())  # type: ignore[arg-type]
         return None
 
     # IETF Secretariat/datatracker bot notices, plus chair-issued procedural
