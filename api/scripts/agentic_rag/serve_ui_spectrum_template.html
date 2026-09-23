@@ -259,54 +259,6 @@
   .po-feedbackbtn:hover, .po-copybtn:hover { color: var(--po-ink); border-color: var(--po-muted); }
   .po-feedbackbtn.active { color: var(--po-accent); border-color: var(--po-accent); background: var(--po-tint); }
 
-  /* Decision history -- same lane/chain visualization Track a Decision
-     already had (real revision text, real diff links, real discussion
-     links), restyled to the Prismatic palette rather than rebuilt as the
-     mockup's simplified dashed rail -- see plan. */
-  .po-lane { margin: 20px 0 26px; }
-  .po-lanehead { font-family: var(--po-mono); font-size: 12px; color: var(--po-accent); margin-bottom: 10px; }
-  .po-chain { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 14px 0; }
-  .po-dcard {
-    background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 10px;
-    padding: 14px 16px; width: 250px; flex-shrink: 0; display: flex; flex-direction: column;
-  }
-  .po-dcard .po-revlabel { font-family: var(--po-mono); font-size: 13px; font-weight: 600; color: var(--po-ink); }
-  .po-dcard .po-revtag { font-size: 10px; color: var(--po-muted); margin: 1px 0 8px; min-height: 12px; }
-  .po-dcard .po-para { font-size: 12px; line-height: 1.6; color: var(--po-ink); flex: 1; position: relative; }
-  .po-dcard .po-para mark { background: var(--po-modified-bg); color: var(--po-modified); font-weight: 600; padding: 0 2px; border-radius: 3px; }
-  .po-dcard.clamped .po-para { max-height: 200px; overflow: hidden; }
-  .po-dcard.clamped .po-para::after {
-    content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 30px;
-    background: linear-gradient(to bottom, transparent, var(--po-soft));
-  }
-  .po-dcard.expanded .po-para { max-height: none; }
-  .po-dcard.expanded .po-para::after { display: none; }
-  .po-expandbtn { align-self: flex-start; margin-top: 8px; background: none; border: none; color: var(--po-accent); font-size: 12px; font-weight: 600; padding: 0; }
-  .po-expandbtn:hover { text-decoration: underline; }
-  .po-arrowgroup { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; width: 96px; padding: 0 4px; align-self: center; }
-  .po-arrowgroup .po-diffpill { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: 0.03em; }
-  .po-diffpill.added { color: var(--po-added); background: var(--po-added-bg); }
-  .po-diffpill.removed { color: var(--po-warn); background: #3a2220; }
-  .po-diffpill.modified { color: var(--po-modified); background: var(--po-modified-bg); }
-  .po-arrowgroup .po-shaft { color: var(--po-line); }
-  .po-difflink { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--po-accent); text-decoration: none; font-weight: 500; white-space: nowrap; }
-  .po-difflink:hover { text-decoration: underline; }
-  .po-discussbtn { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; color: var(--po-modified); background: var(--po-modified-bg); border: none; border-radius: 999px; padding: 2px 9px 2px 7px; font-weight: 500; }
-  .po-discussbtn:hover { filter: brightness(1.15); }
-  .po-tailnote { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--po-muted); margin-top: 12px; }
-  .po-tailnote b { color: var(--po-ink); font-family: var(--po-mono); font-weight: 600; }
-
-  .po-modal-overlay { position: fixed; inset: 0; background: rgba(6,7,11,0.6); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 40px; }
-  .po-modal-overlay[hidden] { display: none; }
-  .po-modal-box { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; width: min(600px, 100%); max-height: 80vh; display: flex; flex-direction: column; }
-  .po-modal-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; border-bottom: 1px solid var(--po-line); flex-shrink: 0; }
-  .po-modal-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--po-modified); font-weight: 600; }
-  .po-modal-body { padding: 16px 18px; overflow-y: auto; font-size: 13px; color: var(--po-ink); line-height: 1.6; white-space: pre-wrap; }
-  .po-modal-links { display: flex; flex-direction: column; gap: 4px; padding: 0 18px 12px; flex-shrink: 0; }
-  .po-modal-links a { font-size: 12px; color: var(--po-accent); text-decoration: none; font-weight: 500; }
-  .po-modal-links a:hover { text-decoration: underline; }
-  .po-modal-caveat { font-size: 11px; color: var(--po-muted); padding: 10px 18px; border-top: 1px solid var(--po-line); flex-shrink: 0; }
-
   /* Live-filtered document lookup, shared by Documents' own composer bar
      and Workspace's "Start from a document" tab. */
   .po-lookup-wrap { position: relative; }
@@ -483,6 +435,62 @@
   .ps-dialogfoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; font-size: 12px; flex-wrap: wrap; }
   .ps-dialogfoot label { display: flex; align-items: center; gap: 6px; }
   .ps-miniheading { color: var(--po-cyan); font-size: 11px; margin: 18px 0 5px; }
+
+  /* Decision history -- passage-map grid + selected-track timeline +
+     tabbed detail panel (pt-*, ported from prism-complete's own dedicated
+     "Decision history" page design), replacing the earlier always-open
+     lane/chain cards. Same real backend data (lanes/nodes/edges from
+     /api/decision-thread), just restructured: a grid lets you see every
+     section x revision at a glance instead of scrolling past every lane
+     to find the one you want. */
+  .pt-form { display: flex; gap: 12px; align-items: flex-end; padding: 16px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .pt-form label { flex: 1; min-width: 160px; font-size: 12px; color: var(--po-muted); }
+  .pt-form select, .pt-form input { display: block; width: 100%; padding: 9px 10px; margin-top: 6px; border: 1px solid var(--po-line); border-radius: 6px; background: var(--po-bg); color: var(--po-ink); font-size: 13px; box-sizing: border-box; }
+  .pt-action { padding: 10px 16px; border-radius: 6px; background: var(--po-accent); color: var(--po-shell); font-size: 13px; font-weight: 600; }
+  .pt-status { margin: 0 0 16px; color: var(--po-muted); font-size: 12px; min-height: 1em; }
+  .pt-map { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 18px; margin-bottom: 20px; }
+  .pt-maphead { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .pt-maphead strong { font-size: 13px; font-weight: 500; }
+  .pt-muted { color: var(--po-muted); font-size: 11px; }
+  .pt-label { font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--po-accent); }
+  .pt-scroll { overflow-x: auto; }
+  .pt-grid { display: grid; gap: 6px; align-items: center; font-size: 12px; }
+  .pt-col { text-align: center; color: var(--po-muted); padding: 5px 0; font-size: 11px; }
+  .pt-track { background: transparent; text-align: left; padding: 10px 8px; border-radius: 6px; color: var(--po-ink); }
+  .pt-track small { display: block; color: var(--po-muted); font-size: 10px; margin-top: 2px; }
+  .pt-track[aria-pressed=true] { background: var(--po-tint); color: var(--po-accent); }
+  .pt-cell { background: var(--po-soft); color: var(--po-muted); border-radius: 6px; padding: 7px 2px; min-height: 32px; text-align: center; }
+  .pt-cell.pt-found { background: var(--po-tint); color: var(--po-accent); }
+  .pt-cell[aria-pressed=true] { outline: 2px solid var(--po-accent); outline-offset: 1px; }
+  .pt-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; font-size: 11px; color: var(--po-muted); }
+  .pt-tailnote { font-size: 12px; color: var(--po-muted); margin-bottom: 20px; }
+  .pt-work { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 20px; }
+  .pt-timeline { padding-left: 14px; border-left: 1px solid var(--po-line); margin-top: 14px; }
+  .pt-event { position: relative; display: block; text-align: left; width: 100%; background: transparent; border-radius: 8px; padding: 10px 12px; margin: 0 0 10px; color: var(--po-ink); }
+  .pt-event:before { content: ''; position: absolute; left: -19px; top: 18px; width: 9px; height: 9px; background: var(--po-muted); border-radius: 50%; }
+  .pt-event[aria-pressed=true] { background: var(--po-tint); }
+  .pt-event[aria-pressed=true]:before { background: var(--po-accent); box-shadow: 0 0 0 4px var(--po-tint); }
+  .pt-event span, .pt-event small { display: block; }
+  .pt-event small { color: var(--po-muted); font-size: 10px; }
+  .pt-detail { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; overflow: hidden; align-self: start; }
+  .pt-detailhead { padding: 18px; background: linear-gradient(115deg, var(--po-tint), var(--po-paper)); border-bottom: 1px solid var(--po-line); }
+  .pt-detailhead h2 { font: 500 19px var(--po-serif); margin: 6px 0; }
+  .pt-tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--po-line); padding: 0 18px; }
+  .pt-tabs button { background: transparent; padding: 12px 0; color: var(--po-muted); border-bottom: 2px solid transparent; font-size: 12px; }
+  .pt-tabs button[aria-pressed=true] { color: var(--po-accent); border-color: var(--po-accent); }
+  .pt-content { padding: 18px; }
+  .pt-content p { margin: 10px 0; font-size: 12px; color: var(--po-muted); }
+  .pt-excerpt { white-space: pre-wrap; padding: 16px; background: var(--po-bg); border-left: 3px solid var(--po-accent); font: 13px/1.8 var(--po-mono); overflow-wrap: anywhere; margin: 10px 0; color: var(--po-ink); }
+  .pt-excerpt mark { background: var(--po-tint); color: var(--po-accent); padding: 1px 3px; }
+  .pt-excerpt mark.pt-activemark { outline: 1px solid currentColor; }
+  .pt-note { padding: 10px 12px; border: 1px dashed var(--po-line); border-radius: 6px; color: var(--po-muted); font-size: 11px; }
+  .pt-occurrences { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .pt-occurrences button { background: var(--po-soft); padding: 6px 11px; border-radius: 5px; font-size: 11px; color: var(--po-ink); }
+  .pt-occurrences button[aria-pressed=true] { background: var(--po-tint); color: var(--po-accent); }
+  @media (max-width: 800px) {
+    .pt-work { grid-template-columns: 1fr; }
+    .pt-grid { min-width: 480px; }
+  }
   .ps-loadmore { display: block; width: 100%; margin: 14px 0; text-align: center; }
   @media (max-width: 600px) {
     .ps-pipeline { grid-template-columns: 1fr; }
@@ -616,12 +624,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       </div>
       <div data-panel="timeline" hidden>
         <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
-        <div class="po-composer-bar">
-          <select id="poThreadDraft"><option value="">(let the agent discover)</option></select>
-          <input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'>
-          <button id="poThreadBtn" class="po-primary" type="button">Track</button>
-        </div>
-        <div id="poThreadStatus" class="po-loading"></div>
+        <form class="pt-form" id="poThreadForm">
+          <label>Document<select id="poThreadDraft"><option value="">(let the agent discover)</option></select></label>
+          <label>Keyword or exact phrase<input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'></label>
+          <button id="poThreadBtn" class="pt-action" type="submit">Track phrase</button>
+        </form>
+        <div id="poThreadStatus" class="pt-status" role="status"></div>
         <div id="poThreadBody"></div>
       </div>
       <div data-panel="activity" hidden>
@@ -742,18 +750,6 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
   </div>
   <div id="poEvidenceBody"></div>
 </aside>
-
-<div class="po-modal-overlay" id="poDiscussionModal" hidden>
-  <div class="po-modal-box">
-    <div class="po-modal-head">
-      <span class="po-modal-title" id="poDiscussionModalTitle">Possibly related discussion</span>
-      <button class="po-close" id="poDiscussionModalClose" type="button" aria-label="Close">&times;</button>
-    </div>
-    <div class="po-modal-body" id="poDiscussionModalBody"></div>
-    <div class="po-modal-links" id="poDiscussionModalLinks"></div>
-    <p class="po-modal-caveat">Found via keyword search and an LLM's best-effort judgment -- not a certainty that this is the actual reason for the change.</p>
-  </div>
-</div>
 
 <script>
 // Same host, same PRISM_PREFIX, just the original page's port -- both
@@ -1456,75 +1452,239 @@ function renderStaticTurn(t) {
 // the plan's explicit call to keep this real content (revision text, live
 // diff links, resolved discussion links) rather than the mockup's
 // simplified dashed-rail wireframe.
-function highlight(text, needle) {
-  const escapedText = escapeHtml(text);
-  if (!needle) return escapedText;
-  const escapedNeedle = escapeHtml(needle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return escapedText.replace(new RegExp(escapedNeedle, 'ig'), (m) => `<mark>${m}</mark>`);
+// Every case-insensitive literal occurrence of `needle` in `text` -- the
+// same real, honest signal the prism-complete mockup's own hits()/marked()
+// used, just against real revision text instead of illustrative excerpts.
+// decision_thread() only ever records a node when the exact substring
+// matched (see ask_decision_agent.py), so this never comes back empty for
+// a real node -- it's only used for the hit COUNT and highlight positions.
+function findOccurrences(text, needle) {
+  if (!needle || !text) return [];
+  const hay = text.toLowerCase();
+  const n = needle.toLowerCase();
+  const out = [];
+  let pos = 0;
+  while (true) {
+    const idx = hay.indexOf(n, pos);
+    if (idx === -1) break;
+    out.push(idx);
+    pos = idx + n.length;
+  }
+  return out;
 }
-function arrowSvg() {
-  return '<svg class="po-shaft" width="76" height="14" viewBox="0 0 80 14" fill="none">'
-    + '<path d="M0 7H76M76 7L69 1M76 7L69 13" stroke="currentColor" stroke-width="1.6"/></svg>';
+function highlightOccurrences(text, needle, activeOcc) {
+  const occs = findOccurrences(text, needle);
+  if (!occs.length) return escapeHtml(text || '');
+  let out = '';
+  let last = 0;
+  occs.forEach((pos, i) => {
+    out += escapeHtml(text.slice(last, pos));
+    out += `<mark${i === activeOcc ? ' class="pt-activemark"' : ''}>${escapeHtml(text.slice(pos, pos + needle.length))}</mark>`;
+    last = pos + needle.length;
+  });
+  return out + escapeHtml(text.slice(last));
 }
-function diffIconSvg() {
-  return '<svg width="11" height="11" viewBox="0 0 16 16" fill="none">'
-    + '<path d="M6 2H2v12h12v-4M9 2h5v5M14 2L7 9" stroke="currentColor" stroke-width="1.4" '
-    + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// Same URL template the backend's own _iddiff_page_url uses (IETF's
+// hosted iddiff-as-a-service) -- safe to build client-side for ANY two
+// revisions of the same draft, not just the consecutive pair the backend
+// already precomputed a diff_url for, since it's a deterministic template
+// over two real, valid revision identifiers.
+function iddiffUrl(draftName, fromRev, toRev) {
+  const params = new URLSearchParams({ url1: `${draftName}-${fromRev}`, url2: `${draftName}-${toRev}`, difftype: '--html' });
+  return `https://author-tools.ietf.org/iddiff?${params}`;
 }
-function chatIconSvg() {
-  return '<svg width="11" height="11" viewBox="0 0 16 16" fill="none">'
-    + '<path d="M2 3h12v8H6l-3 3v-3H2V3z" stroke="currentColor" stroke-width="1.4" '
-    + 'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+function revisionUrl(draftName, rev) {
+  return `https://datatracker.ietf.org/doc/html/${draftName}-${rev}`;
+}
+function edgeTypeLabel(type) {
+  if (type === 'added') return 'Added in this revision';
+  if (type === 'removed') return 'Removed in this revision';
+  return 'Modified in this revision';
 }
 
 let currentThreadData = null;
+let dtLaneIdx = 0;
+let dtRev = null;
+let dtTab = 'passage';
+let dtOcc = 0;
 const poThreadStatusEl = document.getElementById('poThreadStatus');
 const poThreadBodyEl = document.getElementById('poThreadBody');
 
-function renderLaneChain(lane, laneIdx, query) {
-  let html = '<div class="po-chain">';
-  lane.nodes.forEach((node, i) => {
-    const isLong = (node.text || '').length > 420;
-    html += `
-      <div class="po-dcard${isLong ? ' clamped' : ''}">
-        <div class="po-revlabel">rev ${escapeHtml(node.rev)}</div>
-        <div class="po-revtag">${i === 0 ? 'earliest matching wording' : '&nbsp;'}</div>
-        <div class="po-para">${highlight(node.text, query)}</div>
-        ${isLong ? '<button class="po-expandbtn" type="button">Show more</button>' : ''}
-      </div>`;
-    if (i < lane.edges.length) {
-      const edge = lane.edges[i];
-      html += `
-        <div class="po-arrowgroup">
-          <span class="po-diffpill ${escapeHtml(edge.type)}">${escapeHtml(edge.type)}</span>
-          ${arrowSvg()}
-          <a class="po-difflink" href="${edge.diff_url}" target="_blank" rel="noopener">${diffIconSvg()} View diff</a>
-          ${edge.has_discussion ? `<button class="po-discussbtn" data-lane="${laneIdx}" data-edge="${i}">${chatIconSvg()} Discussion</button>` : ''}
-        </div>`;
-    }
-  });
-  html += '</div>';
-  return html;
+// Union of every revision any track actually has a captured excerpt at --
+// real, not a fabricated "every revision this draft ever had" range, since
+// decision_thread() only records segments containing the exact phrase.
+function allTrackRevs(lanes) {
+  const set = new Set();
+  lanes.forEach((lane) => lane.nodes.forEach((n) => set.add(n.rev)));
+  return [...set].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
 }
 
+// Passage map (track x revision grid) + selected-track timeline + tabbed
+// detail panel (Passage/Compare/Discussion) -- ported from prism-complete's
+// dedicated "Decision history" page design, same real lanes/nodes/edges
+// data the earlier always-open lane/chain cards used, just restructured so
+// every section x revision is visible at a glance instead of scrolling
+// past every lane to find the one that matters.
 function renderThread(data) {
+  currentThreadData = data;
   if (!data.lanes.length) {
     poThreadBodyEl.innerHTML = '<p class="corpora-hint">No revision mentions that phrase. Try a more distinctive quote from the decision text.</p>';
     return;
   }
-  let html = '';
-  data.lanes.forEach((lane, laneIdx) => {
-    const lastRev = lane.nodes[lane.nodes.length - 1].rev;
-    html += `
-      <div class="po-lane">
-        <div class="po-lanehead">&sect; ${escapeHtml(lane.section)}${lane.title ? ' &middot; ' + escapeHtml(lane.title) : ''}</div>
-        ${renderLaneChain(lane, laneIdx, data.query)}
-        ${data.rfc_number ? `
-        <p class="po-tailnote">Unchanged from rev ${escapeHtml(lastRev)} through to publication as <b>RFC ${escapeHtml(data.rfc_number)}</b>, unless a later revision rephrased it away from this exact wording.</p>` : ''}
-      </div>`;
-  });
-  poThreadBodyEl.innerHTML = html;
+  dtLaneIdx = 0;
+  dtRev = data.lanes[0].nodes[0].rev;
+  dtTab = 'passage';
+  dtOcc = 0;
+  poThreadBodyEl.innerHTML = `
+    <div class="pt-map">
+      <div class="pt-maphead">
+        <div><strong>Passage map</strong><div class="pt-muted">Choose a section and revision. A number counts keyword hits in the shown excerpt.</div></div>
+        <span class="pt-label">${data.lanes.length} separate track${data.lanes.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="pt-scroll"><div class="pt-grid" id="ptGrid"></div></div>
+      <div class="pt-legend"><span>Number &middot; literal keyword hits</span><span>&mdash; &middot; no excerpt captured at that revision</span></div>
+    </div>
+    <div class="pt-work">
+      <aside>
+        <div class="pt-label">Selected passage history</div>
+        <h3 id="ptTrackTitle"></h3>
+        <div class="pt-timeline" id="ptTimeline"></div>
+        <div class="pt-note" id="ptRfcNote" hidden></div>
+      </aside>
+      <article class="pt-detail">
+        <header class="pt-detailhead">
+          <div class="pt-label" id="ptRevision"></div>
+          <h2 id="ptTitle"></h2>
+          <div class="pt-muted" id="ptSubtitle"></div>
+        </header>
+        <div class="pt-tabs">
+          <button type="button" data-pttab="passage" aria-pressed="true">Passage</button>
+          <button type="button" data-pttab="compare" aria-pressed="false">Compare</button>
+          <button type="button" data-pttab="discussion" aria-pressed="false">Discussion</button>
+        </div>
+        <div class="pt-content" id="ptContent"></div>
+      </article>
+    </div>
+  `;
+  renderDecisionThreadView();
 }
+
+function renderDecisionThreadView() {
+  const data = currentThreadData;
+  const lanes = data.lanes;
+  const revs = allTrackRevs(lanes);
+  const lane = lanes[dtLaneIdx];
+  const node = lane.nodes.find((n) => n.rev === dtRev) || lane.nodes[0];
+  dtRev = node.rev;
+
+  const gridEl = document.getElementById('ptGrid');
+  gridEl.style.gridTemplateColumns = `minmax(165px, 1.8fr) repeat(${revs.length}, minmax(40px, 1fr))`;
+  let gridHtml = '<span class="pt-muted">Section / revision</span>' + revs.map((v) => `<span class="pt-col">rev ${escapeHtml(v)}</span>`).join('');
+  lanes.forEach((l, li) => {
+    gridHtml += `<button type="button" class="pt-track" data-track="${li}" aria-pressed="${li === dtLaneIdx}">&sect; ${escapeHtml(l.section)}${l.title ? ' &middot; ' + escapeHtml(l.title) : ''}<small>${l.nodes.length} revision${l.nodes.length === 1 ? '' : 's'} captured</small></button>`;
+    gridHtml += revs.map((v) => {
+      const n = l.nodes.find((x) => x.rev === v);
+      const hitCount = n ? findOccurrences(n.text, data.query).length : 0;
+      const pressed = li === dtLaneIdx && v === dtRev;
+      const label = n ? `${hitCount} keyword hit${hitCount === 1 ? '' : 's'}` : 'no excerpt captured';
+      return `<button type="button" class="pt-cell${hitCount ? ' pt-found' : ''}" ${n ? `data-cell="${li},${v}"` : 'disabled'} aria-pressed="${pressed}" aria-label="${escapeHtml(l.section)}, revision ${escapeHtml(v)}, ${label}">${n ? (hitCount || '&middot;') : '&mdash;'}</button>`;
+    }).join('');
+  });
+  gridEl.innerHTML = gridHtml;
+
+  document.getElementById('ptTrackTitle').textContent = `§ ${lane.section}${lane.title ? ' · ' + lane.title : ''}`;
+  document.getElementById('ptTimeline').innerHTML = lane.nodes.map((n) => {
+    const idx = lane.nodes.indexOf(n);
+    const incomingEdge = idx > 0 ? lane.edges[idx - 1] : null;
+    const label = incomingEdge ? edgeTypeLabel(incomingEdge.type) : 'Earliest matching wording';
+    const hitCount = findOccurrences(n.text, data.query).length;
+    return `<button type="button" class="pt-event" data-rev="${escapeHtml(n.rev)}" aria-pressed="${n.rev === dtRev}"><small>REVISION ${escapeHtml(n.rev)}</small><span>${escapeHtml(label)}</span><small>${hitCount} literal hit${hitCount === 1 ? '' : 's'} in excerpt</small></button>`;
+  }).join('');
+  const rfcNoteEl = document.getElementById('ptRfcNote');
+  if (data.rfc_number) {
+    const lastRev = lane.nodes[lane.nodes.length - 1].rev;
+    rfcNoteEl.hidden = false;
+    rfcNoteEl.innerHTML = `Unchanged from rev ${escapeHtml(lastRev)} through to publication as <b>RFC ${escapeHtml(data.rfc_number)}</b>, unless a later revision rephrased it away from this exact wording.`;
+  } else {
+    rfcNoteEl.hidden = true;
+  }
+
+  renderDetailPanel();
+}
+
+function renderDetailPanel() {
+  const data = currentThreadData;
+  const lane = data.lanes[dtLaneIdx];
+  const nodeIdx = lane.nodes.findIndex((n) => n.rev === dtRev);
+  const node = lane.nodes[nodeIdx];
+  const incomingEdge = nodeIdx > 0 ? lane.edges[nodeIdx - 1] : null;
+  const hitCount = findOccurrences(node.text, data.query).length;
+  const draftName = data.draft_name;
+
+  document.getElementById('ptRevision').textContent = `${draftName}-${node.rev}`;
+  document.getElementById('ptTitle').textContent = incomingEdge ? edgeTypeLabel(incomingEdge.type) : 'Earliest matching wording';
+  document.getElementById('ptSubtitle').textContent = `§ ${lane.section} · ${hitCount} keyword hit${hitCount === 1 ? '' : 's'}`;
+  document.querySelectorAll('[data-pttab]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pttab === dtTab)));
+
+  const contentEl = document.getElementById('ptContent');
+  if (dtTab === 'passage') {
+    const occs = findOccurrences(node.text, data.query);
+    contentEl.innerHTML = `
+      ${occs.length > 1 ? `<div class="pt-label">Occurrences within this passage</div><div class="pt-occurrences">${occs.map((_, i) => `<button type="button" data-occ="${i}" aria-pressed="${i === dtOcc}">Hit ${i + 1}</button>`).join('')}</div>` : ''}
+      <div class="pt-excerpt">${highlightOccurrences(node.text, data.query, dtOcc)}</div>
+      <p><a href="${revisionUrl(draftName, node.rev)}" target="_blank" rel="noopener">Open full revision ↗</a></p>
+    `;
+  } else if (dtTab === 'compare') {
+    const earlierNodes = lane.nodes.slice(0, nodeIdx);
+    if (!earlierNodes.length) {
+      contentEl.innerHTML = '<p>No earlier captured excerpt for this track -- this is the earliest revision matched.</p>';
+    } else {
+      const defaultBaseline = earlierNodes[earlierNodes.length - 1].rev;
+      contentEl.innerHTML = `
+        <label class="pt-muted">Compare revision ${escapeHtml(node.rev)} with
+          <select id="ptBaseline" aria-label="Comparison baseline">
+            ${earlierNodes.map((n) => `<option value="${escapeHtml(n.rev)}"${n.rev === defaultBaseline ? ' selected' : ''}>rev ${escapeHtml(n.rev)}</option>`).join('')}
+          </select>
+        </label>
+        <div id="ptComparison"></div>
+      `;
+      const renderComparison = (baselineRev) => {
+        const baselineNode = lane.nodes.find((n) => n.rev === baselineRev);
+        document.getElementById('ptComparison').innerHTML = `
+          <div class="pt-label">Earlier &middot; revision ${escapeHtml(baselineRev)}</div>
+          <div class="pt-excerpt">${highlightOccurrences(baselineNode.text, data.query, -1)}</div>
+          <div class="pt-label">Selected &middot; revision ${escapeHtml(node.rev)}</div>
+          <div class="pt-excerpt">${highlightOccurrences(node.text, data.query, -1)}</div>
+          <a href="${iddiffUrl(draftName, baselineRev, node.rev)}" target="_blank" rel="noopener">Open authoritative full diff ↗</a>
+        `;
+      };
+      renderComparison(defaultBaseline);
+      document.getElementById('ptBaseline').addEventListener('change', (e) => renderComparison(e.target.value));
+    }
+  } else if (dtTab === 'discussion') {
+    if (!incomingEdge) {
+      contentEl.innerHTML = '<p>This is the earliest captured wording for this track -- there is no incoming revision change to check for a related discussion.</p>';
+    } else if (incomingEdge.has_discussion) {
+      const links = (incomingEdge.discussion_links || []).filter((l) => /^https?:\/\//.test(l.url));
+      contentEl.innerHTML = `
+        <div class="pt-label">Evidence for the reason</div>
+        <div class="pt-excerpt" style="border-left-color: var(--po-cyan);">${escapeHtml(incomingEdge.discussion)}</div>
+        ${links.map((l) => `<p><a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">View original email — ${escapeHtml(l.from)}, ${escapeHtml(l.date)} ↗</a></p>`).join('')}
+        <div class="pt-note">Found via keyword search and an LLM's best-effort judgment -- not a certainty that this is the actual reason for the change.</div>
+      `;
+    } else {
+      contentEl.innerHTML = `
+        <p>No mailing-list discussion was resolved for this specific revision change.</p>
+        <div class="pt-note">"Not found" is not "never discussed" -- the search may not have surfaced the right thread, or the change may not have been discussed on-list at all.</div>
+      `;
+    }
+  }
+}
+
+document.getElementById('poThreadForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  trackDecision();
+});
 
 function trackDecision() {
   const draft = poThreadDraftEl.value;
@@ -1547,7 +1707,6 @@ function trackDecision() {
       finished = true;
       source.close();
       poThreadStatusEl.textContent = '';
-      currentThreadData = msg.data;
       renderThread(msg.data);
     } else if (msg.type === 'error') {
       finished = true;
@@ -1564,40 +1723,35 @@ function trackDecision() {
     poThreadBodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
   };
 }
-document.getElementById('poThreadBtn').addEventListener('click', trackDecision);
-document.getElementById('poThreadQuery').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') trackDecision();
-});
 
-const poDiscussionModalEl = document.getElementById('poDiscussionModal');
-function openDiscussionModal(edge) {
-  document.getElementById('poDiscussionModalTitle').textContent = `Possibly related discussion — rev ${edge.from_rev} → rev ${edge.to_rev}`;
-  document.getElementById('poDiscussionModalBody').textContent = edge.discussion;
-  const links = (edge.discussion_links || []).filter((l) => /^https?:\/\//.test(l.url));
-  document.getElementById('poDiscussionModalLinks').innerHTML = links.length
-    ? links.map((l) => `<a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">View original email — ${escapeHtml(l.from)}, ${escapeHtml(l.date)} ↗</a>`).join('')
-    : '';
-  poDiscussionModalEl.hidden = false;
-}
-function closeDiscussionModal() { poDiscussionModalEl.hidden = true; }
-document.getElementById('poDiscussionModalClose').addEventListener('click', closeDiscussionModal);
-poDiscussionModalEl.addEventListener('click', (e) => { if (e.target === poDiscussionModalEl) closeDiscussionModal(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !poDiscussionModalEl.hidden) closeDiscussionModal(); });
-
+// Single delegated handler for the whole passage-map/timeline/tabs
+// interaction, same pattern the mockup's own render()-on-any-click design
+// uses -- cheap enough at this data size to just re-render everything
+// rather than patch individual pieces per interaction type.
 poThreadBodyEl.addEventListener('click', (e) => {
-  const discussBtn = e.target.closest('.po-discussbtn');
-  if (discussBtn && currentThreadData) {
-    const laneIdx = parseInt(discussBtn.dataset.lane, 10);
-    const edgeIdx = parseInt(discussBtn.dataset.edge, 10);
-    openDiscussionModal(currentThreadData.lanes[laneIdx].edges[edgeIdx]);
+  const btn = e.target.closest('button');
+  if (!btn || !currentThreadData) return;
+  if (btn.dataset.cell) {
+    const [li, v] = btn.dataset.cell.split(',');
+    dtLaneIdx = Number(li);
+    dtRev = v;
+    dtOcc = 0;
+  } else if (btn.dataset.track) {
+    dtLaneIdx = Number(btn.dataset.track);
+    const lane = currentThreadData.lanes[dtLaneIdx];
+    if (!lane.nodes.some((n) => n.rev === dtRev)) dtRev = lane.nodes[lane.nodes.length - 1].rev;
+    dtOcc = 0;
+  } else if (btn.dataset.rev) {
+    dtRev = btn.dataset.rev;
+    dtOcc = 0;
+  } else if (btn.dataset.occ !== undefined) {
+    dtOcc = Number(btn.dataset.occ);
+  } else if (btn.dataset.pttab) {
+    dtTab = btn.dataset.pttab;
+  } else {
     return;
   }
-  const expandBtn = e.target.closest('.po-expandbtn');
-  if (expandBtn) {
-    const card = expandBtn.closest('.po-dcard');
-    const expanded = card.classList.toggle('expanded');
-    expandBtn.textContent = expanded ? 'Show less' : 'Show more';
-  }
+  renderDecisionThreadView();
 });
 
 // -- Archive coverage -- derived from lastInvestigation's real trace, not
