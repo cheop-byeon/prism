@@ -4,16 +4,27 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Prism</title>
 <style>
-  /* Prismatic palette, dark-only (this app has no light mode), taken
-     directly from the prism-spectrum mockup's own --po-* names and dark
-     values -- not translated into a different app's token names, per the
+  /* Prismatic palette, taken directly from the prism-spectrum mockup's own
+     --po-* names and light-dark() pairs (light value first, dark value
+     second) -- not translated into a different app's token names, per the
      explicit direction to build this as its own page, not a migration of
-     the old one. */
+     the old one. color-scheme: light dark lets light-dark() resolve to
+     whichever the OS/browser prefers automatically, with no manual toggle
+     -- the mockup itself has none either.
+     --po-added/--po-added-bg/--po-modified/--po-modified-bg aren't part of
+     the mockup's own token set (they're this app's claim-pill colors); their
+     light-mode halves are derived to match the same darker-saturated-text-
+     on-pale-background relationship the mockup's other tokens use. */
   :root {
-    --po-bg: #0c1020; --po-paper: #151b30; --po-soft: #1d2540; --po-ink: #eff1ff;
-    --po-muted: #a5aecb; --po-line: #2d3656; --po-accent: #b5a3ff; --po-tint: #2b2450;
-    --po-purple: #e6a5ff; --po-warn: #dfbf7c; --po-shell: #0e1427; --po-cyan: #69e3e8;
-    --po-added: #5fd6a3; --po-added-bg: #16332a; --po-modified: #f0bf6c; --po-modified-bg: #3a2f16;
+    color-scheme: light dark;
+    --po-bg: light-dark(#f5f6ff, #0c1020); --po-paper: light-dark(#ffffff, #151b30);
+    --po-soft: light-dark(#eaedfc, #1d2540); --po-ink: light-dark(#25284c, #eff1ff);
+    --po-muted: light-dark(#636987, #a5aecb); --po-line: light-dark(#dce0f4, #2d3656);
+    --po-accent: light-dark(#6350ca, #b5a3ff); --po-tint: light-dark(#ece7ff, #2b2450);
+    --po-purple: light-dark(#a54aca, #e6a5ff); --po-warn: light-dark(#986822, #dfbf7c);
+    --po-shell: light-dark(#eef0fc, #0e1427); --po-cyan: light-dark(#008895, #69e3e8);
+    --po-added: light-dark(#1f7a52, #5fd6a3); --po-added-bg: light-dark(#e3f5ea, #16332a);
+    --po-modified: light-dark(#8a5f12, #f0bf6c); --po-modified-bg: light-dark(#fbf0da, #3a2f16);
     --po-serif: Georgia, "Times New Roman", serif;
     --po-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     --po-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
