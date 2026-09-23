@@ -356,14 +356,57 @@
   .pm-table td { padding: 12px 8px; border-bottom: 1px solid var(--po-line); }
   .pm-table th:last-child, .pm-table td:last-child { text-align: right; }
   .pm-table small { display: block; color: var(--po-muted); font-size: 10px; }
-  .pm-graphwrap { border: 1px solid var(--po-line); border-radius: 14px; background: radial-gradient(ellipse at 45% 50%, var(--po-tint), var(--po-bg) 70%); position: relative; overflow: hidden; }
-  .pm-graph { display: block; width: 100%; height: 380px; cursor: default; }
-  .pm-legend { display: flex; gap: 18px; flex-wrap: wrap; padding: 12px 16px; border-top: 1px solid var(--po-line); font-size: 11px; color: var(--po-muted); }
-  .pm-legend span { display: inline-flex; align-items: center; gap: 7px; }
-  .pm-legend b { display: inline-block; width: 16px; height: 2px; }
-  .pm-graphdetail { display: flex; align-items: center; justify-content: space-between; gap: 16px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; margin-top: 14px; padding: 16px; flex-wrap: wrap; }
-  .pm-graphdetail h2 { font-size: 16px; font-weight: 500; margin: 4px 0; }
-  .pm-graphdetail p { font-size: 12px; color: var(--po-muted); margin: 0; }
+  /* RFC Graph -- ported from the prism-complete mockup's own rx-* design
+     (map/chronology/list views + relationship filters + reach selector +
+     inspector panel), replacing the earlier single-RFC circular SVG
+     scatter. All content is real: real node titles/WGs/publication years,
+     real edge kinds, a real working-group breakdown for corpus mode
+     instead of the mockup's fixed illustrative DNS/Transport/Routing/
+     Security clusters. */
+  .rx-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .rx-sub { color: var(--po-muted); font-size: 12px; }
+  .rx-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 18px 0; }
+  .rx-controls button, .rx-controls input, .rx-controls select {
+    padding: 9px 12px; border: 1px solid var(--po-line); background: var(--po-paper);
+    border-radius: 7px; max-width: 100%; color: var(--po-ink); font-size: 13px; appearance: none;
+  }
+  .rx-controls button[aria-pressed=true] { background: var(--po-tint); color: var(--po-accent); }
+  .rx-filters { display: flex; gap: 18px; flex-wrap: wrap; padding: 14px 0; border-top: 1px solid var(--po-line); font-size: 12px; color: var(--po-ink); }
+  .rx-filters label { display: inline-flex; gap: 5px; align-items: center; }
+  .rx-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 18px; margin-top: 18px; }
+  .rx-canvas { background: radial-gradient(ellipse at 50% 40%, var(--po-tint), var(--po-paper) 70%); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; min-height: 390px; }
+  .rx-inspector { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; align-self: start; }
+  .rx-inspector h2 { font: 500 20px var(--po-serif); margin: 12px 0; }
+  .rx-inspector p { margin: 12px 0; font-size: 13px; color: var(--po-ink); }
+  .rx-inspector button {
+    display: block; width: 100%; padding: 10px; margin-top: 10px; background: var(--po-tint);
+    color: var(--po-accent); border-radius: 6px; font-size: 13px; text-align: center;
+  }
+  .rx-lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
+  .rx-lanehead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--po-muted); margin-bottom: 16px; }
+  .rx-node {
+    width: 100%; display: block; text-align: left; border: 1px solid var(--po-line); border-radius: 8px;
+    padding: 12px; background: var(--po-paper); margin: 10px 0; color: var(--po-ink);
+  }
+  .rx-node strong, .rx-node small { display: block; }
+  .rx-node small { font-size: 11px; color: var(--po-muted); }
+  .rx-center { margin-top: 72px; border: 2px solid var(--po-accent); box-shadow: 0 0 28px color-mix(in srgb, var(--po-accent) 12%, transparent); }
+  .rx-edge { background: transparent !important; color: var(--po-accent); font-size: 11px; text-align: left; padding: 0 0 8px; }
+  .rx-reading { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--po-line); }
+  .rx-readinggrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .rx-note { font-size: 12px; color: var(--po-muted); margin-top: 14px; }
+  .rx-clusters { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px; margin-top: 20px; }
+  .rx-cluster { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 45% 40% 42% 35%; padding: 34px 15px; text-align: center; color: var(--po-accent); }
+  .rx-cluster span { display: block; font-size: 12px; color: var(--po-muted); }
+  .rx-time { border-left: 2px solid var(--po-line); padding-left: 20px; }
+  .rx-row { padding: 14px 0; border-bottom: 1px solid var(--po-line); }
+  .rx-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rx-table td, .rx-table th { padding: 12px 8px; text-align: left; border-bottom: 1px solid var(--po-line); color: var(--po-ink); }
+  .rx-table button { background: transparent; color: var(--po-accent); }
+  .rx-tablewrap { overflow: auto; }
+  .rx-count { font-size: 12px; color: var(--po-muted); }
+  @media (max-width: 1000px) { .rx-layout { grid-template-columns: 1fr; } .rx-inspector { min-height: 0; } }
+  @media (max-width: 600px) { .rx-lanes { grid-template-columns: 1fr; } .rx-center { margin-top: 0; } .rx-readinggrid { grid-template-columns: 1fr; } }
   .pm-process { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; margin: 20px 0; }
   .pm-process div { padding: 12px 10px; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 8px; font-size: 12px; }
   .pm-process small { display: block; color: var(--po-cyan); font-size: 10px; margin-bottom: 5px; letter-spacing: 0.04em; }
@@ -684,27 +727,42 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 
     <section class="po-page" data-page="graph" hidden>
       <div class="po-eyebrow">Research / RFC Graph</div>
-      <div class="pm-pagehead"><div><h1 class="po-title">No specification stands alone.</h1><p>Follow real Obsoletes/Updates/Citation/Topic relationships out from one RFC.</p></div></div>
-      <form class="pm-toolbar" id="poGraphForm">
-        <input id="poGraphInput" type="text" placeholder="RFC number, e.g. 9000" aria-label="RFC number">
-        <button class="po-primary" type="submit">Go</button>
-        <label class="po-tiny" style="margin-left:auto;">Relationships
-          <select id="poGraphEdgeFilter" aria-label="Graph relationship filter">
-            <option value="all">All relationships</option>
-            <option value="structural">Obsoletes / Updates only</option>
-            <option value="family">Citation + Topic Match only</option>
+      <div class="rx-top"><div><h1 class="po-title">See the specification in context.</h1><p class="rx-sub">Follow formal relationships. Discover related reading. Investigate the connection.</p></div></div>
+      <div class="rx-controls">
+        <button type="button" data-rxmode="focus" aria-pressed="true">Focus on an RFC</button>
+        <button type="button" data-rxmode="corpus" aria-pressed="false">Explore corpus</button>
+      </div>
+      <form class="rx-controls" id="poGraphForm">
+        <label>RFC <input id="poGraphInput" value="9000" aria-label="RFC number" size="8"></label>
+        <button class="po-primary" type="submit">Explore</button>
+        <span class="rx-sub">Try 9000, 8446, 7540 or 2119</span>
+      </form>
+      <div class="rx-filters" id="poGraphFilters">
+        <strong>Specification relationships</strong>
+        <label><input type="checkbox" id="poGraphFilterObsoletes" checked>Obsoletes</label>
+        <label><input type="checkbox" id="poGraphFilterUpdates" checked>Updates</label>
+        <strong>Related reading</strong>
+        <label><input type="checkbox" id="poGraphFilterFamily">Citation match</label>
+        <label><input type="checkbox" id="poGraphFilterTopic">Topic match</label>
+      </div>
+      <div class="rx-controls">
+        <button type="button" data-rxview="map" aria-pressed="true">Relationship map</button>
+        <button type="button" data-rxview="time" aria-pressed="false">Chronology</button>
+        <button type="button" data-rxview="list" aria-pressed="false">List</button>
+        <label id="poGraphDepthLabel">Reach
+          <select id="poGraphDepth" aria-label="Neighborhood depth">
+            <option value="1">Direct connections</option>
+            <option value="2">2 hops</option>
           </select>
         </label>
-      </form>
-      <div id="poGraphStatus"></div>
-      <div class="pm-graphwrap" id="poGraphWrap" hidden>
-        <svg class="pm-graph" id="poGraphSvg" role="img" aria-label="RFC relationship graph; select a node for detail"></svg>
-        <div class="pm-legend">
-          <span><b style="background:var(--po-cyan)"></b>Obsoletes / Updates</span>
-          <span><b style="background:var(--po-purple)"></b>Citation / Topic match</span>
-        </div>
+        <label id="poGraphFilterListLabel" hidden>Filter list <input id="poGraphListFilter" placeholder="RFC or title" size="16"></label>
       </div>
-      <div class="pm-graphdetail" id="poGraphDetail" hidden></div>
+      <div class="rx-count" id="poGraphCount" role="status"></div>
+      <div class="rx-layout">
+        <div class="rx-canvas" id="poGraphCanvas"></div>
+        <aside class="rx-inspector" id="poGraphInspector" aria-live="polite"></aside>
+      </div>
+      <p class="rx-note" id="poGraphNote">Citation match and Topic match are only ever shown for the RFC you're directly focused on -- extending Reach to 2 hops follows Obsoletes/Updates only, since neither citation nor topic similarity is well-defined two hops removed from the RFC you actually asked about.</p>
     </section>
 
     <section class="po-page" data-page="sources" hidden>
@@ -2085,127 +2143,287 @@ function loadToolsPage() {
   });
 }
 
-// -- RFC Graph -- real /api/rfc-graph/<rfc_number> ({center, nodes, edges}
-// from real obsoletes/updates + Citation Match + Topic Match data), drawn
-// as a plain static circular layout (center node in the middle, its
-// neighbors evenly spaced around it) rather than vis-network or the
-// mockup's own fixed illustrative scatter -- a single real request has no
-// hop-distance data to lay out by (that's Focus mode's SSE endpoint, not
-// this simpler one), and a circle is an honest, deterministic layout for
-// "one center, N neighbors" without pulling in a physics engine for a
-// single real RFC's neighborhood (rarely more than a few dozen nodes). ---
-let graphData = null;
-let selectedGraphNode = null;
+// -- RFC Graph -- real /api/rfc-graph/<n> (hop-1: obsoletes/updates +
+// Citation Match + Topic Match, all relative to one center),
+// /api/rfc-graph/focus?rfc=&hops= (SSE; N-hop obsoletes/updates-only BFS
+// beyond hop 1 -- citation/topic match aren't well-defined two hops out, so
+// the real backend only ever returns them for the RFC actually being
+// focused on), and /api/rfc-graph/global (SSE, whole-corpus obsoletes/
+// updates, ~2min cold / cached after) for corpus mode. Design follows the
+// prism-complete mockup's RFC Graph page (map/chronology/list views +
+// relationship filters + reach selector + inspector panel) -- replacing
+// the earlier single-RFC circular SVG scatter, which had no hop-2 data,
+// no chronology/list views, and no corpus-wide mode at all. Content is all
+// real: real node titles/WGs/publication years, real edge kinds, a real
+// working-group breakdown for corpus mode instead of the mockup's fixed
+// illustrative DNS/Transport/Routing/Security clusters.
+const EDGE_KIND_LABELS = { obsoletes: 'obsoletes', updates: 'updates', family: 'citation match', topic_bm25: 'topic match' };
+// Datatracker's document API has no reliable "RFC published" field --
+// confirmed live that RFC9000's own "time" field reads 2026, a recent
+// metadata touch, not its real 2021 publication date, so no per-node date
+// is fetched or shown here. RFC numbers are assigned strictly in
+// publication order, so the numeric id itself IS chronological order, not
+// an approximation of it -- same fact classic's own Arc Diagram already
+// relies on for the identical purpose.
+const rxNumValue = (id) => parseInt(String(id).replace(/^RFC/i, ''), 10) || 0;
+let rxFocus = null;
+let rxMode = 'focus';
+let rxView = 'map';
+let rxData = { center: null, nodes: [], edges: [] };
+let rxSelected = { node: null };
+let rxGlobalData = null;
+let rxCorpusWg = null;
+
 function loadGraphPage() {
   const inputEl = document.getElementById('poGraphInput');
   if (!inputEl.value.trim()) inputEl.value = '9000';
-  runGraph();
-}
-document.getElementById('poGraphForm').addEventListener('submit', (e) => { e.preventDefault(); runGraph(); });
-document.getElementById('poGraphEdgeFilter').addEventListener('change', () => renderGraphSvg());
-
-function runGraph() {
-  const rfcNumber = document.getElementById('poGraphInput').value.trim();
-  if (!rfcNumber) return;
-  const statusEl = document.getElementById('poGraphStatus');
-  const wrapEl = document.getElementById('poGraphWrap');
-  const detailEl = document.getElementById('poGraphDetail');
-  statusEl.innerHTML = `<div class="po-loading">Loading RFC ${escapeHtml(rfcNumber)}’s relationships…</div>`;
-  wrapEl.hidden = true;
-  detailEl.hidden = true;
-  fetch(`${PRISM_PREFIX}/api/rfc-graph/${encodeURIComponent(rfcNumber)}`).then((r) => r.json()).then((data) => {
-    if (data.error) throw new Error(data.error);
-    graphData = data;
-    selectedGraphNode = data.center;
-    statusEl.textContent = '';
-    wrapEl.hidden = false;
-    renderGraphSvg();
-  }).catch((err) => {
-    statusEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load this graph.')}</div>`;
-  });
+  rxExplore(inputEl.value.trim());
 }
 
-function renderGraphSvg() {
-  if (!graphData) return;
-  const svg = document.getElementById('poGraphSvg');
-  const filter = document.getElementById('poGraphEdgeFilter').value;
-  const width = svg.getBoundingClientRect().width || 600;
-  const height = 380;
-  svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
-  const nodes = graphData.nodes || [];
-  const edges = (graphData.edges || []).filter((e) => {
-    const isFamily = e.kind === 'family' || e.kind === 'topic_bm25';
-    if (filter === 'structural') return !isFamily;
-    if (filter === 'family') return isFamily;
-    return true;
-  });
-  const cx = width / 2;
-  const cy = height / 2;
-  const others = nodes.filter((n) => n.id !== graphData.center);
-  const radius = Math.max(70, Math.min(width, height) / 2 - 55);
-  const pos = { [graphData.center]: [cx, cy] };
-  others.forEach((n, i) => {
-    const angle = (2 * Math.PI * i) / Math.max(1, others.length) - Math.PI / 2;
-    pos[n.id] = [cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)];
-  });
-  const ns = 'http://www.w3.org/2000/svg';
-  const el = (tag, attrs) => {
-    const node = document.createElementNS(ns, tag);
-    Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, v));
-    return node;
+function rxSetMode(mode) {
+  rxMode = mode;
+  document.querySelectorAll('[data-rxmode]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.rxmode === mode)));
+  document.getElementById('poGraphForm').hidden = mode !== 'focus';
+  document.getElementById('poGraphFilters').hidden = mode !== 'focus';
+}
+
+document.querySelectorAll('[data-rxmode]').forEach((b) => b.addEventListener('click', () => {
+  rxSetMode(b.dataset.rxmode);
+  if (rxMode === 'corpus') rxLoadCorpus();
+  else if (rxFocus) rxDraw();
+}));
+
+document.querySelectorAll('[data-rxview]').forEach((b) => b.addEventListener('click', () => {
+  rxView = b.dataset.rxview;
+  document.querySelectorAll('[data-rxview]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  document.getElementById('poGraphFilterListLabel').hidden = rxView !== 'list';
+  rxDraw();
+}));
+
+document.getElementById('poGraphForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = document.getElementById('poGraphInput').value.trim();
+  if (raw) rxExplore(raw);
+});
+['poGraphFilterObsoletes', 'poGraphFilterUpdates', 'poGraphFilterFamily', 'poGraphFilterTopic'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', rxDraw);
+});
+document.getElementById('poGraphListFilter').addEventListener('input', rxDraw);
+document.getElementById('poGraphDepth').addEventListener('change', () => { if (rxFocus) rxExplore(rxFocus); });
+
+function rxActiveKinds() {
+  const map = { poGraphFilterObsoletes: 'obsoletes', poGraphFilterUpdates: 'updates', poGraphFilterFamily: 'family', poGraphFilterTopic: 'topic_bm25' };
+  return Object.entries(map).filter(([id]) => document.getElementById(id).checked).map(([, kind]) => kind);
+}
+
+function rxExplore(rfcNumber) {
+  const requested = String(rfcNumber).replace(/^rfc\s*/i, '').trim();
+  if (!requested) return;
+  rxSetMode('focus');
+  document.getElementById('poGraphInput').value = requested;
+  const depth = Number(document.getElementById('poGraphDepth').value);
+  const countEl = document.getElementById('poGraphCount');
+  countEl.textContent = `Loading RFC ${escapeHtml(requested)}’s relationships…`;
+  document.getElementById('poGraphCanvas').innerHTML = '';
+  document.getElementById('poGraphInspector').innerHTML = '';
+  if (depth <= 1) {
+    fetch(`${PRISM_PREFIX}/api/rfc-graph/${encodeURIComponent(requested)}`).then((r) => r.json()).then((data) => {
+      if (data.error) throw new Error(data.error);
+      rxData = data;
+      rxFocus = data.center;
+      rxSelected = { node: data.center };
+      rxDraw();
+    }).catch((err) => {
+      countEl.textContent = err.message || `Could not load RFC ${requested}.`;
+    });
+  } else {
+    const source = new EventSource(`${PRISM_PREFIX}/api/rfc-graph/focus?rfc=${encodeURIComponent(requested)}&hops=${depth}`);
+    source.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'progress') {
+        countEl.textContent = msg.message || 'Working…';
+      } else if (msg.type === 'result') {
+        source.close();
+        if (msg.data.error) { countEl.textContent = msg.data.error; return; }
+        rxData = msg.data;
+        rxFocus = msg.data.center;
+        rxSelected = { node: msg.data.center };
+        rxDraw();
+      } else if (msg.type === 'error') {
+        source.close();
+        countEl.textContent = msg.message;
+      }
+    };
+    source.onerror = () => { source.close(); countEl.textContent = 'Connection lost.'; };
+  }
+}
+
+function rxVisibleEdges() {
+  const active = rxActiveKinds();
+  return (rxData.edges || []).filter((e) => active.includes(e.kind));
+}
+
+function rxNode(id, isCenter) {
+  const n = (rxData.nodes || []).find((x) => x.id === id);
+  if (!n) return '';
+  return `<button type="button" class="rx-node${isCenter ? ' rx-center' : ''}" data-rxnode="${escapeHtml(id)}"><strong>${escapeHtml(id)}</strong><small>${escapeHtml(n.title || '')}</small></button>`;
+}
+function rxEdgeButton(e) {
+  const idx = rxData.edges.indexOf(e);
+  const label = EDGE_KIND_LABELS[e.kind] || e.kind;
+  return `<button type="button" class="rx-edge" data-rxedge="${idx}">${escapeHtml(e.source)} ${escapeHtml(label)} → ${escapeHtml(e.target)}</button>`;
+}
+
+function rxDraw() {
+  if (rxMode === 'corpus') { rxDrawCorpus(); return; }
+  const canvasEl = document.getElementById('poGraphCanvas');
+  const countEl = document.getElementById('poGraphCount');
+  const es = rxVisibleEdges();
+  const nodeIds = new Set((rxData.nodes || []).map((n) => n.id));
+  const ids = [...new Set([rxFocus, ...es.flatMap((e) => [e.source, e.target])])].filter((id) => nodeIds.has(id));
+  countEl.textContent = `${ids.length} document${ids.length === 1 ? '' : 's'} · ${es.length} relationship${es.length === 1 ? '' : 's'} · focus ${escapeHtml(rxFocus || '')}`;
+
+  let html = '';
+  if (rxView === 'list') {
+    const q = document.getElementById('poGraphListFilter').value.toLowerCase();
+    const nodesForList = ids.map((id) => (rxData.nodes || []).find((n) => n.id === id)).filter(Boolean)
+      .filter((n) => `${n.id} ${n.title}`.toLowerCase().includes(q));
+    html = `<div class="rx-tablewrap"><table class="rx-table"><thead><tr><th>Document</th><th>Title</th><th>WG</th></tr></thead><tbody>${
+      nodesForList.map((n) => `<tr><td><button type="button" data-rxnode="${escapeHtml(n.id)}">${escapeHtml(n.id)}</button></td><td>${escapeHtml(n.title || '')}</td><td>${escapeHtml(n.wg || '—')}</td></tr>`).join('')
+    }</tbody></table></div>`;
+  } else if (rxView === 'time') {
+    const sorted = ids.slice().sort((a, b) => rxNumValue(a) - rxNumValue(b));
+    html = `<div class="rx-lanehead">Publication order (by RFC number) · selected neighborhood</div><div class="rx-time">${
+      sorted.map((id) => `<div class="rx-row">${rxNode(id, id === rxFocus)}${es.filter((e) => e.source === id).map(rxEdgeButton).join('<br>')}</div>`).join('')
+    }</div>`;
+  } else {
+    const formal = es.filter((e) => e.kind === 'obsoletes' || e.kind === 'updates');
+    const earlier = formal.filter((e) => e.source === rxFocus);
+    const later = formal.filter((e) => e.target === rxFocus);
+    const related = es.filter((e) => e.kind !== 'obsoletes' && e.kind !== 'updates');
+    html = `<div class="rx-lanes">
+      <div><div class="rx-lanehead">Earlier specifications</div>${earlier.map((e) => rxNode(e.target) + rxEdgeButton(e)).join('') || '<p class="rx-sub">None captured</p>'}</div>
+      <div><div class="rx-lanehead">Selected RFC</div>${rxNode(rxFocus, true)}</div>
+      <div><div class="rx-lanehead">Later changes</div>${later.map((e) => rxNode(e.source) + rxEdgeButton(e)).join('') || '<p class="rx-sub">None captured</p>'}</div>
+    </div>` + (related.length ? `<div class="rx-reading"><div class="rx-lanehead">Related reading · not a formal lineage</div><div class="rx-readinggrid">${
+      related.map((e) => `<div>${rxNode(e.source === rxFocus ? e.target : e.source)}${rxEdgeButton(e)}</div>`).join('')
+    }</div></div>` : '');
+  }
+  canvasEl.innerHTML = html;
+  rxInspect();
+}
+
+function rxInspect() {
+  const el = document.getElementById('poGraphInspector');
+  if (rxSelected.edge !== undefined && rxSelected.edge !== null) {
+    const e = rxData.edges[rxSelected.edge];
+    if (!e) return;
+    const formal = e.kind === 'obsoletes' || e.kind === 'updates';
+    const label = EDGE_KIND_LABELS[e.kind] || e.kind;
+    const explain = formal
+      ? 'A formal specification relationship recorded by IETF Datatracker. The arrow points from the document making the change to the affected document.'
+      : e.kind === 'family'
+        ? 'A real citation, or an exact keyword match in the title — not, by itself, evidence of design influence.'
+        : 'A related-reading suggestion from this corpus’s own BM25 text ranking. Similarity is not a formal relationship.';
+    el.innerHTML = `
+      <div class="po-eyebrow">Selected relationship</div>
+      <h2>${escapeHtml(e.source)}<br>${escapeHtml(label)}<br>${escapeHtml(e.target)}</h2>
+      <p>${explain}</p>
+      <a href="https://datatracker.ietf.org/doc/${escapeHtml(e.source.toLowerCase())}/" target="_blank" rel="noopener">Open ${escapeHtml(e.source)} ↗</a>
+      <button type="button" data-rxfocus="${escapeHtml(e.source)}">Focus on ${escapeHtml(e.source)}</button>
+    `;
+  } else {
+    const id = rxSelected.node || rxFocus;
+    const n = (rxData.nodes || []).find((x) => x.id === id);
+    if (!n) { el.innerHTML = ''; return; }
+    const isCenter = id === rxFocus;
+    const meta = [n.wg, n.std_level ? n.std_level.toUpperCase() : ''].filter(Boolean).join(' · ');
+    el.innerHTML = `
+      <div class="po-eyebrow">Selected document</div>
+      <h2>${escapeHtml(id)}</h2>
+      <p>${escapeHtml(n.title || '')}</p>
+      <p class="rx-sub">${escapeHtml(meta)}</p>
+      <a href="https://datatracker.ietf.org/doc/${escapeHtml(id.toLowerCase())}/" target="_blank" rel="noopener">Open document ↗</a>
+      <button type="button" data-rxreaddoc="${escapeHtml(id)}">Read this RFC in Documents</button>
+      <button type="button" data-rxfocus="${escapeHtml(id)}">${isCenter ? 'Show direct connections' : 'Focus here'}</button>
+      <button type="button" data-rxexpand="${escapeHtml(id)}">Expand this RFC</button>
+      <p class="rx-sub">Select a relationship label to inspect its meaning and source.</p>
+    `;
+  }
+}
+
+function rxHandleClick(e) {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.rxnode) { rxSelected = { node: b.dataset.rxnode }; rxInspect(); }
+  else if (b.dataset.rxedge !== undefined) { rxSelected = { edge: Number(b.dataset.rxedge) }; rxInspect(); }
+  else if (b.dataset.rxreaddoc) { go('document'); goToDocument(b.dataset.rxreaddoc); }
+  else if (b.dataset.rxfocus) { document.getElementById('poGraphDepth').value = '1'; rxExplore(b.dataset.rxfocus); }
+  else if (b.dataset.rxexpand) { document.getElementById('poGraphDepth').value = '2'; rxExplore(b.dataset.rxexpand); }
+  else if (b.dataset.rxwg) { rxCorpusWg = b.dataset.rxwg; rxDrawCorpus(); }
+  else if (b.dataset.rxback === 'corpus') { rxCorpusWg = null; rxDrawCorpus(); }
+}
+document.getElementById('poGraphCanvas').addEventListener('click', rxHandleClick);
+document.getElementById('poGraphInspector').addEventListener('click', rxHandleClick);
+
+function rxLoadCorpus() {
+  const countEl = document.getElementById('poGraphCount');
+  if (rxGlobalData) { rxDrawCorpus(); return; }
+  countEl.textContent = 'Loading the whole-corpus Obsoletes/Updates graph…';
+  document.getElementById('poGraphCanvas').innerHTML = '';
+  document.getElementById('poGraphInspector').innerHTML = '';
+  const source = new EventSource(`${PRISM_PREFIX}/api/rfc-graph/global`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      countEl.textContent = msg.message || 'Working…';
+    } else if (msg.type === 'result') {
+      source.close();
+      if (msg.data.error) { countEl.textContent = msg.data.error; return; }
+      rxGlobalData = msg.data;
+      rxDrawCorpus();
+    } else if (msg.type === 'error') {
+      source.close();
+      countEl.textContent = msg.message;
+    }
   };
-  svg.replaceChildren();
-  edges.forEach((e) => {
-    const p1 = pos[e.source];
-    const p2 = pos[e.target];
-    if (!p1 || !p2) return;
-    const isFamily = e.kind === 'family' || e.kind === 'topic_bm25';
-    svg.appendChild(el('line', {
-      x1: p1[0], y1: p1[1], x2: p2[0], y2: p2[1],
-      stroke: isFamily ? 'var(--po-purple)' : 'var(--po-cyan)',
-      'stroke-width': 1.2, opacity: 0.55,
-      'stroke-dasharray': isFamily ? '4 5' : 'none',
-    }));
-  });
-  nodes.forEach((n) => {
-    const p = pos[n.id];
-    if (!p) return;
-    const g = el('g', {});
-    g.style.cursor = 'pointer';
-    const isSelected = n.id === selectedGraphNode;
-    const isCenter = n.id === graphData.center;
-    if (isSelected) g.appendChild(el('circle', { cx: p[0], cy: p[1], r: 26, fill: 'var(--po-tint)' }));
-    g.appendChild(el('circle', {
-      cx: p[0], cy: p[1], r: isCenter ? 11 : 7,
-      fill: isCenter ? 'var(--po-cyan)' : 'var(--po-accent)',
-      stroke: 'var(--po-paper)', 'stroke-width': 2,
-    }));
-    const text = el('text', { x: p[0], y: p[1] + 24, 'text-anchor': 'middle', fill: 'var(--po-ink)', 'font-size': 11 });
-    text.textContent = n.id;
-    g.appendChild(text);
-    g.addEventListener('click', () => { selectedGraphNode = n.id; renderGraphSvg(); });
-    svg.appendChild(g);
-  });
-  const activeNode = nodes.find((n) => n.id === selectedGraphNode) || nodes.find((n) => n.id === graphData.center);
-  if (activeNode) showGraphNodeDetail(activeNode);
+  source.onerror = () => { source.close(); countEl.textContent = 'Connection lost while loading the corpus graph.'; };
 }
 
-function showGraphNodeDetail(n) {
-  const detailEl = document.getElementById('poGraphDetail');
-  detailEl.hidden = false;
-  const isCenter = n.id === graphData.center;
-  detailEl.innerHTML = `
-    <div>
-      <div class="po-eyebrow" style="margin-bottom:5px;">${isCenter ? 'Center specification' : 'Related specification'}</div>
-      <h2>${escapeHtml(n.id)}</h2>
-      <p>${escapeHtml(n.title || '')}${n.wg ? ' &middot; ' + escapeHtml(n.wg) : ''}${n.std_level ? ' &middot; ' + escapeHtml(n.std_level) : ''}</p>
-    </div>
-    <button type="button" class="po-primary" data-goto-doc="${escapeHtml(n.id)}">Read this RFC →</button>
+function rxDrawCorpus() {
+  if (!rxGlobalData) return;
+  const countEl = document.getElementById('poGraphCount');
+  const canvasEl = document.getElementById('poGraphCanvas');
+  const nodes = rxGlobalData.nodes || [];
+  const edges = rxGlobalData.edges || [];
+  countEl.textContent = `${nodes.length.toLocaleString()} documents · ${edges.length.toLocaleString()} relationships across the corpus`;
+  if (rxCorpusWg) {
+    const wgNodes = nodes.filter((n) => (n.wg || '(none)') === rxCorpusWg).slice().sort((a, b) => rxNumValue(a.id) - rxNumValue(b.id));
+    canvasEl.innerHTML = `
+      <button type="button" class="rx-edge" data-rxback="corpus">← Back to working groups</button>
+      <div class="rx-lanehead">${escapeHtml(rxCorpusWg)} · ${wgNodes.length} RFC${wgNodes.length === 1 ? '' : 's'}</div>
+      <div class="rx-tablewrap"><table class="rx-table"><thead><tr><th>Document</th><th>Title</th><th>Std level</th><th></th></tr></thead><tbody>${
+        wgNodes.map((n) => `<tr><td>${escapeHtml(n.id)}</td><td>${escapeHtml(n.title || '')}</td><td>${escapeHtml((n.std_level || '—').toUpperCase())}</td><td><button type="button" data-rxfocus="${escapeHtml(n.id)}">Focus →</button></td></tr>`).join('')
+      }</tbody></table></div>
+    `;
+  } else {
+    const counts = new Map();
+    nodes.forEach((n) => { const wg = n.wg || ''; if (wg) counts.set(wg, (counts.get(wg) || 0) + 1); });
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const top = ranked.slice(0, 8);
+    const remaining = ranked.length - top.length;
+    canvasEl.innerHTML = `
+      <div class="rx-lanehead">Explore a working group</div>
+      <div class="rx-clusters">${top.map(([wg, count]) => `<button type="button" class="rx-cluster" data-rxwg="${escapeHtml(wg)}">${escapeHtml(wg.toUpperCase())}<span>${count} RFC${count === 1 ? '' : 's'}</span></button>`).join('')}</div>
+      <p class="rx-note">${remaining > 0 ? remaining + ' more working groups not shown here — ' : ''}Select a working group to see its RFCs, then focus on one to explore its full relationship map.</p>
+    `;
+  }
+  document.getElementById('poGraphInspector').innerHTML = `
+    <div class="po-eyebrow">Corpus overview</div>
+    <h2>${nodes.length.toLocaleString()} RFCs</h2>
+    <p class="rx-sub">${edges.length.toLocaleString()} real Obsoletes/Updates relationships, across every working group with at least one.</p>
   `;
-  const btn = detailEl.querySelector('[data-goto-doc]');
-  if (btn) btn.addEventListener('click', () => { go('document'); goToDocument(btn.dataset.gotoDoc); });
 }
-new ResizeObserver(() => renderGraphSvg()).observe(document.getElementById('poGraphWrap'));
 
 // -- Usage -- real /api/observability?days=N (org-wide, data-admin gated
 // server-side; a non-admin just sees the resulting {error} rendered
