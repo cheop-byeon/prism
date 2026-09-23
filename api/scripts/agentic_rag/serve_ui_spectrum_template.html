@@ -113,10 +113,11 @@
     border: none;
   }
   .po-profile-email { font-size: 11px; color: var(--po-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .po-logout { font-size: 11px; color: var(--po-muted); background: none; border: none; padding: 0; text-decoration: underline; }
+  .po-logout, .po-settingslink { font-size: 11px; color: var(--po-muted); background: none; border: none; padding: 0; text-decoration: underline; }
   .po-classiclink { display: block; font-size: 11px; color: var(--po-muted); padding: 8px 6px; text-decoration: none; border-top: 1px solid var(--po-line); margin-top: 8px; }
   .po-classiclink:hover { color: var(--po-accent); }
-  .po-logout:hover { color: var(--po-ink); }
+  .po-logout:hover, .po-settingslink:hover { color: var(--po-ink); }
+  .po-profilelinks { display: flex; gap: 8px; }
 
   /* Main column */
   .po-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -612,7 +613,10 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <span class="po-avatar" id="poAvatar">__ACCOUNT_INITIAL__</span>
       <div style="min-width:0;">
         <div class="po-profile-email" title="__ACCOUNT_EMAIL__">__ACCOUNT_EMAIL__</div>
-        <button class="po-logout" id="poLogoutBtn" type="button">Log out</button>
+        <div class="po-profilelinks">
+          <a class="po-settingslink" href="__CONSOLE_WEB_URL__/apps?action=showSettings&amp;tab=provider" target="_blank" rel="noopener">Settings</a>
+          <button class="po-logout" id="poLogoutBtn" type="button">Log out</button>
+        </div>
       </div>
     </div>
   </aside>

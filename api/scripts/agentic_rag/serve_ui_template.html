@@ -1023,6 +1023,7 @@
     <div class="account-dropdown" id="accountDropdown" hidden>
       <div class="account-dropdown-email">__ACCOUNT_EMAIL__</div>
       <a class="account-dropdown-item" href="__CONSOLE_WEB_URL__/apps?action=showSettings&amp;tab=provider" target="_blank" rel="noopener">Settings</a>
+      <a class="account-dropdown-item" id="spectrumLink" href="#" target="_blank" rel="noopener">Try the new design →</a>
       <button type="button" class="account-dropdown-item" id="accountLogoutBtn">Log out</button>
     </div>
   </div>
@@ -1304,6 +1305,10 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 // button calls, then returns here to show the login page.
 const accountMenuBtnEl = document.getElementById('accountMenuBtn');
 const accountDropdownEl = document.getElementById('accountDropdown');
+// Same reciprocal link the spectrum page's own "Classic view" link uses,
+// just the other direction (session cookies aren't port-scoped, so this
+// opens already signed in, same as Settings above).
+document.getElementById('spectrumLink').href = `${location.protocol}//${location.hostname}:8766${PRISM_PREFIX}/`;
 
 accountMenuBtnEl.addEventListener('click', (e) => {
   e.stopPropagation();
