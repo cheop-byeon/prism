@@ -1138,9 +1138,10 @@ def _filter_primary_source_text(text: str, query: str | None, source_label: str,
         return f"[{source_label}, full text]\n\n{text}"
 
     paragraphs = re.split(r"\n\s*\n", text)
-    matches = [p.strip() for p in paragraphs if query.lower() in p.lower()]
+    words = [w for w in re.findall(r"\w+", query.lower()) if w]
+    matches = [p.strip() for p in paragraphs if all(w in p.lower() for w in words)]
     if not matches:
-        return f"[{source_label}] No paragraph containing {query!r} was found in this document."
+        return f"[{source_label}] No paragraph containing all of {query!r}'s words was found in this document."
     joined = "\n\n---\n\n".join(matches)
     if len(joined) > max_chars:
         joined = joined[:max_chars] + "\n\n[truncated]"
