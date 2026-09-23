@@ -256,7 +256,7 @@ class TestFilterPrimarySourceText:
     def test_query_no_match_says_so_explicitly(self):
         result = _filter_primary_source_text(self._text, "nomatch", "draft-x-01")
 
-        assert result == "[draft-x-01] No paragraph containing 'nomatch' was found in this document."
+        assert result == "[draft-x-01] No paragraph containing all of 'nomatch''s words was found in this document."
 
     def test_query_match_truncates_over_cap(self):
         result = _filter_primary_source_text("X" * 20 + " INIT_CWND", "INIT_CWND", "draft-x-01", max_chars=10)
