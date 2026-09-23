@@ -446,6 +446,7 @@
   .pt-form { display: flex; gap: 12px; align-items: flex-end; padding: 18px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; margin-bottom: 22px; flex-wrap: wrap; }
   .pt-form label { flex: 1; min-width: 160px; font-size: 12px; color: var(--po-muted); }
   .pt-form select, .pt-form input { display: block; width: 100%; padding: 10px; margin-top: 6px; border: 1px solid var(--po-line); border-radius: 6px; background: var(--po-bg); color: var(--po-ink); font-size: 13px; box-sizing: border-box; }
+  .pt-form select:focus, .pt-form input:focus { outline: none; border-color: var(--po-accent); }
   .pt-action { padding: 10px 16px; border-radius: 6px; background: var(--po-accent); color: var(--po-shell); font-size: 13px; font-weight: 600; }
   .pt-status { margin: 0 0 16px; color: var(--po-muted); font-size: 12px; min-height: 1em; }
   .pt-map { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
@@ -1630,7 +1631,7 @@ function renderDetailPanel() {
   if (dtTab === 'passage') {
     const occs = findOccurrences(node.text, data.query);
     contentEl.innerHTML = `
-      ${occs.length > 1 ? `<div class="pt-label">Occurrences within this passage</div><div class="pt-occurrences">${occs.map((_, i) => `<button type="button" data-occ="${i}" aria-pressed="${i === dtOcc}">Hit ${i + 1}</button>`).join('')}</div>` : ''}
+      ${occs.length ? `<div class="pt-label">Occurrences within this passage</div><div class="pt-occurrences">${occs.map((_, i) => `<button type="button" data-occ="${i}" aria-pressed="${i === dtOcc}">Hit ${i + 1}</button>`).join('')}</div>` : ''}
       <div class="pt-excerpt">${highlightOccurrences(node.text, data.query, dtOcc)}</div>
       <p><a href="${revisionUrl(draftName, node.rev)}" target="_blank" rel="noopener">Open full revision ↗</a></p>
     `;
