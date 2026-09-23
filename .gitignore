@@ -195,7 +195,27 @@ docker/volumes/seekdb/*
 !docker/volumes/oceanbase/init.d
 docker/volumes/iris/*
 docker/volumes/ietfdata/*.sqlite
+docker/volumes/ietfdata/cache/*
+docker/volumes/sandbox/dependencies/*
 tools/ietfdata_service/*.sqlite
+
+# On a deployment VM where a data path under docker/volumes/ is itself a
+# symlink to a separate data disk (instead of a plain directory the rules
+# above only ignore the *contents* of), the symlink is a new path git
+# doesn't already know to ignore -- explicitly ignore every path that may
+# ever be such a symlink, whole-directory or a specific subpath of a
+# directory that otherwise holds tracked config (myscale, opensearch),
+# so `git status` stays clean either way.
+docker/volumes/app
+docker/volumes/certbot
+docker/volumes/db
+docker/volumes/ietfdata
+docker/volumes/plugin_daemon
+docker/volumes/redis
+docker/volumes/weaviate
+docker/volumes/myscale/data
+docker/volumes/myscale/log
+docker/volumes/opensearch/data
 
 docker/nginx/conf.d/default.conf
 docker/nginx/ssl/*

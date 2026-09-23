@@ -133,9 +133,19 @@ ssh -o StrictHostKeyChecking=accept-new -T git@github.com || true
 
 # ---------------------------------------------------------------------------
 # Phase 4 — clone the repo
+#
+# Cloned onto /mnt/data, not $HOME: docker-compose.yaml bind-mounts every
+# stateful service (Postgres, Weaviate, downloaded IETF mail/RFC archives,
+# uploaded files) as host paths under docker/volumes/, relative to wherever
+# this repo is checked out -- not as named Docker volumes. Phase 2's
+# data-root redirect only covers Docker/containerd's OWN storage (images,
+# layers, build cache); it does nothing for these bind mounts. Cloning onto
+# /mnt/data instead puts all of that on the big data disk for free, instead
+# of quietly filling the small OS disk the first time a dataset is synced.
 # ---------------------------------------------------------------------------
 echo ""
-echo "==> Cloning $REPO_URL ($BRANCH)"
+echo "==> Cloning $REPO_URL ($BRANCH) onto /mnt/data"
+cd /mnt/data
 git clone "$REPO_URL"
 cd dify
 git checkout "$BRANCH"
@@ -147,7 +157,7 @@ git checkout "$BRANCH"
 # ---------------------------------------------------------------------------
 echo ""
 echo "    PAUSE: from your LAPTOP (separate terminal), run:"
-echo "      scp -i <your azure ssh key> docker/docker-compose.override.yaml ${ADMIN_USER}@<this-vm-ip>:~/dify/docker/"
+echo "      scp -i <your azure ssh key> docker/docker-compose.override.yaml ${ADMIN_USER}@<this-vm-ip>:/mnt/data/dify/docker/"
 echo ""
 read -rp "    Press Enter once that copy has finished..." _
 
@@ -310,7 +320,7 @@ echo " Setup done. What's left is intentionally manual (build takes"
 echo " real time and each step benefits from watching the output):"
 echo "================================================================"
 echo ""
-echo "  cd ~/dify/docker"
+echo "  cd /mnt/data/dify/docker"
 echo ""
 echo "  # Build the custom images (several minutes, especially web):"
 echo "  docker compose -f docker-compose.yaml -f docker-compose.override.yaml build api worker worker_beat web"

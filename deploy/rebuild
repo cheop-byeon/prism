@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Rebuild and redeploy this fork's custom-built images on the VM, then
-# restart nginx so it picks up their new container IPs.
+# restart nginx so it picks up both their new container IPs and any nginx
+# config template changes (nginx's own docker-entrypoint re-runs envsubst
+# on every container start, not just on create -- a plain `restart` is
+# enough, no `--force-recreate` needed there).
 #
 # This is the VM equivalent of dev/rebuild-backend + dev/start-active-dev
 # combined — there's no native `pnpm dev` frontend process on the VM like
@@ -9,22 +12,62 @@
 # anything under api/ or web/.
 #
 # Usage: deploy/rebuild [service ...]
-#   No arguments: rebuilds api, worker, worker_beat, web (everything this
-#   fork builds from source) and restarts nginx.
-#   With arguments: rebuilds only the named services, still restarts
-#   nginx afterward regardless (it caches upstream IPs no matter which
-#   service changed).
+#   No arguments: pulls the current branch, rebuilds api, worker,
+#   worker_beat, web, and (if present on this machine)
+#   ietf_decision_agent_ui, then restarts nginx.
+#   With arguments: rebuilds only the named services, still pulls and
+#   restarts nginx afterward regardless (it caches upstream IPs no matter
+#   which service changed).
+#   PULL=false deploy/rebuild: skips the git pull, e.g. when you've already
+#   pulled or are testing uncommitted local changes.
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
-cd "${SCRIPT_DIR}/../docker"
+REPO_DIR="${SCRIPT_DIR}/.."
+cd "$REPO_DIR"
+
+if [ "${PULL:-true}" = true ]; then
+  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  echo "==> Pulling $BRANCH"
+  # --ff-only: this script runs on a deployment VM, which should never have
+  # its own local commits diverging from the branch -- a merge here would
+  # mean something unexpected happened and deserves a look, not an
+  # automatic merge commit.
+  git pull --ff-only origin "$BRANCH"
+fi
+
+cd "${REPO_DIR}/docker"
+
+COMPOSE_FILES=(-f docker-compose.yaml -f docker-compose.override.yaml)
+DEFAULT_SERVICES=(api worker worker_beat web)
+
+# docker-compose.ietf-ui.yaml (Prism's ietf_decision_agent_ui) and
+# docker-compose.prism-cloud.yaml (sets PRISM_URL_PREFIX=/prism to match
+# nginx's /prism location, deployment-only) are only meaningful together --
+# prism-cloud.yaml overrides a service it doesn't define, so it's gated on
+# the same check as ietf-ui.yaml, not included unconditionally. ietf-ui.yaml
+# itself is a local, gitignored file -- present on machines that actually
+# run Prism, not guaranteed for every clone -- so it's included
+# conditionally rather than hardcoded, same as dev/rebuild-backend does.
+HAS_IETF_UI=false
+if [ -f docker-compose.ietf-ui.yaml ]; then
+  HAS_IETF_UI=true
+  COMPOSE_FILES+=(-f docker-compose.ietf-ui.yaml -f docker-compose.prism-cloud.yaml)
+  # ietf_decision_agent_ui runs off the SAME dify-local-api:dev image tag as
+  # api, but is a separate container -- left out of the default list, it
+  # keeps running its old image indefinitely after a rebuild (confirmed
+  # live: it silently sat hours stale across several rebuilds until
+  # force-recreated by hand). Included here so a plain no-args run always
+  # reaches every container on that tag, not just api/worker/worker_beat.
+  DEFAULT_SERVICES+=(ietf_decision_agent_ui)
+fi
 
 SERVICES=("$@")
 if [ ${#SERVICES[@]} -eq 0 ]; then
-  SERVICES=(api worker worker_beat web)
+  SERVICES=("${DEFAULT_SERVICES[@]}")
 fi
 
-COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.override.yaml)
+COMPOSE=(docker compose "${COMPOSE_FILES[@]}")
 
 echo "==> Removing stale dify-local-api:dev / dify-local-web:dev images and build cache..."
 docker rmi dify-local-api:dev dify-local-web:dev 2>/dev/null || true
@@ -39,9 +82,14 @@ echo "==> Redeploying: ${SERVICES[*]}"
 # recreates whatever they depend_on using the SAME -f files passed here —
 # harmless in this case since we always pass both files, but --no-deps is
 # what keeps this predictable regardless of which services get named.
-"${COMPOSE[@]}" up -d --no-deps "${SERVICES[@]}"
+# --force-recreate: a plain `up -d` is a no-op for a service whose compose
+# config didn't change, even though its underlying image did (e.g.
+# ietf_decision_agent_ui, which has no build: block of its own) -- without
+# this flag it would keep running the stale container instead of picking
+# up the freshly built image.
+"${COMPOSE[@]}" up -d --no-deps --force-recreate "${SERVICES[@]}"
 
-echo "==> Restarting nginx (picks up the new container IPs)"
+echo "==> Restarting nginx (picks up new container IPs and any config template changes)"
 "${COMPOSE[@]}" restart --no-deps nginx
 
 echo "==> Waiting for api to be healthy..."
@@ -53,8 +101,24 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
+if [ "$HAS_IETF_UI" = true ]; then
+  echo "==> Waiting for ietf_decision_agent_ui (Prism) to be up..."
+  for i in $(seq 1 30); do
+    if "${COMPOSE[@]}" exec -T ietf_decision_agent_ui curl -sf -m 3 http://localhost:8765/prism/login >/dev/null 2>&1; then
+      echo "    ietf_decision_agent_ui is up."
+      break
+    fi
+    sleep 2
+  done
+fi
+
 echo "==> Recent api logs:"
 "${COMPOSE[@]}" logs --tail=20 api
+
+if [ "$HAS_IETF_UI" = true ]; then
+  echo "==> Recent ietf_decision_agent_ui (Prism) logs:"
+  "${COMPOSE[@]}" logs --tail=10 ietf_decision_agent_ui
+fi
 
 echo "==> Container status:"
 "${COMPOSE[@]}" ps

@@ -41,7 +41,7 @@ It runs in phases and pauses at a few points for you to do something on your **l
 1. **Mount the data disk.** Deliberately interactive — it shows you `lsblk` and asks you to type the device name yourself, rather than guessing. Attaching a disk at VM-creation time vs. after can number it differently (we saw it come up as `sdb` both ways in practice, but don't trust that), and formatting the wrong device is destructive.
 2. **Redirect Docker's *and* containerd's storage to the data disk.** These are two separate settings most people don't know are separate. `daemon.json`'s `data-root` only covers classic Docker image/container storage; `docker compose build` goes through BuildKit, which uses containerd's own storage root (`/etc/containerd/config.toml`), configured independently. Missing either one means the OS disk fills up again even though you thought you'd fixed it. This phase runs before anything is pulled or built, so there's no existing data to migrate — it just points both at `/mnt/data` from the start and verifies it with `docker info`.
 3. **GitHub deploy key** for this VM (separate from your personal SSH key — this one only needs read access to the one repo).
-4. **Clone the repo.**
+4. **Clone the repo onto `/mnt/data`, not `$HOME`.** A third, separate storage gap from phase 2's: `docker-compose.yaml` bind-mounts every stateful service (Postgres, Weaviate, downloaded IETF mail/RFC archives, uploaded files) as host paths under `docker/volumes/`, relative to wherever the repo itself is checked out — not as named Docker volumes, so phase 2's data-root redirect does nothing for them. Cloning onto the data disk instead of `$HOME` puts all of that on it for free, with no compose-file changes needed.
 5. **Copy over `docker-compose.override.yaml`.** This file is gitignored on purpose (a local dev convenience) — a fresh clone never has it, so it has to come from your laptop. The script also patches the copy's `web` service: your local override builds `web` from a pre-built `.next/standalone` folder (fast for local dev, since you build natively with `pnpm`), but nothing on the VM has that pre-built output. The VM needs the *other* Dockerfile — `web/Dockerfile`, not `web/Dockerfile.local-standalone` — which builds fully from source, with the build context set to `web/` itself (not the repo root, which is what that Dockerfile expects).
 6. **Write a root `.dockerignore`.** There wasn't one. Without it, building `web` (context = repo root for some builds) tries to tar up the entire repo as build context, including `docker/volumes/` — Postgres/Weaviate data, and certbot's Let's Encrypt private keys, which are permission-locked and make the build fail outright.
 7. **Install Ollama**, configured to listen on all interfaces (`OLLAMA_HOST=0.0.0.0`), not just `127.0.0.1` — Ollama's default only accepts connections from localhost, but a container reaching it via `host.docker.internal` arrives on the Docker bridge interface, not `127.0.0.1`, and gets silently connection-refused otherwise. Model storage points at the data disk.
@@ -54,7 +54,7 @@ It runs in phases and pauses at a few points for you to do something on your **l
 The script stops before this on purpose — builds take real time and are worth watching:
 
 ```bash
-cd ~/dify/docker
+cd /mnt/data/dify/docker
 docker compose -f docker-compose.yaml -f docker-compose.override.yaml build api worker worker_beat web
 docker compose -f docker-compose.yaml -f docker-compose.override.yaml up -d
 ```
@@ -94,7 +94,7 @@ Free and takes about 10 minutes total.
 1. **DuckDNS**: sign in at duckdns.org (GitHub/Google login, no new account), complete the reCAPTCHA gate first (the domain-registration field is hidden behind it), pick a subdomain, and set its IP to **the VM's public IP** (it defaults to auto-detecting *your laptop's* IP — overwrite it manually).
 2. **Get the certificate** (`docker-compose.yaml` already has an nginx + certbot setup for this):
    ```bash
-   cd ~/dify/docker
+   cd /mnt/data/dify/docker
    sed -i "s|^CERTBOT_EMAIL=.*|CERTBOT_EMAIL=<your email>|" .env
    sed -i "s|^CERTBOT_DOMAIN=.*|CERTBOT_DOMAIN=<yourname>.duckdns.org|" .env
    sed -i "s|^NGINX_SERVER_NAME=.*|NGINX_SERVER_NAME=<yourname>.duckdns.org|" .env
