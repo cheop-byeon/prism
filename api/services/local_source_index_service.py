@@ -234,7 +234,21 @@ class LocalSourceIndexService:
                     "kind": documents[i]["kind"],
                     "id": documents[i]["id"],
                     "score": round(float(scores[i]), 3),
-                    "snippet": documents[i]["text"][:300],
+                    # 300 chars (the original size here) cuts a mail_thread
+                    # document off before its first message's opening
+                    # sentence finishes -- confirmed live: a real, highly
+                    # relevant, 43-message WG thread ("Using different
+                    # crypto", quic WG) scored top and was correctly found,
+                    # but its snippet ended mid-word ("I like that people
+                    # seem to forget eng"), so the model could see the
+                    # thread existed without ever seeing why it mattered.
+                    # mail_thread documents average ~7.2KB (up to ~48KB);
+                    # 2000 chars typically covers one full message in a
+                    # multi-message chunk -- enough to actually read the
+                    # substance, not just confirm relevance, without
+                    # ballooning a single search call's total observation
+                    # size across top_k results.
+                    "snippet": documents[i]["text"][:2000],
                 }
             )
         return {"query": query, "results": results}
