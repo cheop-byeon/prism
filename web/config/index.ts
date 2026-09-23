@@ -32,6 +32,14 @@ export const MARKETPLACE_URL_PREFIX = getStringConfig(
   '',
 )
 
+// Unset (undefined) by default -- see NEXT_PUBLIC_PRISM_CLASSIC_URL's own
+// comment in env.ts. No getStringConfig fallback here on purpose: an empty-
+// string default would make the link's visibility check (Boolean(...))
+// always false anyway, so leaving it undefined is just as correct and
+// avoids implying these have a real default URL.
+export const PRISM_CLASSIC_URL = env.NEXT_PUBLIC_PRISM_CLASSIC_URL
+export const PRISM_SPECTRUM_URL = env.NEXT_PUBLIC_PRISM_SPECTRUM_URL
+
 const EDITION = env.NEXT_PUBLIC_EDITION
 
 export const IS_CE_EDITION = EDITION === 'SELF_HOSTED'
