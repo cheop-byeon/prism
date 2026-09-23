@@ -1307,8 +1307,15 @@ const accountMenuBtnEl = document.getElementById('accountMenuBtn');
 const accountDropdownEl = document.getElementById('accountDropdown');
 // Same reciprocal link the spectrum page's own "Classic view" link uses,
 // just the other direction (session cookies aren't port-scoped, so this
-// opens already signed in, same as Settings above).
-document.getElementById('spectrumLink').href = `${location.protocol}//${location.hostname}:8766${PRISM_PREFIX}/`;
+// opens already signed in, same as Settings above). See that link's own
+// comment for why this branches on PRISM_PREFIX: locally each page is its
+// own port with no prefix; behind nginx in production only one origin is
+// exposed at all, and nginx maps spectrum to PRISM_PREFIX (e.g. "/prism")
+// itself on that origin, classic to PRISM_PREFIX + "/classic/" -- so from
+// here, spectrum is just PRISM_PREFIX on the same host, not a different port.
+document.getElementById('spectrumLink').href = PRISM_PREFIX
+  ? `${location.protocol}//${location.host}${PRISM_PREFIX}/`
+  : `${location.protocol}//${location.hostname}:8766${PRISM_PREFIX}/`;
 
 accountMenuBtnEl.addEventListener('click', (e) => {
   e.stopPropagation();

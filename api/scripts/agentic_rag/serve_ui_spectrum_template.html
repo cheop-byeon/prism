@@ -851,10 +851,18 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 </aside>
 
 <script>
-// Same host, same PRISM_PREFIX, just the original page's port -- both
-// pages are the same Flask app/routes bound to two ports (see serve_ui.py
-// main()), so this is a real, always-correct link, not a guessed URL.
-document.getElementById('poClassicLink').href = `${location.protocol}//${location.hostname}:8765${PRISM_PREFIX}/`;
+// Local dev (no PRISM_PREFIX): both pages are the same Flask app/routes
+// bound to two ports (see serve_ui.py main()), each reachable directly at
+// its own port with no path prefix -- same host, different port.
+// Behind nginx in production (PRISM_PREFIX set, e.g. "/prism"): only one
+// origin is exposed to the internet at all -- neither port is reachable
+// directly -- so nginx maps classic to /prism/classic/ on that same origin
+// instead (see docker/nginx/conf.d/default.conf.template's own comment on
+// why classic moved there). A hardcoded :8765 would silently 404/timeout
+// in that case, since nothing is listening on that port from the outside.
+document.getElementById('poClassicLink').href = PRISM_PREFIX
+  ? `${location.protocol}//${location.host}${PRISM_PREFIX}/classic/`
+  : `${location.protocol}//${location.hostname}:8765${PRISM_PREFIX}/`;
 
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
