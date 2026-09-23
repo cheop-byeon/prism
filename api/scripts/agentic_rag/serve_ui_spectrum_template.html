@@ -35,7 +35,13 @@
     height: 100vh; overflow: hidden; font-size: 14px;
   }
   button, input, select, textarea { font-family: inherit; color: inherit; }
-  button { cursor: pointer; }
+  /* Matches the mockup's own reset (#prism-complete button{border:0}) --
+     without this, every button that doesn't explicitly set its own border
+     shows the browser's native default button border/outline. This is the
+     actual source of the visible box borders around .pt-cell/.pt-track and
+     any other button across the app that relies on this reset rather than
+     setting border:none itself. */
+  button { cursor: pointer; border: 0; }
 
   .po-shell { display: flex; height: 100vh; }
 
