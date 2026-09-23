@@ -2685,18 +2685,32 @@ class IetfImportService:
             try:
                 download_result, _ = IetfImportService.download_mailarchive_as_mbox_to_local(payload)
             except RemoteFileUploadError as exc:
-                if "No messages matched" in str(exc):
-                    return {
-                        "year": year,
-                        "saved_path": None,
-                        "host_path_hint": None,
-                        "processed_path": None,
-                        "processed_host_path_hint": None,
-                        "total_emails": 0,
-                        "discarded_emails": 0,
-                        "preview_lines": [],
-                    }
-                raise
+                # Any single year failing (genuinely no messages, a sidecar
+                # timeout on an unusually large/busy year -- confirmed live:
+                # one of quic's high-traffic recent years alone exceeded the
+                # sidecar's 300s timeout, per IETFDATA_SERVICE_TIMEOUT) must
+                # not sink the whole multi-year fetch: this runs across
+                # `years` in a ThreadPoolExecutor and future.result() would
+                # otherwise re-raise here, discarding every OTHER year's
+                # already-successful download too. Confirmed live: this
+                # exact failure mode left quic's mbox files for its
+                # successful years on disk with zero threaded output, since
+                # the threading step (which needs ALL years' results) never
+                # ran at all. Degrading to an empty-but-marked-failed year
+                # keeps every other year's real data instead of discarding
+                # all of it over one bad year.
+                is_no_match = "No messages matched" in str(exc)
+                return {
+                    "year": year,
+                    "saved_path": None,
+                    "host_path_hint": None,
+                    "processed_path": None,
+                    "processed_host_path_hint": None,
+                    "total_emails": 0,
+                    "discarded_emails": 0,
+                    "preview_lines": [],
+                    **({} if is_no_match else {"fetch_error": str(exc)}),
+                }
             preprocess_result = IetfImportService.preprocess_mbox_file(
                 download_result["saved_path"], filter_emails=filter_emails, quote_handling=quote_handling
             )
