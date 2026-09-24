@@ -856,12 +856,14 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 // its own port with no path prefix -- same host, different port.
 // Behind nginx in production (PRISM_PREFIX set, e.g. "/prism"): only one
 // origin is exposed to the internet at all -- neither port is reachable
-// directly -- so nginx maps classic to /prism/classic/ on that same origin
-// instead (see docker/nginx/conf.d/default.conf.template's own comment on
-// why classic moved there). A hardcoded :8765 would silently 404/timeout
-// in that case, since nothing is listening on that port from the outside.
+// directly -- so nginx maps classic to the top-level /classic/ path on
+// that same origin instead (see docker/nginx/conf.d/default.conf.template
+// -- /prism itself is not a human-navigable path any more, PRISM_PREFIX
+// here is purely the internal API-call prefix now, unrelated to this
+// public link). A hardcoded :8765 would silently 404/timeout in that
+// case, since nothing is listening on that port from the outside.
 document.getElementById('poClassicLink').href = PRISM_PREFIX
-  ? `${location.protocol}//${location.host}${PRISM_PREFIX}/classic/`
+  ? `${location.protocol}//${location.host}/classic/`
   : `${location.protocol}//${location.hostname}:8765${PRISM_PREFIX}/`;
 
 function escapeHtml(s) {

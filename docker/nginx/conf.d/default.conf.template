@@ -35,30 +35,42 @@ server {
       include proxy.conf;
     }
 
-    # Prism (ietf_decision_agent_ui) -- reverse-proxied at /prism instead of
-    # its own subdomain, so its Flask routes are registered with the same
-    # /prism prefix baked in (PRISM_URL_PREFIX env var) and this must NOT
-    # strip the prefix on the way through: proxy_pass has no trailing URI
-    # here on purpose, so nginx forwards the original /prism/... path as-is.
+    # Prism (ietf_decision_agent_ui) -- reverse-proxied instead of its own
+    # subdomain. Per explicit direction, /prism must not exist as a
+    # human-navigable path at all any more: the real top-level entry points
+    # are /spectrum (the redesigned page, port 8766, the primary post-login
+    # experience), /classic (the original page, port 8765), and /login (one
+    # shared portal for both). Each rewrites its own path segment down to
+    # the bare /prism/... path Flask's routes actually understand
+    # (PRISM_URL_PREFIX env var -- unchanged internally, still shared by
+    # both ports) before proxying, exactly like /prism/classic/ used to
+    # strip /classic.
     #
-    # /prism/ is spectrum (the redesigned page, port 8766) -- the primary,
-    # default experience post-login. Classic (the original page, port 8765)
-    # moves to /prism/classic/ instead of disappearing from the public
-    # domain: that location strips the /classic segment on the way through
-    # (rewrite ... break, no regex capture reaching proxy_pass) since the
-    # Flask app itself only ever understands routes under the bare /prism
-    # prefix, on either port -- it has no idea /classic ever existed.
-    location = /prism {
-      return 301 /prism/;
+    # /prism/... itself is kept working underneath (see the exact-match
+    # redirects below, which take priority over this prefix block
+    # regardless of declaration order in nginx) ONLY because both pages'
+    # own client-side JS is built with that same PRISM_URL_PREFIX baked
+    # into every fetch()/EventSource absolute URL (e.g. /prism/api/models),
+    # not derived from whichever top-level path the page itself loaded
+    # from -- so it keeps working as invisible plumbing no human is
+    # expected to navigate to directly, while the exact-match redirects
+    # below send an actual person straight to the new canonical paths.
+    location = /spectrum {
+      return 301 /spectrum/;
     }
 
-    location /prism/ {
+    location /spectrum/ {
+      rewrite ^/spectrum/(.*)$ /prism/$1 break;
       proxy_pass http://ietf_decision_agent_ui:8766;
       include proxy.conf;
     }
 
-    location /prism/classic/ {
-      rewrite ^/prism/classic/(.*)$ /prism/$1 break;
+    location = /classic {
+      return 301 /classic/;
+    }
+
+    location /classic/ {
+      rewrite ^/classic/(.*)$ /prism/$1 break;
       proxy_pass http://ietf_decision_agent_ui:8765;
       include proxy.conf;
     }
@@ -67,10 +79,11 @@ server {
     # the path, since the domain itself already says prism. Content is
     # identical regardless of which port renders it (see _render_login_page
     # in serve_ui.py -- it doesn't branch on request.host at all), so this
-    # rewrites straight to spectrum's own /prism/login: the login page's own
-    # post-auth redirect is a relative /prism/ path, which -- now that
-    # /prism/ means spectrum above -- lands the browser on the new design
-    # automatically, with no backend template changes needed for this part.
+    # rewrites straight to spectrum's own /prism/login. The login page's own
+    # post-auth redirect targets a relative /prism/ path (baked in the same
+    # way as the API calls above) -- caught by the exact-match /prism/
+    # redirect below and sent on to /spectrum/, so no backend template
+    # change is needed for that leg either.
     # Dify's own web console uses /signin, not /login, for its own sign-in
     # page (confirmed: web/app/signin exists, web/app/login does not), so
     # this doesn't shadow anything Dify itself needs.
@@ -82,6 +95,38 @@ server {
 
     location = /login-hero.jpg {
       rewrite ^/login-hero\.jpg$ /prism/login-hero.jpg break;
+      proxy_pass http://ietf_decision_agent_ui:8766;
+      include proxy.conf;
+    }
+
+    # /prism itself must never render a page for a real visitor -- these
+    # three exact matches intercept the specific paths a person (or an old
+    # bookmark/link) could actually land on, ahead of the general /prism/
+    # prefix block below (nginx always prefers an exact match over a prefix
+    # one, independent of file order) -- everything else under /prism/,
+    # namely the API/asset calls the pages' own JS makes, still reaches the
+    # backend unredirected.
+    location = /prism {
+      return 301 /spectrum;
+    }
+
+    location = /prism/ {
+      return 301 /spectrum/;
+    }
+
+    location = /prism/login {
+      return 301 /login;
+    }
+
+    location = /prism/classic {
+      return 301 /classic;
+    }
+
+    location = /prism/classic/ {
+      return 301 /classic/;
+    }
+
+    location /prism/ {
       proxy_pass http://ietf_decision_agent_ui:8766;
       include proxy.conf;
     }

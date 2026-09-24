@@ -64,8 +64,8 @@ services:
       # Links Dify's own account-menu "Support" submenu out to Prism (see
       # web/app/components/header/account-dropdown/support.tsx) -- unset
       # anywhere else, so this is a no-op for every other Dify deployment.
-      # Spectrum lives at PRISM_URL_PREFIX itself on this same origin;
-      # classic moved to PRISM_URL_PREFIX + /classic/ (see the nginx /prism
-      # location's own comment in default.conf.template for why).
-      NEXT_PUBLIC_PRISM_CLASSIC_URL: https://prism.uiocloud.no/prism/classic/
-      NEXT_PUBLIC_PRISM_SPECTRUM_URL: https://prism.uiocloud.no/prism/
+      # /prism is not a human-navigable path any more -- spectrum and
+      # classic live at their own top-level /spectrum/ and /classic/ paths
+      # instead (see the nginx default.conf.template's own comment).
+      NEXT_PUBLIC_PRISM_CLASSIC_URL: https://prism.uiocloud.no/classic/
+      NEXT_PUBLIC_PRISM_SPECTRUM_URL: https://prism.uiocloud.no/spectrum/
