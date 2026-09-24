@@ -40,12 +40,49 @@ server {
     # /prism prefix baked in (PRISM_URL_PREFIX env var) and this must NOT
     # strip the prefix on the way through: proxy_pass has no trailing URI
     # here on purpose, so nginx forwards the original /prism/... path as-is.
+    #
+    # /prism/ is spectrum (the redesigned page, port 8766) -- the primary,
+    # default experience post-login. Classic (the original page, port 8765)
+    # moves to /prism/classic/ instead of disappearing from the public
+    # domain: that location strips the /classic segment on the way through
+    # (rewrite ... break, no regex capture reaching proxy_pass) since the
+    # Flask app itself only ever understands routes under the bare /prism
+    # prefix, on either port -- it has no idea /classic ever existed.
     location = /prism {
       return 301 /prism/;
     }
 
     location /prism/ {
+      proxy_pass http://ietf_decision_agent_ui:8766;
+      include proxy.conf;
+    }
+
+    location /prism/classic/ {
+      rewrite ^/prism/classic/(.*)$ /prism/$1 break;
       proxy_pass http://ietf_decision_agent_ui:8765;
+      include proxy.conf;
+    }
+
+    # One shared login portal at the domain root -- no "/prism" repeated in
+    # the path, since the domain itself already says prism. Content is
+    # identical regardless of which port renders it (see _render_login_page
+    # in serve_ui.py -- it doesn't branch on request.host at all), so this
+    # rewrites straight to spectrum's own /prism/login: the login page's own
+    # post-auth redirect is a relative /prism/ path, which -- now that
+    # /prism/ means spectrum above -- lands the browser on the new design
+    # automatically, with no backend template changes needed for this part.
+    # Dify's own web console uses /signin, not /login, for its own sign-in
+    # page (confirmed: web/app/signin exists, web/app/login does not), so
+    # this doesn't shadow anything Dify itself needs.
+    location = /login {
+      rewrite ^/login$ /prism/login break;
+      proxy_pass http://ietf_decision_agent_ui:8766;
+      include proxy.conf;
+    }
+
+    location = /login-hero.jpg {
+      rewrite ^/login-hero\.jpg$ /prism/login-hero.jpg break;
+      proxy_pass http://ietf_decision_agent_ui:8766;
       include proxy.conf;
     }
 

@@ -105,6 +105,18 @@ const clientSchema = {
    */
   NEXT_PUBLIC_MAX_TREE_DEPTH: coercedNumber.default(50),
   /**
+   * Link to the "classic" Prism IETF research tool, shown in the account
+   * dropdown's Support menu. Unset (the default) hides the link entirely --
+   * this is specific to this deployment's own custom tool, not a feature of
+   * Dify itself.
+   */
+  NEXT_PUBLIC_PRISM_CLASSIC_URL: z.url().optional(),
+  /**
+   * Link to the "spectrum" (redesigned) Prism IETF research tool -- see
+   * NEXT_PUBLIC_PRISM_CLASSIC_URL.
+   */
+  NEXT_PUBLIC_PRISM_SPECTRUM_URL: z.url().optional(),
+  /**
    * The URL for Web APP, refers to the Web App base URL of WEB service if web app domain is different from
    * console or api domain.
    * example: http://udify.app/api
@@ -182,6 +194,8 @@ export const env = createEnv({
     NEXT_PUBLIC_MAX_PARALLEL_LIMIT: isServer ? process.env.NEXT_PUBLIC_MAX_PARALLEL_LIMIT : getRuntimeEnvFromBody('maxParallelLimit'),
     NEXT_PUBLIC_MAX_TOOLS_NUM: isServer ? process.env.NEXT_PUBLIC_MAX_TOOLS_NUM : getRuntimeEnvFromBody('maxToolsNum'),
     NEXT_PUBLIC_MAX_TREE_DEPTH: isServer ? process.env.NEXT_PUBLIC_MAX_TREE_DEPTH : getRuntimeEnvFromBody('maxTreeDepth'),
+    NEXT_PUBLIC_PRISM_CLASSIC_URL: isServer ? process.env.NEXT_PUBLIC_PRISM_CLASSIC_URL : getRuntimeEnvFromBody('prismClassicUrl'),
+    NEXT_PUBLIC_PRISM_SPECTRUM_URL: isServer ? process.env.NEXT_PUBLIC_PRISM_SPECTRUM_URL : getRuntimeEnvFromBody('prismSpectrumUrl'),
     NEXT_PUBLIC_PUBLIC_API_PREFIX: isServer ? process.env.NEXT_PUBLIC_PUBLIC_API_PREFIX : getRuntimeEnvFromBody('publicApiPrefix'),
     NEXT_PUBLIC_SENTRY_DSN: isServer ? process.env.NEXT_PUBLIC_SENTRY_DSN : getRuntimeEnvFromBody('sentryDsn'),
     NEXT_PUBLIC_SITE_ABOUT: isServer ? process.env.NEXT_PUBLIC_SITE_ABOUT : getRuntimeEnvFromBody('siteAbout'),

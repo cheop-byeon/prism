@@ -261,6 +261,8 @@ class AgenticRagSessionService:
                     "query": row.query,
                     "answer": row.answer,
                     "trace": trace,
+                    "claim_labels": meta.get("claim_labels", {}),
+                    "evidence": meta.get("evidence", []),
                     "created_at": row.created_at.isoformat(),
                     "feedback": feedback_row.rating.value if feedback_row else None,
                     "usage": {
@@ -291,6 +293,8 @@ class AgenticRagSessionService:
         usage: dict | None,
         model_provider: str | None = None,
         model_name: str | None = None,
+        claim_labels: dict | None = None,
+        evidence: list | None = None,
     ) -> str:
         usage = usage or {}
         message = Message(
@@ -313,7 +317,15 @@ class AgenticRagSessionService:
             from_end_user_id=None,
             from_account_id=account.id,
             app_mode=AppMode.AGENT_CHAT,
-            message_metadata=json.dumps({"tier": tier}),
+            # claim_labels/evidence: same rationale as tier above -- a JSON
+            # blob here rather than real columns/tables, since (unlike
+            # trace's tool calls) these aren't queried or joined on, just
+            # replayed back to the frontend as-is when a session reopens.
+            # JSON object keys are always strings, so claim_labels'
+            # {citation_number: status} round-trips as string keys after
+            # this -- already true of the live (non-reloaded) SSE path too,
+            # via jsonify, so both paths hand the frontend the same shape.
+            message_metadata=json.dumps({"tier": tier, "claim_labels": claim_labels or {}, "evidence": evidence or []}),
         )
         db.session.add(message)
         db.session.flush()  # populate message.id before the thoughts below reference it

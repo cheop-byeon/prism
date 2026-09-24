@@ -1,0 +1,3119 @@
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism</title>
+<style>
+  /* Prismatic palette, taken directly from the prism-spectrum mockup's own
+     --po-* names and light-dark() pairs (light value first, dark value
+     second) -- not translated into a different app's token names, per the
+     explicit direction to build this as its own page, not a migration of
+     the old one. color-scheme: light dark lets light-dark() resolve to
+     whichever the OS/browser prefers automatically, with no manual toggle
+     -- the mockup itself has none either.
+     --po-added/--po-added-bg/--po-modified/--po-modified-bg aren't part of
+     the mockup's own token set (they're this app's claim-pill colors); their
+     light-mode halves are derived to match the same darker-saturated-text-
+     on-pale-background relationship the mockup's other tokens use. */
+  :root {
+    color-scheme: light dark;
+    --po-bg: light-dark(#f5f6ff, #0c1020); --po-paper: light-dark(#ffffff, #151b30);
+    --po-soft: light-dark(#eaedfc, #1d2540); --po-ink: light-dark(#25284c, #eff1ff);
+    --po-muted: light-dark(#636987, #a5aecb); --po-line: light-dark(#dce0f4, #2d3656);
+    --po-accent: light-dark(#6350ca, #b5a3ff); --po-tint: light-dark(#ece7ff, #2b2450);
+    --po-purple: light-dark(#a54aca, #e6a5ff); --po-warn: light-dark(#986822, #dfbf7c);
+    --po-shell: light-dark(#eef0fc, #0e1427); --po-cyan: light-dark(#008895, #69e3e8);
+    --po-added: light-dark(#1f7a52, #5fd6a3); --po-added-bg: light-dark(#e3f5ea, #16332a);
+    --po-modified: light-dark(#8a5f12, #f0bf6c); --po-modified-bg: light-dark(#fbf0da, #3a2f16);
+    --po-serif: Georgia, "Times New Roman", serif;
+    --po-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    --po-mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--po-bg); color: var(--po-ink); font-family: var(--po-sans);
+    height: 100vh; overflow: hidden; font-size: 14px;
+  }
+  button, input, select, textarea { font-family: inherit; color: inherit; }
+  /* Matches the mockup's own reset (#prism-complete button{border:0}) --
+     without this, every button that doesn't explicitly set its own border
+     shows the browser's native default button border/outline. This is the
+     actual source of the visible box borders around .pt-cell/.pt-track and
+     any other button across the app that relies on this reset rather than
+     setting border:none itself. */
+  button { cursor: pointer; border: 0; }
+
+  .po-shell { display: flex; height: 100vh; }
+
+  /* Rail -- brand, one primary action, the 4 workspace pages, then real
+     session continuity (mockup's "PINNED INVESTIGATION" caption/button,
+     extended to a real recent-sessions list since there's no Workspace
+     page with its own "Continue an investigation" cards yet). */
+  .po-rail {
+    width: 320px; flex-shrink: 0; display: flex; flex-direction: column;
+    background: var(--po-shell); border-right: 1px solid var(--po-line); padding: 18px 18px;
+  }
+  .po-brand { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 18px; padding: 0 4px; }
+  .po-new {
+    display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 16px;
+    background: var(--po-tint); color: var(--po-accent); border: 1px solid var(--po-tint);
+    border-radius: 8px; padding: 9px 12px; font-size: 13px; font-weight: 600;
+  }
+  .po-new:hover { background: var(--po-accent); color: var(--po-shell); }
+  .po-railnav { display: flex; flex-direction: column; gap: 2px; }
+  .po-railnav button {
+    display: flex; align-items: center; gap: 9px; width: 100%; text-align: left; background: transparent;
+    border: none; border-radius: 7px; padding: 9px 10px; font-size: 13px; color: var(--po-muted);
+  }
+  .po-railnav button:hover { color: var(--po-ink); }
+  .po-railnav button[aria-current="page"] { background: var(--po-tint); color: var(--po-accent); }
+  .po-railcaption {
+    font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--po-muted);
+    margin: 20px 4px 8px;
+  }
+  .pm-navlabel {
+    font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--po-muted);
+    margin: 17px 10px 4px;
+  }
+  .pm-navlabel:first-child { margin-top: 0; }
+  input[type=text].po-sessionsearch {
+    width: 100%; background: var(--po-soft); border: 1px solid var(--po-line); color: var(--po-ink);
+    border-radius: 7px; padding: 6px 9px; font-size: 12px; font-family: inherit; margin-bottom: 6px;
+  }
+  .po-sessionsearch:focus-visible { outline: none; border-color: var(--po-accent); }
+  .po-sessionlist { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+  .po-saved {
+    display: flex; align-items: center; gap: 6px; width: 100%; text-align: left; background: transparent;
+    border: none; border-radius: 7px; padding: 8px 10px; color: var(--po-ink); font-size: 12px; cursor: pointer;
+  }
+  .po-saved:hover { background: var(--po-soft); }
+  .po-saved.active { background: var(--po-tint); }
+  .po-saved small { display: block; color: var(--po-muted); font-size: 10px; margin-top: 2px; }
+  .po-saved-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .po-saved-rename, .po-saved-delete {
+    flex-shrink: 0; opacity: 0; background: transparent; border: none; color: var(--po-muted);
+    padding: 2px 4px; font-size: 11px;
+  }
+  .po-saved:hover .po-saved-rename, .po-saved:hover .po-saved-delete { opacity: 1; }
+  .po-saved-rename:hover { color: var(--po-ink); }
+  .po-saved-delete:hover { color: var(--po-warn); }
+  .po-rename-input {
+    flex: 1; min-width: 0; background: var(--po-paper); border: 1px solid var(--po-accent); color: var(--po-ink);
+    font-size: 12px; padding: 2px 4px; border-radius: 5px; font-family: inherit;
+  }
+  .po-loadmore {
+    width: 100%; background: transparent; color: var(--po-muted); border: 1px dashed var(--po-line);
+    font-size: 11px; padding: 6px; margin-top: 4px; border-radius: 7px;
+  }
+  .po-loadmore:hover { color: var(--po-ink); border-color: var(--po-muted); }
+  .po-profile { display: flex; align-items: center; gap: 8px; padding: 10px 4px 0; border-top: 1px solid var(--po-line); margin-top: 10px; }
+  .po-avatar {
+    width: 26px; height: 26px; border-radius: 50%; background: var(--po-accent); color: var(--po-shell);
+    display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; flex-shrink: 0;
+    border: none;
+  }
+  .po-profile-email { font-size: 11px; color: var(--po-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .po-logout, .po-settingslink { font-size: 11px; color: var(--po-muted); background: none; border: none; padding: 0; text-decoration: underline; }
+  .po-classiclink { display: block; font-size: 11px; color: var(--po-muted); padding: 8px 6px; text-decoration: none; border-top: 1px solid var(--po-line); margin-top: 8px; }
+  .po-classiclink:hover { color: var(--po-accent); }
+  .po-logout:hover, .po-settingslink:hover { color: var(--po-ink); }
+  .po-profilelinks { display: flex; gap: 8px; }
+
+  /* Main column */
+  .po-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
+  .po-top {
+    flex-shrink: 0; padding: 12px 30px; border-bottom: 1px solid var(--po-line);
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 11px; color: var(--po-muted);
+  }
+  .po-preview { font-size: 10px; letter-spacing: 0.04em; }
+
+  /* Centered, capped-width column -- was flush against .main-area's left
+     edge (just a max-width with no margin), leaving a large dead zone on
+     wide screens instead of centering like localhost:8765's own
+     --content-max-width/--gutter-x column does. margin:0 auto centers a
+     flex item here since .po-main is a column-direction flex container
+     (width is the cross axis, so an explicit horizontal auto-margin
+     overrides the default stretch instead of fighting it). */
+  .po-page { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 30px; max-width: 1280px; width: 100%; margin: 0 auto; }
+  .po-page[hidden] { display: none; }
+  .po-eyebrow { color: var(--po-cyan); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
+  .po-title { font: 500 30px/1.2 var(--po-serif); letter-spacing: -0.8px; margin: 10px 0 12px; }
+  .po-subtitle { font-size: 13px; color: var(--po-muted); margin-bottom: 20px; }
+
+  /* Workspace page */
+  .po-hero { margin-bottom: 28px; }
+  .po-title em {
+    font-style: normal; background: linear-gradient(90deg, var(--po-accent), var(--po-purple) 52%, var(--po-cyan));
+    background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .po-herotext { max-width: 420px; font-size: 13px; line-height: 1.8; color: var(--po-muted); margin-top: 12px; }
+  .po-composer { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 14px; margin-bottom: 32px; }
+  .po-composer:focus-within { border-color: var(--po-accent); }
+  .po-compose-tabs { display: flex; gap: 18px; margin: 0 20px; border-bottom: 1px solid var(--po-line); }
+  .po-compose-tabs button { background: transparent; border: none; padding: 12px 0 10px; font-size: 12px; color: var(--po-muted); border-bottom: 2px solid transparent; }
+  .po-compose-tabs button[aria-pressed="true"] { color: var(--po-accent); border-color: var(--po-accent); }
+  .po-questionform textarea {
+    width: 100%; min-height: 100px; resize: vertical; border: 0; background: transparent;
+    padding: 20px; font: 15px/1.6 var(--po-serif); color: var(--po-ink);
+  }
+  .po-questionform textarea:focus { outline: none; }
+  .po-composefoot {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 13px 18px; border-top: 1px solid var(--po-line);
+  }
+  .po-doclookup { padding: 18px; }
+  .po-tiny { font-size: 11px; color: var(--po-muted); }
+  .po-sectionhead { display: flex; align-items: baseline; justify-content: space-between; margin: 30px 0 12px; }
+  .po-sectionhead h2 { font: 500 16px var(--po-serif); margin: 0; }
+  .po-sectionhead small { color: var(--po-muted); font-size: 11px; }
+  .po-recent {
+    display: flex; justify-content: space-between; align-items: baseline; gap: 14px; width: 100%; text-align: left;
+    padding: 15px 16px; border: 1px solid var(--po-line); border-radius: 10px; background: var(--po-paper); margin-bottom: 8px;
+  }
+  .po-recent:hover { border-color: var(--po-accent); }
+  .po-recent strong { display: block; font-size: 13px; font-weight: 500; }
+  .po-recent small { display: block; color: var(--po-muted); font-size: 11px; margin-top: 4px; }
+
+  /* Investigation page chrome */
+  .po-context { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
+  .po-context code { background: var(--po-soft); padding: 3px 6px; border-radius: 4px; color: var(--po-ink); font-size: 11px; font-family: var(--po-mono); }
+  .po-invest-title { font: 500 26px/1.3 var(--po-serif); letter-spacing: -0.6px; max-width: 640px; margin-bottom: 12px; }
+  .po-pill {
+    display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px;
+    background: var(--po-tint); color: var(--po-accent); font-size: 10px; margin-right: 6px;
+  }
+  .po-pill.po-warn { background: transparent; color: var(--po-warn); padding-left: 0; }
+  .po-viewtabs { display: flex; gap: 22px; border-bottom: 1px solid var(--po-line); margin: 16px 0 20px; flex-wrap: wrap; }
+  .po-viewtabs button { background: transparent; border: none; padding: 0 0 10px; font-size: 12px; color: var(--po-muted); border-bottom: 2px solid transparent; }
+  .po-viewtabs button[aria-pressed="true"] { border-color: var(--po-accent); color: var(--po-accent); }
+
+  /* Composer -- a real Investigations-page composer (the mockup puts this
+     on Workspace, which isn't built yet -- see plan; this is a deliberate
+     temporary bridge so the core research flow is actually usable now). */
+  .po-composer-bar { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+  .po-composer-bar select, .po-composer-bar input[type=text] {
+    background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px;
+    padding: 9px 10px; font-size: 13px; color: var(--po-ink);
+  }
+  .po-composer-bar input[type=text] { flex: 1; min-width: 220px; }
+  .po-primary {
+    background: linear-gradient(110deg, #6350ca, #a18af8); color: #fff; border: none; border-radius: 7px;
+    padding: 9px 16px; font-size: 13px; font-weight: 600;
+  }
+  .po-primary:hover { filter: brightness(1.08); }
+  .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
+  .po-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .po-linkbutton { background: transparent; color: var(--po-accent); font-size: 12px; padding: 0; text-align: left; }
+  .po-linkbutton:hover { text-decoration: underline; }
+  .po-linkbutton:disabled { color: var(--po-muted); cursor: default; text-decoration: none; }
+  .po-secondary:hover { color: var(--po-ink); border-color: var(--po-muted); }
+
+  /* Live plan / activity steps */
+  .po-plan { margin-bottom: 16px; }
+  .po-planstep { display: flex; gap: 10px; padding: 6px 0; font-size: 12px; color: var(--po-muted); }
+  .po-planstep.done { color: var(--po-ink); }
+  .po-planstep.errored { color: var(--po-warn); }
+  .po-planmarker { width: 14px; flex-shrink: 0; }
+  .po-planreason { color: var(--po-muted); font-size: 11px; margin-top: 2px; }
+  .po-loading { color: var(--po-muted); font-size: 13px; }
+
+  /* Decision brief -- eyebrow + narrative sections, real data from the
+     existing 5-heading agent_skill.md convention (Decision/Rationale/
+     Alternatives/Evolution/Uncertainty), rendered with the mockup's own
+     po-brief/po-claim visual language rather than a plain answer block. */
+  .po-brief { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 26px; }
+  .po-brief-lede { font: 16px/1.7 var(--po-serif); margin: 8px 0 4px; }
+  .po-claim { border-top: 1px solid var(--po-line); margin-top: 18px; padding-top: 16px; }
+  .po-claim h3 { font-size: 12px; font-weight: 600; color: var(--po-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px; }
+  .po-claim p { font: 14px/1.75 var(--po-serif); margin: 0 0 10px; }
+  .po-cite {
+    padding: 1px 5px; border: 1px solid var(--po-line); border-radius: 5px; color: var(--po-accent);
+    background: var(--po-tint); font-size: 10px; font-family: var(--po-sans); white-space: nowrap; margin: 0 2px;
+  }
+  .po-claim-pill { font-size: 9px; text-transform: uppercase; letter-spacing: 0.03em; padding: 1px 5px; border-radius: 4px; margin-left: 4px; }
+  .po-claim-pill-stated { background: var(--po-added-bg); color: var(--po-added); }
+  .po-claim-pill-inferred { background: var(--po-modified-bg); color: var(--po-modified); }
+  .po-claim-pill-unresolved { background: var(--po-soft); color: var(--po-muted); }
+  .po-gap {
+    display: flex; gap: 10px; padding: 14px; background: var(--po-soft); border-radius: 8px;
+    color: var(--po-muted); font-size: 12px; line-height: 1.6; margin-top: 18px;
+  }
+  .po-gap strong { color: var(--po-ink); display: block; margin-bottom: 3px; font-weight: 500; }
+
+  /* Evidence inspector -- slide-in from the right, same interaction as the
+     mockup's aside but as an overlay (this app's content column isn't a
+     fixed-width grid the way the mockup's Findings page is). */
+  .po-evidence {
+    position: fixed; top: 0; right: 0; width: 340px; height: 100vh; background: var(--po-paper);
+    border-left: 1px solid var(--po-line); padding: 20px; overflow-y: auto; transform: translateX(100%);
+    transition: transform 0.18s ease; z-index: 30;
+  }
+  .po-evidence.open { transform: translateX(0); }
+  .po-evidencehead { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--po-muted); margin-bottom: 14px; }
+  .po-close { background: none; border: none; color: var(--po-muted); font-size: 18px; line-height: 1; padding: 0; }
+  .po-close:hover { color: var(--po-ink); }
+  .po-evidencetitle { font: 500 16px var(--po-serif); margin: 10px 0 4px; }
+  .po-evidencemeta { font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
+  .po-evidenceexcerpt {
+    font: 13px/1.7 var(--po-serif); background: var(--po-soft); border-left: 2px solid var(--po-accent);
+    padding: 10px 12px; margin: 0 0 14px; white-space: pre-wrap;
+  }
+  .po-relation { font-size: 11px; padding: 10px 0; border-top: 1px solid var(--po-line); color: var(--po-muted); }
+  .po-relation strong { display: block; color: var(--po-ink); margin-top: 2px; font-weight: 500; }
+
+  .po-turn { margin-bottom: 30px; }
+  .po-q { font-size: 15px; color: var(--po-muted); margin-bottom: 10px; }
+  .po-q strong { color: var(--po-ink); }
+  .po-error { background: var(--po-soft); border: 1px solid var(--po-warn); border-radius: 8px; padding: 12px 14px; color: var(--po-warn); font-size: 13px; }
+  .po-retry { margin-top: 8px; }
+  .po-usagebar { font-size: 11px; color: var(--po-muted); padding: 0 0 6px; min-height: 1em; }
+  .po-turnusage { font-size: 11px; color: var(--po-muted); margin-top: 8px; }
+  .po-feedbackrow { display: flex; gap: 4px; margin-top: 10px; }
+  .po-feedbackbtn, .po-copybtn {
+    background: transparent; border: 1px solid var(--po-line); color: var(--po-muted);
+    padding: 4px 8px; font-size: 12px; border-radius: 6px;
+  }
+  .po-feedbackbtn:hover, .po-copybtn:hover { color: var(--po-ink); border-color: var(--po-muted); }
+  .po-feedbackbtn.active { color: var(--po-accent); border-color: var(--po-accent); background: var(--po-tint); }
+
+  /* Live-filtered document lookup, shared by Documents' own composer bar
+     and Workspace's "Start from a document" tab. */
+  .po-lookup-wrap { position: relative; }
+  .po-lookup-results {
+    position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 10;
+    background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 8px; overflow: hidden;
+  }
+  .po-lookup-results button {
+    display: flex; justify-content: space-between; align-items: center; width: 100%; text-align: left;
+    padding: 10px 14px; background: none; border: none; border-bottom: 1px solid var(--po-line);
+    font-size: 13px; color: var(--po-ink);
+  }
+  .po-lookup-results button:last-child { border-bottom: none; }
+  .po-lookup-results button:hover { background: var(--po-soft); }
+  .po-lookup-results button small { color: var(--po-muted); font-size: 11px; }
+
+  /* Documents (reading view) */
+  .po-document { display: grid; grid-template-columns: 150px minmax(0,1fr); gap: 26px; margin-top: 22px; }
+  .po-toc { font-size: 11px; color: var(--po-muted); }
+  .po-toc button { display: block; width: 100%; text-align: left; padding: 7px 0; font-size: 11px; color: var(--po-muted); background: none; border: none; }
+  .po-toc button[aria-pressed="true"] { color: var(--po-accent); }
+  .po-docpaper { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 26px; min-width: 0; }
+  .po-docpaper h2 { font: 500 22px var(--po-serif); margin: 6px 0 18px; }
+  .po-passage {
+    display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 12px;
+    background: transparent; border: 0; border-left: 3px solid var(--po-line); border-radius: 0 6px 6px 0;
+    font: 14px/1.8 var(--po-serif); color: var(--po-ink);
+  }
+  .po-passage[aria-pressed="true"] { background: var(--po-tint); border-left-color: var(--po-accent); }
+  .po-selectionbar { margin-top: 8px; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  .po-selectionbar[hidden] { display: none; }
+
+  /* Archive coverage */
+  .po-context { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--po-muted); margin-bottom: 14px; }
+  .po-coverage-row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--po-line); }
+  .po-coverage-row h3 { font-size: 14px; font-weight: 500; margin: 0; }
+  .po-coverage-row p { font-size: 12px; color: var(--po-muted); margin: 5px 0 0; }
+  .po-coverage-row .po-coveragestatus { font-size: 12px; color: var(--po-muted); }
+
+  .corpora-hint { color: var(--po-muted); font-size: 13px; line-height: 1.6; }
+
+  /* Sources/Usage/RFC Graph/How-it-works -- structural classes ported
+     verbatim from the prism-complete mockup's own pm-* rule set (kept
+     under a separate prefix from po-*, same as the mockup itself, since
+     these are a distinct "operations" component family layered on top of
+     the base design system), values translated 1:1 since both pages share
+     the same --po-* token names. */
+  .pm-pagehead { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+  .pm-pagehead .po-title { margin-bottom: 6px; }
+  .pm-pagehead p { font-size: 13px; color: var(--po-muted); max-width: 440px; }
+  .pm-pagehead select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
+  .pm-toolbar { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
+  .pm-toolbar input { min-width: 0; flex: 1; padding: 11px 13px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 8px; font-size: 13px; color: var(--po-ink); }
+  .pm-toolbar select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
+  .pm-group { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; overflow: hidden; margin: 14px 0; }
+  .pm-grouphead { padding: 16px 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; background: var(--po-soft); border-bottom: 1px solid var(--po-line); }
+  .pm-grouphead h2 { font-size: 15px; font-weight: 500; margin: 0; }
+  .pm-grouphead p { font-size: 11px; color: var(--po-muted); margin: 4px 0 0; }
+  .pm-facets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; padding: 16px 18px; }
+  .pm-facet { border-right: 1px solid var(--po-line); padding-right: 10px; }
+  .pm-facet:last-child { border: 0; }
+  .pm-facet strong { display: block; font-size: 13px; font-weight: 500; }
+  .pm-facet small { display: block; font-size: 11px; color: var(--po-muted); margin: 4px 0 10px; }
+  .pm-groupfoot { border-top: 1px solid var(--po-line); padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; color: var(--po-muted); flex-wrap: wrap; }
+  .pm-queue { padding: 14px 18px; border-left: 2px solid var(--po-cyan); background: var(--po-soft); border-radius: 0 8px 8px 0; margin-top: 18px; font-size: 12px; line-height: 1.7; }
+  .pm-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0 26px; }
+  .pm-metric { padding: 16px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; }
+  .pm-metric small { font-size: 11px; color: var(--po-muted); }
+  .pm-metric strong { display: block; font-size: 26px; letter-spacing: -0.5px; font-weight: 500; margin: 8px 0 3px; }
+  .pm-metric span { font-size: 11px; color: var(--po-muted); }
+  .pm-chart { display: grid; grid-template-columns: repeat(auto-fit, minmax(0, 1fr)); gap: 8px; height: 150px; align-items: end; margin: 18px 0 26px; padding-bottom: 22px; border-bottom: 1px solid var(--po-line); }
+  .pm-barcolumn { height: 100%; display: flex; flex-direction: column; justify-content: end; align-items: center; gap: 5px; position: relative; font-size: 10px; color: var(--po-muted); }
+  .pm-bar { width: 65%; min-height: 2px; background: linear-gradient(0deg, var(--po-accent), var(--po-cyan)); border-radius: 4px 4px 0 0; border: none; }
+  .pm-barcolumn small { position: absolute; bottom: -20px; font-size: 10px; white-space: nowrap; }
+  .pm-tablewrap { overflow-x: auto; }
+  .pm-table { border-collapse: collapse; width: 100%; font-size: 12px; text-align: left; }
+  .pm-table th { font-weight: 400; color: var(--po-muted); font-size: 11px; padding: 9px 8px; border-bottom: 1px solid var(--po-line); }
+  .pm-table td { padding: 12px 8px; border-bottom: 1px solid var(--po-line); }
+  .pm-table th:last-child, .pm-table td:last-child { text-align: right; }
+  .pm-table small { display: block; color: var(--po-muted); font-size: 10px; }
+  /* RFC Graph -- ported from the prism-complete mockup's own rx-* design
+     (map/chronology/list views + relationship filters + reach selector +
+     inspector panel), replacing the earlier single-RFC circular SVG
+     scatter. All content is real: real node titles/WGs/publication years,
+     real edge kinds, a real working-group breakdown for corpus mode
+     instead of the mockup's fixed illustrative DNS/Transport/Routing/
+     Security clusters. */
+  .rx-top { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .rx-sub { color: var(--po-muted); font-size: 12px; }
+  .rx-controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 18px 0; }
+  .rx-controls button, .rx-controls input, .rx-controls select {
+    padding: 9px 12px; border: 1px solid var(--po-line); background: var(--po-paper);
+    border-radius: 7px; max-width: 100%; color: var(--po-ink); font-size: 13px; appearance: none;
+  }
+  .rx-controls button[aria-pressed=true] { background: var(--po-tint); color: var(--po-accent); }
+  .rx-filters { display: flex; gap: 18px; flex-wrap: wrap; padding: 14px 0; border-top: 1px solid var(--po-line); font-size: 12px; color: var(--po-ink); }
+  .rx-filters label { display: inline-flex; gap: 5px; align-items: center; }
+  .rx-layout { display: grid; grid-template-columns: minmax(0, 1fr) 245px; gap: 18px; margin-top: 18px; }
+  .rx-canvas { background: radial-gradient(ellipse at 50% 40%, var(--po-tint), var(--po-paper) 70%); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; min-height: 390px; }
+  .rx-inspector { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; align-self: start; }
+  .rx-inspector h2 { font: 500 20px var(--po-serif); margin: 12px 0; }
+  .rx-inspector p { margin: 12px 0; font-size: 13px; color: var(--po-ink); }
+  .rx-inspector button {
+    display: block; width: 100%; padding: 10px; margin-top: 10px; background: var(--po-tint);
+    color: var(--po-accent); border-radius: 6px; font-size: 13px; text-align: center;
+  }
+  .rx-lanes { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; align-items: start; }
+  .rx-lanehead { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--po-muted); margin-bottom: 16px; }
+  .rx-node {
+    width: 100%; display: block; text-align: left; border: 1px solid var(--po-line); border-radius: 8px;
+    padding: 12px; background: var(--po-paper); margin: 10px 0; color: var(--po-ink);
+  }
+  .rx-node strong, .rx-node small { display: block; }
+  .rx-node small { font-size: 11px; color: var(--po-muted); }
+  .rx-center { margin-top: 72px; border: 2px solid var(--po-accent); box-shadow: 0 0 28px color-mix(in srgb, var(--po-accent) 12%, transparent); }
+  .rx-edge { background: transparent !important; color: var(--po-accent); font-size: 11px; text-align: left; padding: 0 0 8px; }
+  .rx-reading { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--po-line); }
+  .rx-readinggrid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .rx-note { font-size: 12px; color: var(--po-muted); margin-top: 14px; }
+  .rx-clusters { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 18px; margin-top: 20px; }
+  .rx-cluster { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 45% 40% 42% 35%; padding: 34px 15px; text-align: center; color: var(--po-accent); }
+  .rx-cluster span { display: block; font-size: 12px; color: var(--po-muted); }
+  .rx-time { border-left: 2px solid var(--po-line); padding-left: 20px; }
+  .rx-row { padding: 14px 0; border-bottom: 1px solid var(--po-line); }
+  .rx-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .rx-table td, .rx-table th { padding: 12px 8px; text-align: left; border-bottom: 1px solid var(--po-line); color: var(--po-ink); }
+  .rx-table button { background: transparent; color: var(--po-accent); }
+  .rx-tablewrap { overflow: auto; }
+  .rx-count { font-size: 12px; color: var(--po-muted); }
+  @media (max-width: 1000px) { .rx-layout { grid-template-columns: 1fr; } .rx-inspector { min-height: 0; } }
+  @media (max-width: 600px) { .rx-lanes { grid-template-columns: 1fr; } .rx-center { margin-top: 0; } .rx-readinggrid { grid-template-columns: 1fr; } }
+  .pm-process { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 9px; margin: 20px 0; }
+  .pm-process div { padding: 12px 10px; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 8px; font-size: 12px; }
+  .pm-process small { display: block; color: var(--po-cyan); font-size: 10px; margin-bottom: 5px; letter-spacing: 0.04em; }
+  .pm-tool { border: 1px solid var(--po-line); border-radius: 10px; background: var(--po-paper); margin: 10px 0; padding: 0; overflow: hidden; }
+  .pm-tool summary { padding: 15px 17px; color: var(--po-ink); font-size: 13px; cursor: pointer; }
+  .pm-tool summary small { color: var(--po-muted); font-size: 11px; margin-left: 8px; }
+  .pm-toolbody { padding: 0 17px 16px; color: var(--po-muted); font-size: 12px; }
+  .pm-toolbody p { margin: 0 0 12px; line-height: 1.6; }
+  .pm-toolbody dl { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; font-size: 11px; margin: 0; }
+  .pm-toolbody dt { color: var(--po-cyan); }
+  .pm-toolbody dd { margin: 0; }
+  .pm-toolbody code { display: block; background: var(--po-soft); padding: 10px; border-radius: 6px; font-size: 11px; overflow-wrap: anywhere; margin-top: 8px; }
+  .pm-sample { font-size: 11px; color: var(--po-muted); margin: 14px 0; }
+  @media (max-width: 900px) {
+    .pm-facets { grid-template-columns: 1fr; }
+    .pm-metrics { grid-template-columns: 1fr; }
+  }
+
+  /* Sources -- collapsible per-source and per-resource <details> (ps-*,
+     ported from the prism-sources-v2 mockup's own toggle design) instead
+     of the always-expanded pm-group cards the first cut used, since a
+     40+ source library read as one enormous scroll with everything open
+     at once. */
+  .ps-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 21px; flex-wrap: wrap; }
+  .ps-head p { font-size: 13px; color: var(--po-muted); margin-top: 9px; }
+  .ps-boundary { font-size: 12px; color: var(--po-muted); padding: 13px 16px; border: 1px solid var(--po-line); border-radius: 9px; background: var(--po-paper); margin-bottom: 22px; }
+  .ps-boundary strong { color: var(--po-cyan); font-weight: 500; }
+  .ps-filters { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .ps-filters input { min-width: 0; flex: 1; padding: 11px 12px; border: 1px solid var(--po-line); border-radius: 7px; background: var(--po-paper); font-size: 13px; color: var(--po-ink); }
+  .ps-filters select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
+  .ps-source { border: 1px solid var(--po-line); border-radius: 11px; background: var(--po-paper); margin: 12px 0; overflow: hidden; }
+  .ps-source > summary { list-style: none; display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 17px; color: var(--po-ink); cursor: pointer; }
+  .ps-source > summary::-webkit-details-marker { display: none; }
+  .ps-source > summary:before { content: '›'; font-size: 23px; color: var(--po-accent); flex-shrink: 0; }
+  .ps-source[open] > summary:before { transform: rotate(90deg); }
+  .ps-source[open] > summary { background: linear-gradient(110deg, var(--po-tint), var(--po-paper)); border-bottom: 1px solid var(--po-line); }
+  .ps-source-title { flex: 1; min-width: 0; }
+  .ps-source-title strong { font-size: 14px; font-weight: 500; display: block; }
+  .ps-source-title small { font-size: 11px; color: var(--po-muted); display: block; margin-top: 3px; overflow-wrap: anywhere; }
+  .ps-body { padding: 18px; }
+  .ps-meta { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-bottom: 21px; }
+  .ps-meta > div { padding: 12px; border: 1px solid var(--po-line); border-radius: 7px; font-size: 13px; }
+  .ps-meta small { display: block; font-size: 11px; color: var(--po-muted); margin-top: 5px; }
+  .ps-label { font-size: 11px; color: var(--po-muted); margin: 8px 0 12px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .ps-pipeline { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .ps-stage { background: var(--po-soft); border-radius: 9px; padding: 13px; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; }
+  .ps-stage .ps-number { font-size: 10px; color: var(--po-cyan); letter-spacing: 0.08em; }
+  .ps-stage h3 { font-size: 13px; font-weight: 500; margin: 0; }
+  .ps-stage p { font-size: 11px; color: var(--po-muted); line-height: 1.6; min-height: 35px; margin: 0; }
+  .ps-stage button { margin-top: auto; font-size: 12px; }
+  .ps-stage small { font-size: 10px; color: var(--po-muted); }
+  .ps-more { border-top: 1px solid var(--po-line); margin-top: 21px; padding-top: 14px; }
+  .ps-more > summary { font-size: 13px; color: var(--po-accent); cursor: pointer; }
+  .ps-resources-intro { font-size: 12px; color: var(--po-muted); margin: 14px 0; line-height: 1.7; }
+  .ps-resourcefilter { display: flex; gap: 14px; align-items: center; font-size: 11px; margin: 14px 0; color: var(--po-muted); flex-wrap: wrap; }
+  .ps-resourcefilter label { display: flex; gap: 6px; align-items: center; }
+  .ps-resource { border-bottom: 1px solid var(--po-line); margin: 0; padding: 0; }
+  .ps-resource > summary { display: flex; gap: 10px; justify-content: space-between; align-items: center; padding: 12px 0; list-style: none; color: var(--po-ink); font-size: 12px; cursor: pointer; }
+  .ps-resource > summary::-webkit-details-marker { display: none; }
+  .ps-resource > summary:before { content: '+'; color: var(--po-accent); }
+  .ps-resource[open] > summary:before { content: '−'; }
+  .ps-resource > summary strong { flex: 1; font-weight: 400; }
+  .ps-resource > summary span { font-size: 11px; color: var(--po-muted); }
+  .ps-resource-inside { padding: 5px 0 17px 20px; display: flex; align-items: flex-start; gap: 14px; flex-wrap: wrap; }
+  .ps-resource-inside > div { flex: 1; min-width: 150px; font-size: 11px; color: var(--po-muted); }
+  .ps-resource-inside p { margin: 7px 0; font-size: 11px; }
+  .ps-disabled { opacity: 0.55; cursor: not-allowed !important; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 5px; padding: 6px 9px; font-size: 11px; color: var(--po-muted); }
+  .ps-disabledgroup { display: flex; flex-wrap: wrap; gap: 6px; }
+  .ps-status { margin: 0 0 20px; padding: 12px 15px; border-left: 2px solid var(--po-cyan); background: var(--po-soft); font-size: 12px; border-radius: 0 8px 8px 0; color: var(--po-muted); }
+  .ps-status strong { display: block; color: var(--po-ink); font-size: 12px; font-weight: 500; margin-bottom: 3px; }
+  .ps-dialog { background: var(--po-paper); color: var(--po-ink); border: 1px solid var(--po-line); border-radius: 16px; padding: 0; width: min(620px, 92%); max-height: 85%; box-shadow: 0 24px 80px #0006; }
+  .ps-dialog::backdrop { background: #080c1dcc; backdrop-filter: blur(5px); }
+  .ps-dialoghead { display: flex; justify-content: space-between; align-items: center; padding: 21px 23px; border-bottom: 1px solid var(--po-line); background: linear-gradient(100deg, var(--po-tint), var(--po-paper)); }
+  .ps-dialoghead h2 { font-size: 20px; font-weight: 500; margin: 0; }
+  .ps-dialogbody { padding: 23px; overflow-y: auto; }
+  .ps-dialogtabs { display: flex; gap: 8px; background: var(--po-soft); padding: 4px; border-radius: 8px; margin-bottom: 20px; }
+  .ps-dialogtabs button { flex: 1; padding: 9px; background: transparent; color: var(--po-muted); border-radius: 5px; font-size: 13px; }
+  .ps-dialogtabs button[aria-pressed=true] { background: var(--po-paper); color: var(--po-accent); }
+  .ps-formlabel { display: block; color: var(--po-muted); font-size: 12px; margin: 15px 0 7px; }
+  .ps-field { display: block; width: 100%; padding: 11px 12px; border: 1px solid var(--po-line); background: var(--po-bg); border-radius: 7px; font-size: 13px; color: var(--po-ink); box-sizing: border-box; }
+  .ps-dialog p { font-size: 12px; color: var(--po-muted); margin: 0; }
+  .ps-topicsearch { display: flex; gap: 9px; margin-top: 13px; }
+  .ps-topicsearch input { min-width: 0; flex: 1; }
+  .ps-topicresult { display: flex; align-items: flex-start; gap: 10px; padding: 13px 0; border-bottom: 1px solid var(--po-line); font-size: 13px; }
+  .ps-topicresult small { display: block; font-size: 11px; color: var(--po-muted); }
+  .ps-dialogfoot { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 20px; font-size: 12px; flex-wrap: wrap; }
+  .ps-dialogfoot label { display: flex; align-items: center; gap: 6px; }
+  .ps-miniheading { color: var(--po-cyan); font-size: 11px; margin: 18px 0 5px; }
+
+  /* Decision history -- passage-map grid + selected-track timeline +
+     tabbed detail panel (pt-*, ported from prism-complete's own dedicated
+     "Decision history" page design), replacing the earlier always-open
+     lane/chain cards. Same real backend data (lanes/nodes/edges from
+     /api/decision-thread), just restructured: a grid lets you see every
+     section x revision at a glance instead of scrolling past every lane
+     to find the one you want. */
+  .pt-form { display: flex; gap: 12px; align-items: flex-end; padding: 18px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; margin-bottom: 22px; flex-wrap: wrap; }
+  .pt-form label { flex: 1; min-width: 160px; font-size: 12px; color: var(--po-muted); }
+  .pt-form select, .pt-form input {
+    display: block; width: 100%; padding: 10px; margin-top: 6px; border: 1px solid var(--po-line);
+    border-radius: 6px; background: var(--po-bg); color: var(--po-ink); font-size: 13px; box-sizing: border-box;
+    appearance: none;
+  }
+  /* The mockup's own Document field is a static readonly <input> with no
+     dropdown affordance at all -- ours has to stay a real, functional
+     <select> since Decision history covers many registered drafts, not one
+     hardcoded demo value. appearance:none strips the browser's bold native
+     chevron (the one concrete, visible mismatch against the mockup); this
+     small custom arrow keeps just enough affordance that it still reads as
+     clickable, without the heavier native widget look. */
+  .pt-form select {
+    /* #7d84a0 is a static middle gray (not a --po-* token, since this color
+       lives inside a data: URI and can't reference a CSS custom property) --
+       picked to read clearly against both the light and dark --po-bg fill
+       rather than exactly matching either theme's own --po-muted value. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' fill='none' stroke='%237d84a0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; background-size: 10px 7px; padding-right: 30px;
+  }
+  .pt-form select:focus, .pt-form input:focus { outline: none; border-color: var(--po-accent); }
+  .pt-action { padding: 10px 16px; border-radius: 6px; background: var(--po-accent); color: var(--po-shell); font-size: 13px; font-weight: 600; }
+  .pt-status { margin: 0 0 16px; color: var(--po-muted); font-size: 12px; min-height: 1em; }
+  .pt-map { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+  .pt-maphead { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .pt-maphead strong { font-size: 13px; font-weight: 500; }
+  .pt-muted { color: var(--po-muted); font-size: 12px; }
+  .pt-label { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--po-accent); }
+  .pt-scroll { overflow-x: auto; }
+  .pt-grid { display: grid; gap: 7px; align-items: center; font-size: 12px; }
+  .pt-col { text-align: center; color: var(--po-muted); padding: 6px 0; }
+  .pt-track { background: transparent; text-align: left; padding: 12px 8px; border-radius: 6px; color: var(--po-ink); }
+  .pt-track small { display: block; color: var(--po-muted); font-size: 10px; margin-top: 2px; }
+  .pt-track[aria-pressed=true] { background: var(--po-tint); color: var(--po-accent); }
+  .pt-cell { background: var(--po-soft); color: var(--po-muted); border-radius: 6px; padding: 8px 2px; min-height: 36px; text-align: center; }
+  .pt-cell.pt-found { background: var(--po-tint); color: var(--po-accent); }
+  .pt-cell[aria-pressed=true] { outline: 2px solid var(--po-accent); outline-offset: 1px; }
+  .pt-legend { display: flex; gap: 18px; flex-wrap: wrap; margin-top: 14px; font-size: 11px; color: var(--po-muted); }
+  .pt-tailnote { font-size: 12px; color: var(--po-muted); margin-bottom: 20px; }
+  .pt-work { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 24px; }
+  .pt-timeline { padding-left: 14px; border-left: 1px solid var(--po-line); margin-top: 16px; }
+  .pt-event { position: relative; display: block; text-align: left; width: 100%; background: transparent; border-radius: 8px; padding: 12px 14px; margin: 0 0 12px; color: var(--po-ink); }
+  .pt-event:before { content: ''; position: absolute; left: -19px; top: 20px; width: 9px; height: 9px; background: var(--po-muted); border-radius: 50%; }
+  .pt-event[aria-pressed=true] { background: var(--po-tint); }
+  .pt-event[aria-pressed=true]:before { background: var(--po-accent); box-shadow: 0 0 0 4px var(--po-tint); }
+  .pt-event span, .pt-event small { display: block; }
+  .pt-event small { color: var(--po-muted); font-size: 11px; }
+  .pt-detail { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; overflow: hidden; align-self: start; }
+  .pt-detailhead { padding: 20px; background: linear-gradient(115deg, var(--po-tint), var(--po-paper)); border-bottom: 1px solid var(--po-line); }
+  .pt-detailhead h2 { font: 500 21px var(--po-serif); margin: 6px 0; }
+  .pt-tabs { display: flex; gap: 18px; border-bottom: 1px solid var(--po-line); padding: 0 20px; }
+  .pt-tabs button { background: transparent; padding: 13px 0; color: var(--po-muted); border-bottom: 2px solid transparent; font-size: 12px; }
+  .pt-tabs button[aria-pressed=true] { color: var(--po-accent); border-color: var(--po-accent); }
+  .pt-content { padding: 20px; }
+  .pt-content p { margin: 12px 0; font-size: 12px; color: var(--po-muted); }
+  .pt-excerpt { white-space: pre-wrap; padding: 18px; background: var(--po-bg); border-left: 3px solid var(--po-accent); font: 13px/1.8 var(--po-mono); overflow-wrap: anywhere; margin: 12px 0; color: var(--po-ink); }
+  .pt-excerpt mark { background: var(--po-tint); color: var(--po-accent); padding: 1px 3px; }
+  .pt-excerpt mark.pt-activemark { outline: 1px solid currentColor; }
+  .pt-note { padding: 12px; border: 1px dashed var(--po-line); border-radius: 6px; color: var(--po-muted); font-size: 12px; }
+  .pt-occurrences { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+  .pt-occurrences button { background: var(--po-soft); padding: 7px 12px; border-radius: 5px; font-size: 11px; color: var(--po-ink); }
+  .pt-occurrences button[aria-pressed=true] { background: var(--po-tint); color: var(--po-accent); }
+  @media (max-width: 800px) {
+    .pt-work { grid-template-columns: 1fr; }
+    .pt-grid { min-width: 480px; }
+  }
+  .ps-loadmore { display: block; width: 100%; margin: 14px 0; text-align: center; }
+  @media (max-width: 600px) {
+    .ps-pipeline { grid-template-columns: 1fr; }
+    .ps-stage p { min-height: 0; }
+    .ps-meta { grid-template-columns: 1fr; }
+    .ps-head { flex-direction: column; }
+    .ps-source > summary { flex-wrap: wrap; }
+    .ps-source-title { flex-basis: 70%; }
+    .ps-dialogbody { padding: 16px; }
+    .ps-dialoghead { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<script>const CONSOLE_API_BASE = "__API_BASE__";
+const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
+<div class="po-shell">
+  <aside class="po-rail">
+    <div class="po-brand">prism</div>
+    <button id="poNewBtn" class="po-new" type="button">+ New investigation</button>
+    <nav class="po-railnav" aria-label="Workspace">
+      <div class="pm-navlabel">Research</div>
+      <button data-goto="workspace"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 9l-2 6-6 2 2-6 6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Workspace</button>
+      <button data-goto="document"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 4.5A2.5 2.5 0 016.5 2H20v17H6.5A2.5 2.5 0 004 21.5v-17z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Documents</button>
+      <button data-goto="investigation" aria-current="page"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Investigations</button>
+      <button data-goto="graph"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="18" cy="6" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><circle cx="12" cy="18" r="2.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8.1 7.1L10 16M15.9 7.1L14 16M8.4 6h7.2" stroke="currentColor" stroke-width="1.4"/></svg>RFC Graph</button>
+      <div class="pm-navlabel">Library</div>
+      <button data-goto="sources"><svg width="15" height="15" viewBox="0 0 24 24"><ellipse cx="12" cy="6" rx="7" ry="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 6v6c0 1.66 3.13 3 7 3s7-1.34 7-3V6M5 12v6c0 1.66 3.13 3 7 3s7-1.34 7-3v-6" fill="none" stroke="currentColor" stroke-width="2"/></svg>Sources</button>
+      <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Archive coverage</button>
+      <div class="pm-navlabel">Operations</div>
+      <button data-goto="usage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 20V10M11 20V4M18 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Usage</button>
+      <button data-goto="tools"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>How it works</button>
+    </nav>
+    <div class="po-railcaption">Recent investigations</div>
+    <input id="poSessionSearch" type="text" class="po-sessionsearch" placeholder="Search sessions…">
+    <div class="po-sessionlist" id="poSessionList"></div>
+    <a class="po-classiclink" id="poClassicLink" href="#" target="_blank" rel="noopener">Classic view (fuller Sources/Usage/RFC Graph tools) →</a>
+    <div class="po-profile">
+      <span class="po-avatar" id="poAvatar">__ACCOUNT_INITIAL__</span>
+      <div style="min-width:0;">
+        <div class="po-profile-email" title="__ACCOUNT_EMAIL__">__ACCOUNT_EMAIL__</div>
+        <div class="po-profilelinks">
+          <a class="po-settingslink" href="__CONSOLE_WEB_URL__/apps?action=showSettings&amp;tab=provider" target="_blank" rel="noopener">Settings</a>
+          <button class="po-logout" id="poLogoutBtn" type="button">Log out</button>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <div class="po-main">
+    <header class="po-top">
+      <span id="poBreadcrumb">Investigations</span>
+      <span class="po-preview">Prism</span>
+    </header>
+
+    <section class="po-page" data-page="workspace" hidden>
+      <div class="po-hero">
+        <div class="po-eyebrow">Clarity, across decades.</div>
+        <h1 class="po-title">Every protocol.<br>A spectrum of <em>decisions.</em></h1>
+        <p class="po-herotext">Illuminate the discussions behind the specification. Follow the evidence. Understand the decision.</p>
+      </div>
+
+      <div class="po-composer">
+        <div class="po-compose-tabs">
+          <button type="button" data-entry="question" aria-pressed="true">Ask a question</button>
+          <button type="button" data-entry="document" aria-pressed="false">Start from a document</button>
+        </div>
+        <!-- No manual scope selector here (unlike the mockup) -- the agent
+             already decides for itself whether to stay within one draft or
+             widen the search, see _RESEARCH_ADDENDUM. -->
+        <form class="po-questionform" id="poWorkspaceForm">
+          <textarea id="poWorkspaceQuery" placeholder="Why was INIT_CWND set to 4?" required></textarea>
+          <div class="po-composefoot">
+            <span class="po-tiny">The agent decides how deep to go and whether to look beyond this draft.</span>
+            <button class="po-primary" type="submit">Investigate</button>
+          </div>
+        </form>
+        <div class="po-doclookup po-lookup-wrap" hidden>
+          <input id="poWorkspaceDocQuery" type="text" placeholder="RFC number, draft name, or topic" autocomplete="off">
+          <div class="po-lookup-results" id="poWorkspaceDocResults" hidden></div>
+        </div>
+      </div>
+
+      <div class="po-sectionhead"><h2>Continue an investigation</h2><small>Your recent sessions</small></div>
+      <div id="poRecentList"><p class="corpora-hint">Loading…</p></div>
+
+      <div class="po-sectionhead"><h2>Reading desk</h2><small>Recently opened documents</small></div>
+      <div id="poReadingDesk"><p class="corpora-hint">Nothing opened yet -- look up a document from Documents to start.</p></div>
+    </section>
+
+    <section class="po-page" data-page="document" hidden>
+      <div class="po-eyebrow">Reading view</div>
+      <h1 class="po-title">Read the rule.<br>Investigate the reason.</h1>
+      <p class="po-subtitle">Select a passage to make it the starting point of an investigation.</p>
+      <div class="po-lookup-wrap">
+        <div class="po-composer-bar">
+          <input id="poDocQuery" type="text" placeholder="RFC number or draft name, e.g. RFC 9000 or draft-ietf-quic-transport" autocomplete="off">
+          <button id="poDocLookupBtn" class="po-primary" type="button">Open</button>
+        </div>
+        <div class="po-lookup-results" id="poDocResults" hidden></div>
+      </div>
+      <div id="poDocBody"><p class="corpora-hint">Look up a document above to start reading it.</p></div>
+    </section>
+
+    <!-- Investigations starts as the visible page (not Workspace, per the
+         mockup's own default) since it's the only page with real, working
+         content right now -- the rail's aria-current="page" already points
+         here, so the visible content must match, not default to a stub. -->
+    <section class="po-page" data-page="investigation">
+      <div class="po-context"><code id="poDraftBadge">(let the agent discover)</code><span id="poQuestionBadge"></span></div>
+      <h1 class="po-invest-title" id="poInvestTitle">Ask a question about an RFC or draft</h1>
+      <div id="poInvestPills" style="margin-bottom:14px;"></div>
+
+      <div class="po-composer-bar">
+        <select id="poDraft"><option value="">(let the agent discover)</option></select>
+        <select id="poModel"><option value="">(default model)</option></select>
+        <input id="poQuery" type="text" placeholder="Why was INIT_CWND set to 4?">
+        <button id="poAskBtn" class="po-primary" type="button">Ask</button>
+      </div>
+      <div class="po-usagebar" id="poUsageBar"></div>
+
+      <div class="po-viewtabs" aria-label="Investigation views">
+        <button data-view="findings" aria-pressed="true">Findings</button>
+        <button data-view="timeline" aria-pressed="false">Decision history</button>
+        <button data-view="activity" aria-pressed="false">Research activity</button>
+      </div>
+
+      <div data-panel="findings">
+        <div id="poConversation"></div>
+        <form class="po-composer-bar" id="poFollowupForm" style="margin-top:16px;">
+          <input id="poFollowupQuery" type="text" placeholder="Ask a follow-up, or challenge a claim…">
+          <button class="po-primary" type="submit">Follow up →</button>
+        </form>
+      </div>
+      <div data-panel="timeline" hidden>
+        <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
+        <form class="pt-form" id="poThreadForm">
+          <label>Document<select id="poThreadDraft"><option value="">(let the agent discover)</option></select></label>
+          <label>Keyword or exact phrase<input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'></label>
+          <button id="poThreadBtn" class="pt-action" type="submit">Track phrase</button>
+        </form>
+        <div id="poThreadStatus" class="pt-status" role="status"></div>
+        <div id="poThreadBody"></div>
+      </div>
+      <div data-panel="activity" hidden>
+        <p class="corpora-hint">Research activity for the most recent question appears here once you ask one.</p>
+        <div id="poActivityLog"></div>
+      </div>
+    </section>
+
+    <section class="po-page" data-page="coverage" hidden>
+      <div class="po-eyebrow">Research boundaries</div>
+      <h1 class="po-title">Know what Prism<br>can see.</h1>
+      <p class="po-subtitle">Coverage belongs beside the findings. Missing evidence should never look like a missing discussion.</p>
+      <div id="poCoverageBody"></div>
+    </section>
+
+    <section class="po-page" data-page="graph" hidden>
+      <div class="po-eyebrow">Research / RFC Graph</div>
+      <div class="rx-top"><div><h1 class="po-title">See the specification in context.</h1><p class="rx-sub">Follow formal relationships. Discover related reading. Investigate the connection.</p></div></div>
+      <div class="rx-controls">
+        <button type="button" data-rxmode="focus" aria-pressed="true">Focus on an RFC</button>
+        <button type="button" data-rxmode="corpus" aria-pressed="false">Explore corpus</button>
+      </div>
+      <form class="rx-controls" id="poGraphForm">
+        <label>RFC <input id="poGraphInput" value="9000" aria-label="RFC number" size="8"></label>
+        <button class="po-primary" type="submit">Explore</button>
+        <span class="rx-sub">Try 9000, 8446, 7540 or 2119</span>
+      </form>
+      <div class="rx-filters" id="poGraphFilters">
+        <strong>Specification relationships</strong>
+        <label><input type="checkbox" id="poGraphFilterObsoletes" checked>Obsoletes</label>
+        <label><input type="checkbox" id="poGraphFilterUpdates" checked>Updates</label>
+        <strong>Related reading</strong>
+        <label><input type="checkbox" id="poGraphFilterFamily">Citation match</label>
+        <label><input type="checkbox" id="poGraphFilterTopic">Topic match</label>
+      </div>
+      <div class="rx-controls">
+        <button type="button" data-rxview="map" aria-pressed="true">Relationship map</button>
+        <button type="button" data-rxview="time" aria-pressed="false">Chronology</button>
+        <button type="button" data-rxview="list" aria-pressed="false">List</button>
+        <label id="poGraphDepthLabel">Reach
+          <select id="poGraphDepth" aria-label="Neighborhood depth">
+            <option value="1">Direct connections</option>
+            <option value="2">2 hops</option>
+          </select>
+        </label>
+        <label id="poGraphFilterListLabel" hidden>Filter list <input id="poGraphListFilter" placeholder="RFC or title" size="16"></label>
+      </div>
+      <div class="rx-count" id="poGraphCount" role="status"></div>
+      <div class="rx-layout">
+        <div class="rx-canvas" id="poGraphCanvas"></div>
+        <aside class="rx-inspector" id="poGraphInspector" aria-live="polite"></aside>
+      </div>
+      <p class="rx-note" id="poGraphNote">Citation match and Topic match are only ever shown for the RFC you're directly focused on -- extending Reach to 2 hops follows Obsoletes/Updates only, since neither citation nor topic similarity is well-defined two hops removed from the RFC you actually asked about.</p>
+    </section>
+
+    <section class="po-page" data-page="sources" hidden>
+      <div class="po-eyebrow">Library / Sources</div>
+      <div class="ps-head">
+        <div><h1 class="po-title">From archive to evidence.</h1><p>Manage downloaded content and the indexes that make it searchable.</p></div>
+        <button class="po-primary" type="button" id="poSourceAddOpenBtn"><span>+</span>Add source</button>
+      </div>
+      <div class="ps-boundary"><strong>Local library ≠ Dify dataset.</strong> Downloads and local indexes are managed here. Attaching material to a Dify dataset is still a separate Studio step.</div>
+      <div class="ps-filters">
+        <input id="poSourceFilterText" class="ps-librarysearch" placeholder="Filter by RFC, draft, or working group…" aria-label="Filter sources">
+        <select id="poSourceFilterKind" class="ps-libraryfilter" aria-label="Source type">
+          <option value="all">All sources</option>
+          <option value="local">Local library</option>
+          <option value="dataset">Dify datasets</option>
+        </select>
+      </div>
+      <!-- Right under the filters, not after the source list -- that list
+           can run to 40+ cards, and a status message appended after it
+           read as "nothing happened" when Add source was clicked,
+           confirmed live. Always visible, no scrolling required. -->
+      <div class="ps-status" id="poSourceQueue" hidden aria-live="polite"><strong>Operation status</strong><span id="poSourceQueueText"></span></div>
+      <div id="poSourcesList"><p class="corpora-hint">Loading…</p></div>
+    </section>
+
+    <dialog class="ps-dialog" id="poSourceAddDialog" aria-labelledby="poSourceAddTitle">
+      <div class="ps-dialoghead"><h2 id="poSourceAddTitle">Expand your source library</h2><button type="button" class="po-close" id="poSourceAddCloseBtn" aria-label="Close">&times;</button></div>
+      <div class="ps-dialogbody">
+        <div class="ps-dialogtabs">
+          <button type="button" data-addmode="one" aria-pressed="true">Find one</button>
+          <button type="button" data-addmode="topic" aria-pressed="false">Discover a topic</button>
+        </div>
+        <form class="ps-oneform" id="poSourceOneForm">
+          <p>Start with a working group, RFC number, or draft name.</p>
+          <label class="ps-formlabel" for="poSourceOneSearch">Search</label>
+          <input class="ps-field" id="poSourceOneSearch" placeholder="Try RFC 4033 or dnsext" autocomplete="off">
+          <div class="po-lookup-results" id="poSourceOneResults" hidden></div>
+          <label class="ps-formlabel" for="poSourceDraftName">Draft name</label>
+          <input class="ps-field" id="poSourceDraftName" placeholder="draft-ietf-…" required>
+          <div class="ps-dialogfoot"><span class="po-tiny">Registers the source and syncs its revisions, RFC, and mail.</span><button class="po-primary" type="submit">Add source</button></div>
+        </form>
+        <div class="ps-topicpanel" id="poSourceTopicPanel" hidden>
+          <p>Search the whole RFC corpus by topic (BM25 + semantic, no LLM for this part). When a roadmap RFC exists, its family and each member's role are shown.</p>
+          <form class="ps-topicform" id="poSourceTopicForm">
+            <label class="ps-formlabel" for="poSourceTopicInput">Topic</label>
+            <div class="ps-topicsearch"><input class="ps-field" id="poSourceTopicInput" placeholder="e.g. DNSSEC" required><button class="po-primary" type="submit">Search</button></div>
+          </form>
+          <div class="ps-topicresults" id="poSourceTopicResults" hidden></div>
+        </div>
+      </div>
+    </dialog>
+
+    <section class="po-page" data-page="usage" hidden>
+      <div class="po-eyebrow">Operations / Usage</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">See what research costs.</h1><p>Org-wide across every Prism account, not just yours -- data maintainers only.</p></div>
+        <select id="poUsageRange" aria-label="Usage date range">
+          <option value="7">Last 7 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </div>
+      <div id="poUsageBody"><p class="corpora-hint">Loading…</p></div>
+    </section>
+
+    <section class="po-page" data-page="tools" hidden>
+      <div class="po-eyebrow">Operations / How it works</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">Behind every finding,<br>a traceable process.</h1><p>The agent's real tools and the instructions that combine them into an answer.</p></div></div>
+      <div class="po-sectionhead"><h2>Tool catalog</h2><small>Expand a tool to inspect its contract</small></div>
+      <div id="poToolsList"><p class="corpora-hint">Loading…</p></div>
+      <div class="po-sectionhead"><h2>Skill</h2><small>How the tools above get combined into an answer</small></div>
+      <div id="poSkillBody"></div>
+    </section>
+  </div>
+</div>
+
+<aside class="po-evidence" id="poEvidence" aria-label="Evidence inspector">
+  <div class="po-evidencehead">
+    <span>Evidence <span id="poEvidenceNo"></span></span>
+    <button class="po-close" id="poEvidenceClose" type="button" aria-label="Close evidence">&times;</button>
+  </div>
+  <div id="poEvidenceBody"></div>
+</aside>
+
+<script>
+// Local dev (no PRISM_PREFIX): both pages are the same Flask app/routes
+// bound to two ports (see serve_ui.py main()), each reachable directly at
+// its own port with no path prefix -- same host, different port.
+// Behind nginx in production (PRISM_PREFIX set, e.g. "/prism"): only one
+// origin is exposed to the internet at all -- neither port is reachable
+// directly -- so nginx maps classic to /prism/classic/ on that same origin
+// instead (see docker/nginx/conf.d/default.conf.template's own comment on
+// why classic moved there). A hardcoded :8765 would silently 404/timeout
+// in that case, since nothing is listening on that port from the outside.
+document.getElementById('poClassicLink').href = PRISM_PREFIX
+  ? `${location.protocol}//${location.host}${PRISM_PREFIX}/classic/`
+  : `${location.protocol}//${location.hostname}:8765${PRISM_PREFIX}/`;
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// -- Page + sub-view switching (mockup's go()/view() functions, ported
+// verbatim) --------------------------------------------------------------
+const BREADCRUMBS = {
+  workspace: 'Workspace / Overview', document: 'Documents',
+  investigation: 'Investigations', coverage: 'Library / Coverage',
+  graph: 'Research / RFC Graph', sources: 'Library / Sources',
+  usage: 'Operations / Usage', tools: 'Operations / How it works',
+};
+// Each of these fetches real data the first time its page is opened, not
+// on initial load -- same lazy-load reasoning as the mockup's own
+// "nothing is fetched until you click Refresh" note on Usage, just applied
+// to first-visit instead of a manual button, since every one of these
+// calls is read-only and safe to run once automatically.
+const _pageOpened = {};
+function go(name) {
+  document.querySelectorAll('[data-page]').forEach((p) => { p.hidden = p.dataset.page !== name; });
+  document.getElementById('poBreadcrumb').textContent = BREADCRUMBS[name] || '';
+  document.querySelectorAll('.po-railnav button').forEach((b) => {
+    if (b.dataset.goto === name) b.setAttribute('aria-current', 'page');
+    else b.removeAttribute('aria-current');
+  });
+  // renderCoverage is a hoisted function declaration defined further down
+  // -- safe to call here since go() itself only ever runs later, on a user
+  // click, well after the whole script has finished its first pass.
+  if (name === 'coverage') renderCoverage();
+  if (name === 'workspace') renderReadingDesk();
+  if (!_pageOpened[name]) {
+    _pageOpened[name] = true;
+    if (name === 'tools') loadToolsPage();
+    if (name === 'usage') loadUsagePage();
+    if (name === 'sources') loadSourcesPage();
+    if (name === 'graph') loadGraphPage();
+  }
+}
+document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
+
+function view(name) {
+  document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+  document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === name)));
+}
+document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
+
+// -- Workspace composer: entry-mode tabs (question vs document) ----------
+document.querySelectorAll('[data-entry]').forEach((b) => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('[data-entry]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    document.querySelector('.po-questionform').hidden = b.dataset.entry !== 'question';
+    document.querySelector('.po-doclookup').hidden = b.dataset.entry !== 'document';
+  });
+});
+
+// Submitting from Workspace reuses the exact same runAsk() the
+// Investigations composer uses (defined further down, but function
+// declarations are hoisted, and this only ever runs on a later user
+// interaction, well after the whole script has finished its first pass)
+// -- it just relays the typed question into Investigations' own query
+// field first, rather than duplicating the SSE flow for a second composer.
+// Matches the mockup's own submit behavior: new investigations land on
+// Research activity, not Findings, since that's the "the agent is
+// currently working" view.
+document.getElementById('poWorkspaceForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const workspaceQueryEl = document.getElementById('poWorkspaceQuery');
+  const query = workspaceQueryEl.value.trim();
+  if (!query) return;
+  document.getElementById('poQuery').value = query;
+  workspaceQueryEl.value = '';
+  go('investigation');
+  view('activity');
+  runAsk();
+});
+
+// -- "Continue an investigation" -- real recent sessions, not the
+// mockup's one hardcoded card. Reuses the same /api/sessions data the
+// rail's own list already fetches, rendered as full-width cards here
+// instead of the rail's compact rows. -------------------------------
+function loadRecentInvestigations() {
+  const listEl = document.getElementById('poRecentList');
+  fetch(`${PRISM_PREFIX}/api/sessions`).then((r) => r.json()).then((data) => {
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      listEl.innerHTML = '<p class="corpora-hint">No investigations yet -- ask a question above to start one.</p>';
+      return;
+    }
+    listEl.innerHTML = sessions.slice(0, 6).map((s) => `
+      <button type="button" class="po-recent" data-session-id="${escapeHtml(s.id)}">
+        <strong>${escapeHtml(s.title || s.id)}</strong>
+        <small>${s.model_id ? escapeHtml(s.model_id) : ''}</small>
+      </button>
+    `).join('');
+    listEl.querySelectorAll('.po-recent').forEach((btn) => {
+      btn.addEventListener('click', () => openSession(btn.dataset.sessionId));
+    });
+  }).catch(() => {
+    listEl.innerHTML = '<p class="corpora-hint">Couldn’t load recent investigations.</p>';
+  });
+}
+// Initial call happens via loadSessionList() below (it calls this too, so
+// both lists come from one fetch flow) -- not called standalone here.
+
+document.getElementById('poNewBtn').addEventListener('click', () => {
+  go('investigation');
+  currentSessionId = null;
+  lastInvestigation = null;
+  document.getElementById('poConversation').innerHTML = '';
+  document.getElementById('poActivityLog').innerHTML = '';
+  document.getElementById('poInvestPills').innerHTML = '';
+  document.getElementById('poUsageBar').textContent = '';
+  document.getElementById('poInvestTitle').textContent = 'Ask a question about an RFC or draft';
+  poSessionSearchEl.value = '';
+  loadSessionList({ q: '' });
+});
+
+document.getElementById('poLogoutBtn').addEventListener('click', () => {
+  fetch(`${CONSOLE_API_BASE}/console/api/logout`, { method: 'POST', credentials: 'include' })
+    .finally(() => { window.location.href = `${PRISM_PREFIX}/login`; });
+});
+
+// -- Tool display names (for live step labels) -- /api/tools returns a
+// bare array (jsonify(_tool_info()) serializes the list directly), not a
+// {tools: [...]} wrapper -- this previously read data.tools here, which is
+// always undefined against a bare array, so toolDisplayNames silently
+// stayed empty and toolLabel() fell back to raw tool names the whole time.
+let toolDisplayNames = {};
+fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()).then((tools) => {
+  (tools || []).forEach((t) => { toolDisplayNames[t.name] = t.display_name || t.name; });
+}).catch(() => {});
+function toolLabel(name) { return toolDisplayNames[name] || name; }
+
+// -- Model picker ----------------------------------------------------------
+const poModelEl = document.getElementById('poModel');
+fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
+  (data.models || []).forEach((m) => {
+    const opt = document.createElement('option');
+    opt.value = `${m.provider}|||${m.model}`;
+    opt.textContent = m.byok ? `${m.label} (your key)` : m.label;
+    poModelEl.appendChild(opt);
+  });
+}).catch(() => {});
+
+// -- Draft pickers (Investigations' own + Decision history's separate
+// one) + the raw catalog, fetched once and reused everywhere a document
+// needs to be looked up by name/topic (Documents page, Workspace's
+// "Start from a document" tab) -------------------------------------------
+const poDraftEl = document.getElementById('poDraft');
+const poThreadDraftEl = document.getElementById('poThreadDraft');
+let corporaCatalog = [];
+fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
+  corporaCatalog = data.catalog || [];
+  corporaCatalog.forEach((c) => {
+    if (!c.draft_name) return;
+    [poDraftEl, poThreadDraftEl].forEach((sel) => {
+      const opt = document.createElement('option');
+      opt.value = c.draft_name;
+      opt.textContent = c.draft_name;
+      sel.appendChild(opt);
+    });
+  });
+}).catch(() => {});
+
+// Shared by Documents' own lookup and Workspace's "Start from a document"
+// tab -- matches the mockup's own live-filtered doc-result, just against
+// the real catalog instead of one hardcoded fake entry. A bare RFC number
+// always matches too, even if it's not in the (draft-only) catalog, since
+// /api/document-text can fetch RFC text directly.
+function matchDocuments(hint) {
+  const needle = hint.trim().toLowerCase();
+  if (!needle) return [];
+  const results = corporaCatalog
+    .filter((c) => c.draft_name && (
+      c.draft_name.toLowerCase().includes(needle)
+      || (c.rfc_number && c.rfc_number.includes(needle))
+      || (c.wg && c.wg.toLowerCase().includes(needle))
+    ))
+    .slice(0, 6)
+    .map((c) => ({
+      id: c.draft_name,
+      label: c.draft_name,
+      meta: c.rfc_number ? `RFC ${c.rfc_number}` : (c.wg || ''),
+    }));
+  const bareRfc = needle.replace(/^rfc\s*/, '');
+  if (/^\d+$/.test(bareRfc) && !results.some((r) => r.meta === `RFC ${bareRfc}`)) {
+    results.unshift({ id: `RFC ${bareRfc}`, label: `RFC ${bareRfc}`, meta: 'Specification' });
+  }
+  return results;
+}
+
+// -- Session list (rail) --------------------------------------------------
+let currentSessionId = null;
+// Archive coverage reads this -- set whenever a live run finishes or a
+// saved session is opened, not persisted anywhere new server-side.
+let lastInvestigation = null;
+const poSessionSearchEl = document.getElementById('poSessionSearch');
+const poSessionListEl = document.getElementById('poSessionList');
+let sessionListCursor = null;
+
+function renderSessionRow(s) {
+  return `
+    <div class="po-saved${s.id === currentSessionId ? ' active' : ''}" data-session-id="${escapeHtml(s.id)}">
+      <span class="po-saved-title" data-session-id="${escapeHtml(s.id)}">${escapeHtml(s.title || s.id)}</span>
+      <button class="po-saved-rename" data-rename-id="${escapeHtml(s.id)}" title="Rename">&#9998;</button>
+      <button class="po-saved-delete" data-delete-id="${escapeHtml(s.id)}" title="Delete">&times;</button>
+    </div>`;
+}
+
+// Ported from serve_ui_template.html's loadSessionList/renderSessionList --
+// same q-vs-last_id contract the /api/sessions route already supports, just
+// rendered as po-saved rows instead of session-item ones.
+function loadSessionList(opts) {
+  opts = opts || {};
+  const q = opts.q !== undefined ? opts.q : poSessionSearchEl.value.trim();
+  const params = new URLSearchParams();
+  if (q) {
+    params.set('q', q);
+  } else if (opts.lastId) {
+    params.set('last_id', opts.lastId);
+  }
+  fetch(`${PRISM_PREFIX}/api/sessions?${params}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    const sessions = data.sessions || [];
+    if (!q && sessions.length) sessionListCursor = sessions[sessions.length - 1].id;
+    const existingLoadMore = poSessionListEl.querySelector('.po-loadmore');
+    if (existingLoadMore) existingLoadMore.remove();
+    if (!sessions.length && !opts.append) {
+      poSessionListEl.innerHTML = `<p class="corpora-hint" style="font-size:11px;padding:0 6px;">${q ? 'No matching sessions.' : 'No sessions yet.'}</p>`;
+    } else if (opts.append) {
+      poSessionListEl.insertAdjacentHTML('beforeend', sessions.map(renderSessionRow).join(''));
+    } else {
+      poSessionListEl.innerHTML = sessions.map(renderSessionRow).join('');
+    }
+    if (data.has_more) {
+      poSessionListEl.insertAdjacentHTML('beforeend', '<button type="button" class="po-loadmore">Load more</button>');
+    }
+  }).catch(() => {
+    if (!opts.append) poSessionListEl.innerHTML = '<p class="corpora-hint" style="font-size:11px;padding:0 6px;">Couldn’t load sessions.</p>';
+  });
+  // Keeps Workspace's "Continue an investigation" cards in sync with the
+  // rail's own list -- every existing call site that refreshes one now
+  // refreshes both, rather than needing a second call added everywhere.
+  if (!opts.append) loadRecentInvestigations();
+}
+loadSessionList();
+
+let sessionSearchDebounce = null;
+poSessionSearchEl.addEventListener('input', () => {
+  clearTimeout(sessionSearchDebounce);
+  sessionSearchDebounce = setTimeout(() => loadSessionList({ q: poSessionSearchEl.value.trim() }), 300);
+});
+
+// Single delegated handler for the rail list: opening a session, "Load
+// more" pagination, inline rename, and delete -- ported from
+// serve_ui_template.html's sessionListEl click handler.
+poSessionListEl.addEventListener('click', (e) => {
+  const loadMoreBtn = e.target.closest('.po-loadmore');
+  if (loadMoreBtn) {
+    loadSessionList({ lastId: sessionListCursor, append: true });
+    return;
+  }
+  const delBtn = e.target.closest('.po-saved-delete');
+  if (delBtn) {
+    e.stopPropagation();
+    fetch(`${PRISM_PREFIX}/api/sessions/${delBtn.dataset.deleteId}`, { method: 'DELETE' })
+      .catch(() => {})
+      .finally(() => {
+        if (delBtn.dataset.deleteId === currentSessionId) {
+          currentSessionId = null;
+          document.getElementById('poConversation').innerHTML = '';
+          document.getElementById('poUsageBar').textContent = '';
+        }
+        loadSessionList();
+      });
+    return;
+  }
+  const renameBtn = e.target.closest('.po-saved-rename');
+  if (renameBtn) {
+    e.stopPropagation();
+    const id = renameBtn.dataset.renameId;
+    const titleEl = poSessionListEl.querySelector(`.po-saved-title[data-session-id="${id}"]`);
+    if (!titleEl || titleEl.tagName === 'INPUT') return;
+    const previousTitle = titleEl.textContent;
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.value = previousTitle;
+    input.className = 'po-rename-input';
+    titleEl.replaceWith(input);
+    input.focus();
+    input.select();
+    let committed = false;
+    const commit = () => {
+      if (committed) return;
+      committed = true;
+      const newName = input.value.trim();
+      if (newName && newName !== previousTitle) {
+        fetch(`${PRISM_PREFIX}/api/sessions/${id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: newName }),
+        }).catch(() => {}).finally(() => loadSessionList());
+      } else {
+        loadSessionList();
+      }
+    };
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') input.blur();
+      if (ev.key === 'Escape') { committed = true; loadSessionList(); }
+    });
+    input.addEventListener('blur', commit);
+    return;
+  }
+  const item = e.target.closest('.po-saved');
+  if (item) openSession(item.dataset.sessionId);
+});
+
+// -- Running session-total usage bar -- recomputed from whatever
+// .po-turnusage nodes are actually in the DOM right now, not separately
+// tracked state, so it stays correct across session switches/retries.
+function updateSessionUsageBar() {
+  const barEl = document.getElementById('poUsageBar');
+  const nodes = document.getElementById('poConversation').querySelectorAll('.po-turnusage[data-tokens]');
+  if (!nodes.length) { barEl.textContent = ''; return; }
+  let tokens = 0;
+  let price = 0;
+  nodes.forEach((n) => {
+    tokens += Number(n.dataset.tokens) || 0;
+    price += Number(n.dataset.price) || 0;
+  });
+  const priceStr = price ? ` · $${price.toFixed(4)}` : '';
+  barEl.innerHTML = `Session total: ${tokens.toLocaleString()} tokens${priceStr}`;
+}
+
+function openSession(id) {
+  fetch(`${PRISM_PREFIX}/api/sessions/${id}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    currentSessionId = data.id;
+    if (data.model_provider && data.model_id) {
+      poModelEl.value = `${data.model_provider}|||${data.model_id}`;
+    }
+    const convEl = document.getElementById('poConversation');
+    convEl.innerHTML = '';
+    (data.turns || []).forEach((t) => convEl.appendChild(renderStaticTurn(t)));
+    updateSessionUsageBar();
+    const lastTurn = (data.turns || [])[(data.turns || []).length - 1];
+    if (lastTurn) {
+      lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
+      document.getElementById('poInvestTitle').textContent = lastTurn.query;
+      document.getElementById('poInvestPills').innerHTML = deriveStatusPills(lastTurn.answer);
+    }
+    go('investigation');
+    view('findings');
+    loadSessionList();
+  }).catch(() => {
+    document.getElementById('poConversation').innerHTML = '<div class="po-error">Couldn’t load that session.</div>';
+  });
+}
+
+// -- Decision-brief rendering, ported from serve_ui_template.html's
+// renderDecisionBrief/renderClaimText, restyled with po-brief/po-claim/
+// po-cite instead of the old app's classes. Same 5-heading convention
+// (Decision/Rationale/Alternatives/Evolution/Uncertainty) since that's the
+// real backend format agent_skill.md already produces -- only the visual
+// presentation is new here, not the answer structure. --------------------
+function renderClaimText(text, claimLabels) {
+  let html = escapeHtml(text);
+  html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
+  html = html.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  return html.replace(/\[(\d+)\]/g, (whole, n) => {
+    const status = (claimLabels || {})[n];
+    const pillHtml = status ? `<span class="po-claim-pill po-claim-pill-${status}">${status}</span>` : '';
+    return `<button type="button" class="po-cite" data-n="${n}">[${n}]${pillHtml}</button>`;
+  });
+}
+
+const _BRIEF_HEADINGS = ['Decision', 'Rationale', 'Alternatives', 'Evolution', 'Uncertainty'];
+const _BRIEF_HEADING_RE = new RegExp(`\\*\\*(${_BRIEF_HEADINGS.join('|')})\\*\\*:?`, 'g');
+
+// Page-level status pills under the title -- derived from which headings
+// the model actually wrote (evidence-backed, per agent_skill.md, which
+// asks it to omit a heading entirely rather than write "none found"), not
+// the mockup's own fixed example copy ("Specification supported" /
+// "Historical decision not yet established" are that one demo's fake
+// state, not a real signal this app can compute the same way).
+function deriveStatusPills(answerText) {
+  const headings = new Set();
+  let m;
+  const re = new RegExp(_BRIEF_HEADING_RE.source, 'g');
+  while ((m = re.exec(answerText || ''))) headings.add(m[1]);
+  const pills = [];
+  if (headings.has('Decision')) pills.push('<span class="po-pill">Decision identified</span>');
+  if (headings.has('Uncertainty')) pills.push('<span class="po-pill po-warn">Open questions remain</span>');
+  return pills.join('');
+}
+
+function renderDecisionBrief(answerText, claimLabels) {
+  const parts = String(answerText || '').split(_BRIEF_HEADING_RE);
+  let html = '';
+  if (parts.length === 1) {
+    html = `<p class="po-brief-lede">${renderClaimText(answerText, claimLabels)}</p>`;
+  } else {
+    const lede = parts[0].trim();
+    if (lede) html += `<p class="po-brief-lede">${renderClaimText(lede, claimLabels)}</p>`;
+    for (let i = 1; i < parts.length; i += 2) {
+      const body = (parts[i + 1] || '').trim();
+      if (!body) continue;
+      html += `<div class="po-claim"><h3>${escapeHtml(parts[i])}</h3><p>${renderClaimText(body, claimLabels)}</p></div>`;
+    }
+  }
+  return `<div class="po-brief">${html}</div>`;
+}
+
+// -- Evidence inspector ----------------------------------------------------
+const poEvidenceEl = document.getElementById('poEvidence');
+const poEvidenceBodyEl = document.getElementById('poEvidenceBody');
+const poEvidenceNoEl = document.getElementById('poEvidenceNo');
+const EVIDENCE_KIND_LABELS = { mail: 'Mailing-list search', evolution: 'Draft evolution search' };
+
+function openEvidencePanel(n, item) {
+  poEvidenceNoEl.textContent = `/ ${n}`;
+  if (!item) {
+    poEvidenceBodyEl.innerHTML = `<p class="po-evidencemeta">No evidence recorded for citation [${escapeHtml(String(n))}].</p>`;
+  } else {
+    poEvidenceBodyEl.innerHTML = `
+      <div class="po-eyebrow">${escapeHtml(item.label)}</div>
+      <blockquote class="po-evidenceexcerpt">${escapeHtml(item.excerpt || '')}</blockquote>
+      <div class="po-relation">${escapeHtml(item.relation)}</div>
+    `;
+  }
+  poEvidenceEl.classList.add('open');
+}
+document.getElementById('poEvidenceClose').addEventListener('click', () => poEvidenceEl.classList.remove('open'));
+
+document.getElementById('poConversation').addEventListener('click', (e) => {
+  const citeBtn = e.target.closest('.po-cite');
+  if (!citeBtn) return;
+  const turn = citeBtn.closest('.po-turn');
+  const evidenceList = (turn && turn._prismEvidence) || [];
+  const claimLabels = (turn && turn._prismClaimLabels) || {};
+  const n = citeBtn.dataset.n;
+  const raw = evidenceList[parseInt(n, 10) - 1];
+  let item = null;
+  if (raw) {
+    const status = claimLabels[n];
+    item = {
+      label: EVIDENCE_KIND_LABELS[raw.kind] || 'Source',
+      excerpt: raw.text,
+      relation: (status === 'stated' || status === 'inferred') ? 'Supports' : 'Does not establish',
+    };
+  }
+  openEvidencePanel(n, item);
+});
+
+// -- Scope badge (trace-derived, same rule as the main app) ---------------
+const CROSS_WG_TOOLS = new Set(['get_rfc_relations', 'find_related_rfc_family', 'search_rfc_corpus_bm25']);
+function scopeLabel(trace) {
+  const expanded = (trace || []).some((t) => CROSS_WG_TOOLS.has(t.tool));
+  return expanded ? 'Scope: expanded' : 'Scope: this draft';
+}
+
+// -- Live plan / activity rendering ----------------------------------------
+function renderPlan(steps) {
+  if (!steps.length) return '';
+  return `<div class="po-plan">${steps.map((s) => `
+    <div class="po-planstep ${s.status}">
+      <span class="po-planmarker">${s.status === 'done' ? '✓' : (s.status === 'errored' ? '!' : '•')}</span>
+      <div>
+        <div>${escapeHtml(s.title)}${s.forced ? ' <em>(auto)</em>' : ''}</div>
+        ${s.reason ? `<div class="po-planreason">${escapeHtml(s.reason)}</div>` : ''}
+      </div>
+    </div>
+  `).join('')}</div>`;
+}
+
+// -- Per-turn feedback/copy/usage, ported from serve_ui_template.html's
+// renderFeedback/renderUsage -- same backend (real Dify MessageFeedback via
+// POST /api/messages/<id>/feedback), restyled to po- classes. ------------
+function renderFeedback(messageId, rating, answerText) {
+  if (!messageId) return '';
+  const likeActive = rating === 'like' ? ' active' : '';
+  const dislikeActive = rating === 'dislike' ? ' active' : '';
+  return `
+    <div class="po-feedbackrow" data-message-id="${messageId}">
+      <button class="po-feedbackbtn${likeActive}" data-rating="like" title="Good answer">&#128077;</button>
+      <button class="po-feedbackbtn${dislikeActive}" data-rating="dislike" title="Not good">&#128078;</button>
+      <button class="po-copybtn" data-copy-text="${escapeHtml(answerText || '')}" title="Copy answer">&#128203;</button>
+    </div>`;
+}
+
+function renderUsage(usage) {
+  if (!usage || !usage.total_tokens) return '';
+  const price = usage.total_price || 0;
+  const priceStr = price ? ` · $${price.toFixed(4)}` : '';
+  const latencyStr = usage.latency ? ` · ${usage.latency.toFixed(1)}s` : '';
+  return `<div class="po-turnusage" data-tokens="${usage.total_tokens}" data-price="${price}">`
+    + `${usage.total_tokens.toLocaleString()} tokens${priceStr}${latencyStr}</div>`;
+}
+
+document.getElementById('poConversation').addEventListener('click', (e) => {
+  const copyBtn = e.target.closest('.po-copybtn');
+  if (copyBtn) {
+    const original = copyBtn.innerHTML;
+    navigator.clipboard.writeText(copyBtn.dataset.copyText)
+      .then(() => {
+        copyBtn.innerHTML = '&#10003;';
+        setTimeout(() => { copyBtn.innerHTML = original; }, 1200);
+      })
+      .catch(() => {});
+    return;
+  }
+  const btn = e.target.closest('.po-feedbackbtn');
+  if (!btn) return;
+  const row = btn.closest('.po-feedbackrow');
+  const messageId = row.dataset.messageId;
+  const clearing = btn.classList.contains('active');
+  const rating = clearing ? null : btn.dataset.rating;
+  fetch(`${PRISM_PREFIX}/api/messages/${messageId}/feedback`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating }),
+  })
+    .then((r) => r.json())
+    .then((result) => {
+      if (result.error) throw new Error(result.error);
+      row.querySelectorAll('.po-feedbackbtn').forEach((b) => b.classList.remove('active'));
+      if (result.rating) {
+        const activeBtn = row.querySelector(`.po-feedbackbtn[data-rating="${result.rating}"]`);
+        if (activeBtn) activeBtn.classList.add('active');
+      }
+    })
+    .catch(() => {
+      // Leaves the button state as it was before the click -- better than
+      // silently claiming a rating that wasn't actually saved.
+    });
+});
+
+// -- The real research flow, ported from runAgentFlow, restyled ----------
+let activeAskStop = null;
+
+function runAsk() {
+  const queryEl = document.getElementById('poQuery');
+  const query = queryEl.value.trim();
+  if (!query) return;
+  if (activeAskStop) { activeAskStop(); return; }
+
+  const convEl = document.getElementById('poConversation');
+  const btnEl = document.getElementById('poAskBtn');
+  const turn = document.createElement('div');
+  turn.className = 'po-turn';
+  const draftVal = poDraftEl.value;
+  const qHtml = `<div class="po-q"><strong>Q:</strong> ${escapeHtml(query)}${draftVal ? ` <em>(draft: ${escapeHtml(draftVal)})</em>` : ''}</div>`;
+  document.getElementById('poInvestTitle').textContent = query;
+  document.getElementById('poDraftBadge').textContent = draftVal || '(let the agent discover)';
+
+  const steps = [];
+  let pendingReason = null;
+  let requestId = null;
+  const render = (bodyHtml) => { turn.innerHTML = qHtml + renderPlan(steps) + bodyHtml; };
+
+  render('<div class="po-loading">Starting…</div>');
+  convEl.appendChild(turn);
+  turn.scrollIntoView({ behavior: 'smooth' });
+
+  const params = new URLSearchParams({ query });
+  if (draftVal) params.set('draft', draftVal);
+  if (currentSessionId) params.set('session_id', currentSessionId);
+  if (poModelEl.value) {
+    const [modelProvider, modelName] = poModelEl.value.split('|||');
+    params.set('model_provider', modelProvider);
+    params.set('model_name', modelName);
+  }
+  const source = new EventSource(`${PRISM_PREFIX}/api/research?${params}`);
+  let finished = false;
+  const originalBtnText = btnEl.textContent;
+  btnEl.textContent = 'Stop';
+
+  activeAskStop = () => {
+    if (!requestId) return;
+    btnEl.disabled = true;
+    btnEl.textContent = 'Stopping…';
+    fetch(`${PRISM_PREFIX}/api/research/${requestId}/cancel`, { method: 'POST' }).catch(() => {});
+  };
+  const stop = () => {
+    finished = true;
+    source.close();
+    activeAskStop = null;
+    btnEl.disabled = false;
+    btnEl.textContent = originalBtnText;
+    queryEl.value = '';
+  };
+
+  const retryButtonHtml = '<button type="button" class="po-secondary po-retry">Retry</button>';
+  const wireRetryButton = () => {
+    const retryBtn = turn.querySelector('.po-retry');
+    if (retryBtn) {
+      retryBtn.addEventListener('click', () => {
+        queryEl.value = query;
+        runAsk();
+      });
+    }
+  };
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      if (msg.stage === 'started' && msg.request_id) {
+        requestId = msg.request_id;
+      } else if (msg.stage === 'reasoning' && msg.message) {
+        pendingReason = msg.message;
+      } else if (msg.stage === 'tool_call') {
+        if (steps.length) steps[steps.length - 1].status = 'done';
+        steps.push({ title: toolLabel(msg.tool), reason: pendingReason, status: 'active', forced: msg.forced });
+        pendingReason = null;
+        document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+      }
+      render(steps.length ? '' : '<div class="po-loading">Starting…</div>');
+    } else if (msg.type === 'result') {
+      if (steps.length) steps[steps.length - 1].status = 'done';
+      turn._prismEvidence = msg.data.evidence || [];
+      turn._prismClaimLabels = msg.data.claim_labels || {};
+      const scope = scopeLabel(msg.data.trace);
+      render(
+        `<div class="po-pill">${escapeHtml(scope)}</div>`
+        + renderDecisionBrief(msg.data.answer, msg.data.claim_labels)
+        + renderFeedback(msg.data.message_id, null, msg.data.answer)
+        + renderUsage(msg.data.usage)
+      );
+      updateSessionUsageBar();
+      document.getElementById('poInvestPills').innerHTML = deriveStatusPills(msg.data.answer);
+      document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+      lastInvestigation = { query, draft: draftVal, trace: msg.data.trace || [] };
+      if (msg.data.session_id) {
+        currentSessionId = msg.data.session_id;
+        loadSessionList();
+      }
+      stop();
+    } else if (msg.type === 'error') {
+      if (steps.length) steps[steps.length - 1].status = 'errored';
+      render(`<div class="po-error">${escapeHtml(msg.message)}</div>${retryButtonHtml}`);
+      wireRetryButton();
+      stop();
+    }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    if (steps.length) steps[steps.length - 1].status = 'errored';
+    render(`<div class="po-error">Connection lost.</div>${retryButtonHtml}`);
+    wireRetryButton();
+    stop();
+  };
+}
+
+document.getElementById('poAskBtn').addEventListener('click', runAsk);
+document.getElementById('poQuery').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !activeAskStop) runAsk();
+});
+
+// Follow-up form at the bottom of Findings -- just relays into the same
+// runAsk()/currentSessionId flow the main composer uses, so a follow-up
+// genuinely continues the same session rather than being a separate
+// mechanism.
+document.getElementById('poFollowupForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (activeAskStop) return;
+  const followupEl = document.getElementById('poFollowupQuery');
+  const text = followupEl.value.trim();
+  if (!text) return;
+  followupEl.value = '';
+  document.getElementById('poQuery').value = text;
+  runAsk();
+});
+
+function renderStaticTurn(t) {
+  const turn = document.createElement('div');
+  turn.className = 'po-turn';
+  turn._prismEvidence = t.evidence || [];
+  turn._prismClaimLabels = t.claim_labels || {};
+  const scope = scopeLabel(t.trace);
+  turn.innerHTML = `<div class="po-q"><strong>Q:</strong> ${escapeHtml(t.query)}</div>`
+    + `<div class="po-pill">${escapeHtml(scope)}</div>`
+    + renderDecisionBrief(t.answer, t.claim_labels)
+    + renderFeedback(t.message_id, t.feedback || null, t.answer)
+    + renderUsage(t.usage);
+  return turn;
+}
+
+// -- Decision history (Track a Decision, ported) --------------------------
+// Same backend (decision_thread(), the deterministic exact-phrase lookup
+// across every revision of one draft) and the same lane/chain visual
+// structure the old app had -- restyled to po- classes, not rebuilt, per
+// the plan's explicit call to keep this real content (revision text, live
+// diff links, resolved discussion links) rather than the mockup's
+// simplified dashed-rail wireframe.
+// Every case-insensitive literal occurrence of `needle` in `text` -- the
+// same real, honest signal the prism-complete mockup's own hits()/marked()
+// used, just against real revision text instead of illustrative excerpts.
+// decision_thread() only ever records a node when the exact substring
+// matched (see ask_decision_agent.py), so this never comes back empty for
+// a real node -- it's only used for the hit COUNT and highlight positions.
+function findOccurrences(text, needle) {
+  if (!needle || !text) return [];
+  const hay = text.toLowerCase();
+  const n = needle.toLowerCase();
+  const out = [];
+  let pos = 0;
+  while (true) {
+    const idx = hay.indexOf(n, pos);
+    if (idx === -1) break;
+    out.push(idx);
+    pos = idx + n.length;
+  }
+  return out;
+}
+function highlightOccurrences(text, needle, activeOcc) {
+  const occs = findOccurrences(text, needle);
+  if (!occs.length) return escapeHtml(text || '');
+  let out = '';
+  let last = 0;
+  occs.forEach((pos, i) => {
+    out += escapeHtml(text.slice(last, pos));
+    out += `<mark${i === activeOcc ? ' class="pt-activemark"' : ''}>${escapeHtml(text.slice(pos, pos + needle.length))}</mark>`;
+    last = pos + needle.length;
+  });
+  return out + escapeHtml(text.slice(last));
+}
+// Same URL template the backend's own _iddiff_page_url uses (IETF's
+// hosted iddiff-as-a-service) -- safe to build client-side for ANY two
+// revisions of the same draft, not just the consecutive pair the backend
+// already precomputed a diff_url for, since it's a deterministic template
+// over two real, valid revision identifiers.
+function iddiffUrl(draftName, fromRev, toRev) {
+  const params = new URLSearchParams({ url1: `${draftName}-${fromRev}`, url2: `${draftName}-${toRev}`, difftype: '--html' });
+  return `https://author-tools.ietf.org/iddiff?${params}`;
+}
+function revisionUrl(draftName, rev) {
+  return `https://datatracker.ietf.org/doc/html/${draftName}-${rev}`;
+}
+function edgeTypeLabel(type) {
+  if (type === 'added') return 'Added in this revision';
+  if (type === 'removed') return 'Removed in this revision';
+  return 'Modified in this revision';
+}
+
+let currentThreadData = null;
+let dtLaneIdx = 0;
+let dtRev = null;
+let dtTab = 'passage';
+let dtOcc = 0;
+const poThreadStatusEl = document.getElementById('poThreadStatus');
+const poThreadBodyEl = document.getElementById('poThreadBody');
+
+// Union of every revision any track actually has a captured excerpt at --
+// real, not a fabricated "every revision this draft ever had" range, since
+// decision_thread() only records segments containing the exact phrase.
+function allTrackRevs(lanes) {
+  const set = new Set();
+  lanes.forEach((lane) => lane.nodes.forEach((n) => set.add(n.rev)));
+  return [...set].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
+}
+
+// Passage map (track x revision grid) + selected-track timeline + tabbed
+// detail panel (Passage/Compare/Discussion) -- ported from prism-complete's
+// dedicated "Decision history" page design, same real lanes/nodes/edges
+// data the earlier always-open lane/chain cards used, just restructured so
+// every section x revision is visible at a glance instead of scrolling
+// past every lane to find the one that matters.
+function renderThread(data) {
+  currentThreadData = data;
+  if (!data.lanes.length) {
+    poThreadBodyEl.innerHTML = '<p class="corpora-hint">No revision mentions that phrase. Try a more distinctive quote from the decision text.</p>';
+    return;
+  }
+  dtLaneIdx = 0;
+  dtRev = data.lanes[0].nodes[0].rev;
+  dtTab = 'passage';
+  dtOcc = 0;
+  poThreadBodyEl.innerHTML = `
+    <div class="pt-map">
+      <div class="pt-maphead">
+        <div><strong>Passage map</strong><div class="pt-muted">Choose a section and revision. A number counts keyword hits in the shown excerpt.</div></div>
+        <span class="pt-label">${data.lanes.length} separate track${data.lanes.length === 1 ? '' : 's'}</span>
+      </div>
+      <div class="pt-scroll"><div class="pt-grid" id="ptGrid"></div></div>
+      <div class="pt-legend"><span>Number &middot; literal keyword hits</span><span>&mdash; &middot; no excerpt captured at that revision</span></div>
+    </div>
+    <div class="pt-work">
+      <aside>
+        <div class="pt-label">Selected passage history</div>
+        <h3 id="ptTrackTitle"></h3>
+        <div class="pt-timeline" id="ptTimeline"></div>
+        <div class="pt-note" id="ptRfcNote" hidden></div>
+      </aside>
+      <article class="pt-detail">
+        <header class="pt-detailhead">
+          <div class="pt-label" id="ptRevision"></div>
+          <h2 id="ptTitle"></h2>
+          <div class="pt-muted" id="ptSubtitle"></div>
+        </header>
+        <div class="pt-tabs">
+          <button type="button" data-pttab="passage" aria-pressed="true">Passage</button>
+          <button type="button" data-pttab="compare" aria-pressed="false">Compare</button>
+          <button type="button" data-pttab="discussion" aria-pressed="false">Discussion</button>
+        </div>
+        <div class="pt-content" id="ptContent"></div>
+      </article>
+    </div>
+  `;
+  renderDecisionThreadView();
+}
+
+function renderDecisionThreadView() {
+  const data = currentThreadData;
+  const lanes = data.lanes;
+  const revs = allTrackRevs(lanes);
+  const lane = lanes[dtLaneIdx];
+  const node = lane.nodes.find((n) => n.rev === dtRev) || lane.nodes[0];
+  dtRev = node.rev;
+
+  const gridEl = document.getElementById('ptGrid');
+  gridEl.style.gridTemplateColumns = `minmax(165px, 1.8fr) repeat(${revs.length}, minmax(40px, 1fr))`;
+  let gridHtml = '<span class="pt-muted">Section / revision</span>' + revs.map((v) => `<span class="pt-col">rev ${escapeHtml(v)}</span>`).join('');
+  lanes.forEach((l, li) => {
+    gridHtml += `<button type="button" class="pt-track" data-track="${li}" aria-pressed="${li === dtLaneIdx}">&sect; ${escapeHtml(l.section)}${l.title ? ' &middot; ' + escapeHtml(l.title) : ''}<small>${l.nodes.length} revision${l.nodes.length === 1 ? '' : 's'} captured</small></button>`;
+    gridHtml += revs.map((v) => {
+      const n = l.nodes.find((x) => x.rev === v);
+      const hitCount = n ? findOccurrences(n.text, data.query).length : 0;
+      const pressed = li === dtLaneIdx && v === dtRev;
+      const label = n ? `${hitCount} keyword hit${hitCount === 1 ? '' : 's'}` : 'no excerpt captured';
+      return `<button type="button" class="pt-cell${hitCount ? ' pt-found' : ''}" ${n ? `data-cell="${li},${v}"` : 'disabled'} aria-pressed="${pressed}" aria-label="${escapeHtml(l.section)}, revision ${escapeHtml(v)}, ${label}">${n ? (hitCount || '&middot;') : '&mdash;'}</button>`;
+    }).join('');
+  });
+  gridEl.innerHTML = gridHtml;
+
+  document.getElementById('ptTrackTitle').textContent = `§ ${lane.section}${lane.title ? ' · ' + lane.title : ''}`;
+  document.getElementById('ptTimeline').innerHTML = lane.nodes.map((n) => {
+    const idx = lane.nodes.indexOf(n);
+    const incomingEdge = idx > 0 ? lane.edges[idx - 1] : null;
+    const label = incomingEdge ? edgeTypeLabel(incomingEdge.type) : 'Earliest matching wording';
+    const hitCount = findOccurrences(n.text, data.query).length;
+    return `<button type="button" class="pt-event" data-rev="${escapeHtml(n.rev)}" aria-pressed="${n.rev === dtRev}"><small>REVISION ${escapeHtml(n.rev)}</small><span>${escapeHtml(label)}</span><small>${hitCount} literal hit${hitCount === 1 ? '' : 's'} in excerpt</small></button>`;
+  }).join('');
+  const rfcNoteEl = document.getElementById('ptRfcNote');
+  if (data.rfc_number) {
+    const lastRev = lane.nodes[lane.nodes.length - 1].rev;
+    rfcNoteEl.hidden = false;
+    rfcNoteEl.innerHTML = `Unchanged from rev ${escapeHtml(lastRev)} through to publication as <b>RFC ${escapeHtml(data.rfc_number)}</b>, unless a later revision rephrased it away from this exact wording.`;
+  } else {
+    rfcNoteEl.hidden = true;
+  }
+
+  renderDetailPanel();
+}
+
+function renderDetailPanel() {
+  const data = currentThreadData;
+  const lane = data.lanes[dtLaneIdx];
+  const nodeIdx = lane.nodes.findIndex((n) => n.rev === dtRev);
+  const node = lane.nodes[nodeIdx];
+  const incomingEdge = nodeIdx > 0 ? lane.edges[nodeIdx - 1] : null;
+  const hitCount = findOccurrences(node.text, data.query).length;
+  const draftName = data.draft_name;
+
+  document.getElementById('ptRevision').textContent = `${draftName}-${node.rev}`;
+  document.getElementById('ptTitle').textContent = incomingEdge ? edgeTypeLabel(incomingEdge.type) : 'Earliest matching wording';
+  document.getElementById('ptSubtitle').textContent = `§ ${lane.section} · ${hitCount} keyword hit${hitCount === 1 ? '' : 's'}`;
+  document.querySelectorAll('[data-pttab]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.pttab === dtTab)));
+
+  const contentEl = document.getElementById('ptContent');
+  if (dtTab === 'passage') {
+    const occs = findOccurrences(node.text, data.query);
+    contentEl.innerHTML = `
+      ${occs.length ? `<div class="pt-label">Occurrences within this passage</div><div class="pt-occurrences">${occs.map((_, i) => `<button type="button" data-occ="${i}" aria-pressed="${i === dtOcc}">Hit ${i + 1}</button>`).join('')}</div>` : ''}
+      <div class="pt-excerpt">${highlightOccurrences(node.text, data.query, dtOcc)}</div>
+      <p><a href="${revisionUrl(draftName, node.rev)}" target="_blank" rel="noopener">Open full revision ↗</a></p>
+    `;
+  } else if (dtTab === 'compare') {
+    const earlierNodes = lane.nodes.slice(0, nodeIdx);
+    if (!earlierNodes.length) {
+      contentEl.innerHTML = '<p>No earlier captured excerpt for this track -- this is the earliest revision matched.</p>';
+    } else {
+      const defaultBaseline = earlierNodes[earlierNodes.length - 1].rev;
+      contentEl.innerHTML = `
+        <label class="pt-muted">Compare revision ${escapeHtml(node.rev)} with
+          <select id="ptBaseline" aria-label="Comparison baseline">
+            ${earlierNodes.map((n) => `<option value="${escapeHtml(n.rev)}"${n.rev === defaultBaseline ? ' selected' : ''}>rev ${escapeHtml(n.rev)}</option>`).join('')}
+          </select>
+        </label>
+        <div id="ptComparison"></div>
+      `;
+      const renderComparison = (baselineRev) => {
+        const baselineNode = lane.nodes.find((n) => n.rev === baselineRev);
+        document.getElementById('ptComparison').innerHTML = `
+          <div class="pt-label">Earlier &middot; revision ${escapeHtml(baselineRev)}</div>
+          <div class="pt-excerpt">${highlightOccurrences(baselineNode.text, data.query, -1)}</div>
+          <div class="pt-label">Selected &middot; revision ${escapeHtml(node.rev)}</div>
+          <div class="pt-excerpt">${highlightOccurrences(node.text, data.query, -1)}</div>
+          <a href="${iddiffUrl(draftName, baselineRev, node.rev)}" target="_blank" rel="noopener">Open authoritative full diff ↗</a>
+        `;
+      };
+      renderComparison(defaultBaseline);
+      document.getElementById('ptBaseline').addEventListener('change', (e) => renderComparison(e.target.value));
+    }
+  } else if (dtTab === 'discussion') {
+    if (!incomingEdge) {
+      contentEl.innerHTML = '<p>This is the earliest captured wording for this track -- there is no incoming revision change to check for a related discussion.</p>';
+    } else if (incomingEdge.has_discussion) {
+      const links = (incomingEdge.discussion_links || []).filter((l) => /^https?:\/\//.test(l.url));
+      contentEl.innerHTML = `
+        <div class="pt-label">Evidence for the reason</div>
+        <div class="pt-excerpt" style="border-left-color: var(--po-cyan);">${escapeHtml(incomingEdge.discussion)}</div>
+        ${links.map((l) => `<p><a href="${escapeHtml(l.url)}" target="_blank" rel="noopener">View original email — ${escapeHtml(l.from)}, ${escapeHtml(l.date)} ↗</a></p>`).join('')}
+        <div class="pt-note">Found via keyword search and an LLM's best-effort judgment -- not a certainty that this is the actual reason for the change.</div>
+      `;
+    } else {
+      contentEl.innerHTML = `
+        <p>No mailing-list discussion was resolved for this specific revision change.</p>
+        <div class="pt-note">"Not found" is not "never discussed" -- the search may not have surfaced the right thread, or the change may not have been discussed on-list at all.</div>
+      `;
+    }
+  }
+}
+
+document.getElementById('poThreadForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  trackDecision();
+});
+
+function trackDecision() {
+  const draft = poThreadDraftEl.value;
+  const query = document.getElementById('poThreadQuery').value.trim();
+  if (!query) return;
+
+  poThreadStatusEl.textContent = 'Starting…';
+  poThreadBodyEl.innerHTML = '';
+
+  const params = new URLSearchParams({ query });
+  if (draft) params.set('draft', draft);
+  const source = new EventSource(`${PRISM_PREFIX}/api/decision-thread?${params}`);
+  let finished = false;
+
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      poThreadStatusEl.textContent = msg.message || 'Working…';
+    } else if (msg.type === 'result') {
+      finished = true;
+      source.close();
+      poThreadStatusEl.textContent = '';
+      renderThread(msg.data);
+    } else if (msg.type === 'error') {
+      finished = true;
+      source.close();
+      poThreadStatusEl.textContent = '';
+      poThreadBodyEl.innerHTML = `<div class="po-error">${escapeHtml(msg.message)}</div>`;
+    }
+  };
+  source.onerror = () => {
+    if (finished) return;
+    finished = true;
+    source.close();
+    poThreadStatusEl.textContent = '';
+    poThreadBodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
+  };
+}
+
+// Single delegated handler for the whole passage-map/timeline/tabs
+// interaction, same pattern the mockup's own render()-on-any-click design
+// uses -- cheap enough at this data size to just re-render everything
+// rather than patch individual pieces per interaction type.
+poThreadBodyEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn || !currentThreadData) return;
+  if (btn.dataset.cell) {
+    const [li, v] = btn.dataset.cell.split(',');
+    dtLaneIdx = Number(li);
+    dtRev = v;
+    dtOcc = 0;
+  } else if (btn.dataset.track) {
+    dtLaneIdx = Number(btn.dataset.track);
+    const lane = currentThreadData.lanes[dtLaneIdx];
+    if (!lane.nodes.some((n) => n.rev === dtRev)) dtRev = lane.nodes[lane.nodes.length - 1].rev;
+    dtOcc = 0;
+  } else if (btn.dataset.rev) {
+    dtRev = btn.dataset.rev;
+    dtOcc = 0;
+  } else if (btn.dataset.occ !== undefined) {
+    dtOcc = Number(btn.dataset.occ);
+  } else if (btn.dataset.pttab) {
+    dtTab = btn.dataset.pttab;
+  } else {
+    return;
+  }
+  renderDecisionThreadView();
+});
+
+// -- Archive coverage -- derived from lastInvestigation's real trace, not
+// hardcoded like the mockup's own 3 rows (its own copy admits those are
+// aspirational: "the working product should expose searched lists..."). No
+// new backend route -- this is a client-side read of trace data already
+// sent to the browser for every completed turn, the same approach the
+// scope badge already uses. --------------------------------------------
+// Real tool names (must match the TOOL_NAME constants in
+// ask_decision_agent.py exactly -- fetch_ietf_draft_text/fetch_ietf_rfc_text,
+// not fetch_draft_text/fetch_rfc_text, caught live: the first version of
+// this used the wrong names and every row silently read "not searched"
+// even for a turn that clearly had searched).
+const COVERAGE_ROWS = [
+  {
+    title: 'This draft or RFC\'s own text', desc: 'The specification text itself',
+    tools: ['fetch_ietf_draft_text', 'fetch_ietf_rfc_text', 'diff_ietf_draft_revisions', 'cite_iddiff_url'],
+  },
+  {
+    title: 'Local-only source', desc: 'Not yet in the real mailarchive/evolution datasets -- pulled and searched locally instead',
+    tools: ['search_local_source', 'add_local_source'],
+  },
+  {
+    title: 'Draft evolution (revision history)', desc: 'What changed across revisions, and when',
+    tools: ['search_ietf_evolution_dataset'],
+  },
+  {
+    title: 'Mailing-list archive', desc: 'Original discussion and responses',
+    tools: ['search_ietf_mailarchive_dataset', 'get_iesg_ballot_comments', 'search_wg_minutes'],
+  },
+  {
+    title: 'Wider RFC landscape', desc: 'Other RFCs connected to this one -- structurally, by citation, or by topic',
+    tools: ['get_rfc_relations', 'find_related_rfc_family', 'search_rfc_corpus_bm25', 'find_similar_rfcs_by_meaning'],
+  },
+];
+
+function renderCoverage() {
+  const bodyEl = document.getElementById('poCoverageBody');
+  if (!lastInvestigation) {
+    bodyEl.innerHTML = '<p class="corpora-hint">Ask a question first -- coverage is shown for your most recent investigation.</p>';
+    return;
+  }
+  const trace = lastInvestigation.trace || [];
+  const rowsHtml = COVERAGE_ROWS.map((row) => {
+    const calls = trace.filter((t) => row.tools.includes(t.tool));
+    const status = calls.length
+      ? `<span class="po-pill">Searched for this question (${calls.length} call${calls.length === 1 ? '' : 's'})</span>`
+      : `<span class="po-coveragestatus">Not searched for this question</span>`;
+    return `
+      <div class="po-coverage-row">
+        <div><h3>${escapeHtml(row.title)}</h3><p>${escapeHtml(row.desc)}</p></div>
+        <div>${status}</div>
+      </div>`;
+  }).join('');
+  bodyEl.innerHTML = `
+    <div class="po-context"><code>${escapeHtml(lastInvestigation.draft || '(let the agent discover)')}</code><span>${escapeHtml(lastInvestigation.query)}</span></div>
+    ${rowsHtml}
+    <div class="po-gap">
+      <div><strong>&ldquo;Not searched&rdquo; is not &ldquo;never discussed.&rdquo;</strong>A row above being empty means the agent judged it unnecessary for this specific question, not that Prism can't see that source -- ask a follow-up if you want it checked directly.</div>
+    </div>
+    <div class="po-actions" style="margin-top:20px;">
+      <button type="button" class="po-primary" id="poCoverageReturnBtn">Return to findings →</button>
+    </div>
+  `;
+  document.getElementById('poCoverageReturnBtn').addEventListener('click', () => {
+    go('investigation');
+    view('findings');
+  });
+}
+
+// -- Documents (reading view + passage selection) -------------------------
+// The one genuinely new page: /api/document-text does the real work
+// (resolve + fetch + segment); everything here is rendering that payload
+// and wiring "Explain this decision" into the exact same runAsk() flow
+// Workspace's composer already uses.
+let currentDocument = null;
+let currentDocSectionIdx = 0;
+let selectedPassageText = null;
+
+function renderDocSection(idx) {
+  currentDocSectionIdx = idx;
+  const section = currentDocument.sections[idx];
+  selectedPassageText = null;
+
+  const tocHtml = currentDocument.sections.map((s, i) => `
+    <button type="button" data-idx="${i}" aria-pressed="${i === idx}">${escapeHtml(s.number ? `${s.number}  ${s.title}` : s.title)}</button>
+  `).join('');
+
+  const paragraphs = section.text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
+  const passagesHtml = paragraphs.map((p) => `<button type="button" class="po-passage">${escapeHtml(p)}</button>`).join('');
+
+  document.getElementById('poDocBody').innerHTML = `
+    <div class="po-context"><code>${escapeHtml(currentDocument.doc_id)}</code><span>${escapeHtml(currentDocument.title)}</span></div>
+    <div class="po-document">
+      <aside class="po-toc" aria-label="Document sections">${tocHtml}</aside>
+      <article class="po-docpaper">
+        <h2>${escapeHtml(section.number ? `${section.number}. ${section.title}` : section.title)}</h2>
+        ${passagesHtml || '<p class="corpora-hint">No text in this section.</p>'}
+        ${section.truncated ? '<p class="po-tiny">[Section truncated -- long past what fits here. Ask a question about it instead of reading the rest.]</p>' : ''}
+        <div class="po-selectionbar" id="poSelectionBar" hidden>
+          <span class="po-tiny">Passage selected</span>
+          <button type="button" class="po-primary" id="poExplainBtn">Explain this decision →</button>
+        </div>
+      </article>
+    </div>
+  `;
+
+  document.querySelectorAll('#poDocBody .po-toc button').forEach((b) => {
+    b.addEventListener('click', () => renderDocSection(parseInt(b.dataset.idx, 10)));
+  });
+  document.querySelectorAll('#poDocBody .po-passage').forEach((b) => {
+    b.addEventListener('click', () => {
+      const wasSelected = b.getAttribute('aria-pressed') === 'true';
+      document.querySelectorAll('#poDocBody .po-passage').forEach((x) => x.setAttribute('aria-pressed', 'false'));
+      const bar = document.getElementById('poSelectionBar');
+      if (wasSelected) {
+        selectedPassageText = null;
+        bar.hidden = true;
+      } else {
+        b.setAttribute('aria-pressed', 'true');
+        selectedPassageText = b.textContent;
+        bar.hidden = false;
+      }
+    });
+  });
+  document.getElementById('poExplainBtn')?.addEventListener('click', () => {
+    if (!selectedPassageText) return;
+    document.getElementById('poQuery').value = `Why does ${currentDocument.doc_id} say: "${selectedPassageText}"`;
+    // Only a draft name is a real <option> in the picker (RFC text's
+    // doc_id, e.g. "RFC 9000", has no matching catalog entry) -- setting
+    // .value to something with no matching option is a harmless no-op,
+    // so this doesn't need its own draft-vs-RFC branch.
+    poDraftEl.value = currentDocument.doc_id;
+    go('investigation');
+    view('findings');
+    runAsk();
+  });
+}
+
+// Recently-viewed documents -- per-viewer convenience, not shared state,
+// so localStorage rather than a new backend field/table. Newest first,
+// deduped by doc_id, capped so this can't grow without bound.
+const READING_DESK_KEY = 'prism.readingDesk';
+const READING_DESK_MAX = 8;
+
+function recordReadingDeskEntry(docId, title) {
+  let entries = [];
+  try {
+    entries = JSON.parse(localStorage.getItem(READING_DESK_KEY) || '[]');
+  } catch (e) { entries = []; }
+  entries = entries.filter((e) => e.doc_id !== docId);
+  entries.unshift({ doc_id: docId, title });
+  try {
+    localStorage.setItem(READING_DESK_KEY, JSON.stringify(entries.slice(0, READING_DESK_MAX)));
+  } catch (e) { /* private-window/quota -- Reading desk just won't persist this session, harmless */ }
+}
+
+function renderReadingDesk() {
+  const el = document.getElementById('poReadingDesk');
+  let entries = [];
+  try {
+    entries = JSON.parse(localStorage.getItem(READING_DESK_KEY) || '[]');
+  } catch (e) { entries = []; }
+  if (!entries.length) {
+    el.innerHTML = '<p class="corpora-hint">Nothing opened yet -- look up a document from Documents to start.</p>';
+    return;
+  }
+  el.innerHTML = entries.map((e) => `
+    <button type="button" class="po-recent" data-doc-id="${escapeHtml(e.doc_id)}"><strong>${escapeHtml(e.title)}</strong><small>${escapeHtml(e.doc_id)}</small></button>
+  `).join('');
+  el.querySelectorAll('.po-recent').forEach((b) => {
+    b.addEventListener('click', () => goToDocument(b.dataset.docId));
+  });
+}
+
+function goToDocument(id) {
+  go('document');
+  loadDocument(id);
+}
+
+function loadDocument(hint) {
+  const bodyEl = document.getElementById('poDocBody');
+  bodyEl.innerHTML = '<p class="po-loading">Looking up…</p>';
+  fetch(`${PRISM_PREFIX}/api/document-text?q=${encodeURIComponent(hint)}`).then((r) => r.json()).then((data) => {
+    if (data.error) {
+      bodyEl.innerHTML = `<div class="po-error">${escapeHtml(data.error)}</div>`;
+      return;
+    }
+    currentDocument = data;
+    recordReadingDeskEntry(data.doc_id, data.title);
+    renderDocSection(0);
+  }).catch(() => {
+    bodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
+  });
+}
+
+// Shared between Documents' own lookup and Workspace's "Start from a
+// document" tab -- live-filters matchDocuments() as the user types
+// (matching the mockup's own live-filtered doc-result), Enter/button opens
+// either the picked result or, failing that, whatever was typed (so a
+// full exact draft name/RFC number still works without picking from the
+// list first).
+function wireDocLookup(inputEl, resultsEl, buttonEl, onSelect) {
+  // buttonEl is optional -- Workspace's compact lookup has no explicit
+  // "Open" button (result-click or Enter only), Documents' own does.
+  const renderResults = () => {
+    const matches = matchDocuments(inputEl.value);
+    if (!matches.length) {
+      resultsEl.hidden = true;
+      return;
+    }
+    resultsEl.innerHTML = matches.map((m) => `
+      <button type="button" data-id="${escapeHtml(m.id)}">${escapeHtml(m.label)}<small>${escapeHtml(m.meta)}</small></button>
+    `).join('');
+    resultsEl.hidden = false;
+    resultsEl.querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => {
+        inputEl.value = b.dataset.id;
+        resultsEl.hidden = true;
+        onSelect(b.dataset.id);
+      });
+    });
+  };
+  inputEl.addEventListener('input', renderResults);
+  inputEl.addEventListener('focus', renderResults);
+  document.addEventListener('click', (e) => {
+    if (!inputEl.contains(e.target) && !resultsEl.contains(e.target)) resultsEl.hidden = true;
+  });
+  const openTyped = () => {
+    const hint = inputEl.value.trim();
+    if (hint) { resultsEl.hidden = true; onSelect(hint); }
+  };
+  if (buttonEl) buttonEl.addEventListener('click', openTyped);
+  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') openTyped(); });
+}
+
+wireDocLookup(
+  document.getElementById('poDocQuery'),
+  document.getElementById('poDocResults'),
+  document.getElementById('poDocLookupBtn'),
+  (id) => loadDocument(id)
+);
+wireDocLookup(
+  document.getElementById('poWorkspaceDocQuery'),
+  document.getElementById('poWorkspaceDocResults'),
+  null,
+  (id) => goToDocument(id)
+);
+
+// -- How it works -- real /api/tools + /api/skills, restyled into the
+// mockup's pm-tool <details>/dl contract layout instead of classic's
+// list+detail-panel split. dt/dd pairs use what the real tool payload
+// actually carries (resource/example, see _TOOL_DETAILS) rather than the
+// mockup's fabricated Inputs/Returns/Boundary framing, which nothing in
+// this backend computes. ------------------------------------------------
+function loadToolsPage() {
+  const listEl = document.getElementById('poToolsList');
+  const skillEl = document.getElementById('poSkillBody');
+  Promise.all([
+    fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()),
+    fetch(`${PRISM_PREFIX}/api/skills`).then((r) => r.json()),
+  ]).then(([tools, skillsData]) => {
+    tools = tools || [];
+    listEl.innerHTML = tools.map((t, i) => `
+      <details class="pm-tool"${i === 0 ? ' open' : ''}>
+        <summary>${escapeHtml(t.display_name || t.name)}<small>${escapeHtml(t.group || t.kind || '')}${t.forced ? ' · forced at least once per run' : ''}</small></summary>
+        <div class="pm-toolbody">
+          <p>${escapeHtml(t.description || '')}</p>
+          ${t.resource ? `<dl><dt>Touches</dt><dd>${escapeHtml(t.resource)}</dd></dl>` : ''}
+          ${t.example ? `<code>${escapeHtml(t.example)}</code>` : ''}
+        </div>
+      </details>
+    `).join('') || '<p class="corpora-hint">No tools reported.</p>';
+
+    const guardrails = skillsData.guardrails || [];
+    skillEl.innerHTML = `
+      <details class="pm-tool" open>
+        <summary>Agent instructions<small>How every tool call above gets orchestrated</small></summary>
+        <div class="pm-toolbody"><code>${escapeHtml(skillsData.agent || '')}</code></div>
+      </details>
+      ${guardrails.map((g) => `
+        <details class="pm-tool">
+          <summary>${escapeHtml(g.name)}<small>Guardrail</small></summary>
+          <div class="pm-toolbody">
+            <p>${escapeHtml(g.purpose || '')}</p>
+            ${g.instruction ? `<code>${escapeHtml(g.instruction)}</code>` : ''}
+          </div>
+        </details>
+      `).join('')}
+    `;
+  }).catch(() => {
+    listEl.innerHTML = '<div class="po-error">Couldn’t load the tool catalog.</div>';
+    skillEl.innerHTML = '';
+  });
+}
+
+// -- RFC Graph -- real /api/rfc-graph/<n> (hop-1: obsoletes/updates +
+// Citation Match + Topic Match, all relative to one center),
+// /api/rfc-graph/focus?rfc=&hops= (SSE; N-hop obsoletes/updates-only BFS
+// beyond hop 1 -- citation/topic match aren't well-defined two hops out, so
+// the real backend only ever returns them for the RFC actually being
+// focused on), and /api/rfc-graph/global (SSE, whole-corpus obsoletes/
+// updates, ~2min cold / cached after) for corpus mode. Design follows the
+// prism-complete mockup's RFC Graph page (map/chronology/list views +
+// relationship filters + reach selector + inspector panel) -- replacing
+// the earlier single-RFC circular SVG scatter, which had no hop-2 data,
+// no chronology/list views, and no corpus-wide mode at all. Content is all
+// real: real node titles/WGs/publication years, real edge kinds, a real
+// working-group breakdown for corpus mode instead of the mockup's fixed
+// illustrative DNS/Transport/Routing/Security clusters.
+const EDGE_KIND_LABELS = { obsoletes: 'obsoletes', updates: 'updates', family: 'citation match', topic_bm25: 'topic match' };
+// Datatracker's document API has no reliable "RFC published" field --
+// confirmed live that RFC9000's own "time" field reads 2026, a recent
+// metadata touch, not its real 2021 publication date, so no per-node date
+// is fetched or shown here. RFC numbers are assigned strictly in
+// publication order, so the numeric id itself IS chronological order, not
+// an approximation of it -- same fact classic's own Arc Diagram already
+// relies on for the identical purpose.
+const rxNumValue = (id) => parseInt(String(id).replace(/^RFC/i, ''), 10) || 0;
+let rxFocus = null;
+let rxMode = 'focus';
+let rxView = 'map';
+let rxData = { center: null, nodes: [], edges: [] };
+let rxSelected = { node: null };
+let rxGlobalData = null;
+let rxCorpusWg = null;
+
+function loadGraphPage() {
+  const inputEl = document.getElementById('poGraphInput');
+  if (!inputEl.value.trim()) inputEl.value = '9000';
+  rxExplore(inputEl.value.trim());
+}
+
+function rxSetMode(mode) {
+  rxMode = mode;
+  document.querySelectorAll('[data-rxmode]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.rxmode === mode)));
+  document.getElementById('poGraphForm').hidden = mode !== 'focus';
+  document.getElementById('poGraphFilters').hidden = mode !== 'focus';
+}
+
+document.querySelectorAll('[data-rxmode]').forEach((b) => b.addEventListener('click', () => {
+  rxSetMode(b.dataset.rxmode);
+  if (rxMode === 'corpus') rxLoadCorpus();
+  else if (rxFocus) rxDraw();
+}));
+
+document.querySelectorAll('[data-rxview]').forEach((b) => b.addEventListener('click', () => {
+  rxView = b.dataset.rxview;
+  document.querySelectorAll('[data-rxview]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  document.getElementById('poGraphFilterListLabel').hidden = rxView !== 'list';
+  rxDraw();
+}));
+
+document.getElementById('poGraphForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const raw = document.getElementById('poGraphInput').value.trim();
+  if (raw) rxExplore(raw);
+});
+['poGraphFilterObsoletes', 'poGraphFilterUpdates', 'poGraphFilterFamily', 'poGraphFilterTopic'].forEach((id) => {
+  document.getElementById(id).addEventListener('change', rxDraw);
+});
+document.getElementById('poGraphListFilter').addEventListener('input', rxDraw);
+document.getElementById('poGraphDepth').addEventListener('change', () => { if (rxFocus) rxExplore(rxFocus); });
+
+function rxActiveKinds() {
+  const map = { poGraphFilterObsoletes: 'obsoletes', poGraphFilterUpdates: 'updates', poGraphFilterFamily: 'family', poGraphFilterTopic: 'topic_bm25' };
+  return Object.entries(map).filter(([id]) => document.getElementById(id).checked).map(([, kind]) => kind);
+}
+
+function rxExplore(rfcNumber) {
+  const requested = String(rfcNumber).replace(/^rfc\s*/i, '').trim();
+  if (!requested) return;
+  rxSetMode('focus');
+  document.getElementById('poGraphInput').value = requested;
+  const depth = Number(document.getElementById('poGraphDepth').value);
+  const countEl = document.getElementById('poGraphCount');
+  countEl.textContent = `Loading RFC ${escapeHtml(requested)}’s relationships…`;
+  document.getElementById('poGraphCanvas').innerHTML = '';
+  document.getElementById('poGraphInspector').innerHTML = '';
+  if (depth <= 1) {
+    fetch(`${PRISM_PREFIX}/api/rfc-graph/${encodeURIComponent(requested)}`).then((r) => r.json()).then((data) => {
+      if (data.error) throw new Error(data.error);
+      rxData = data;
+      rxFocus = data.center;
+      rxSelected = { node: data.center };
+      rxDraw();
+    }).catch((err) => {
+      countEl.textContent = err.message || `Could not load RFC ${requested}.`;
+    });
+  } else {
+    const source = new EventSource(`${PRISM_PREFIX}/api/rfc-graph/focus?rfc=${encodeURIComponent(requested)}&hops=${depth}`);
+    source.onmessage = (ev) => {
+      const msg = JSON.parse(ev.data);
+      if (msg.type === 'progress') {
+        countEl.textContent = msg.message || 'Working…';
+      } else if (msg.type === 'result') {
+        source.close();
+        if (msg.data.error) { countEl.textContent = msg.data.error; return; }
+        rxData = msg.data;
+        rxFocus = msg.data.center;
+        rxSelected = { node: msg.data.center };
+        rxDraw();
+      } else if (msg.type === 'error') {
+        source.close();
+        countEl.textContent = msg.message;
+      }
+    };
+    source.onerror = () => { source.close(); countEl.textContent = 'Connection lost.'; };
+  }
+}
+
+function rxVisibleEdges() {
+  const active = rxActiveKinds();
+  return (rxData.edges || []).filter((e) => active.includes(e.kind));
+}
+
+function rxNode(id, isCenter) {
+  const n = (rxData.nodes || []).find((x) => x.id === id);
+  if (!n) return '';
+  return `<button type="button" class="rx-node${isCenter ? ' rx-center' : ''}" data-rxnode="${escapeHtml(id)}"><strong>${escapeHtml(id)}</strong><small>${escapeHtml(n.title || '')}</small></button>`;
+}
+function rxEdgeButton(e) {
+  const idx = rxData.edges.indexOf(e);
+  const label = EDGE_KIND_LABELS[e.kind] || e.kind;
+  return `<button type="button" class="rx-edge" data-rxedge="${idx}">${escapeHtml(e.source)} ${escapeHtml(label)} → ${escapeHtml(e.target)}</button>`;
+}
+
+function rxDraw() {
+  if (rxMode === 'corpus') { rxDrawCorpus(); return; }
+  const canvasEl = document.getElementById('poGraphCanvas');
+  const countEl = document.getElementById('poGraphCount');
+  const es = rxVisibleEdges();
+  const nodeIds = new Set((rxData.nodes || []).map((n) => n.id));
+  const ids = [...new Set([rxFocus, ...es.flatMap((e) => [e.source, e.target])])].filter((id) => nodeIds.has(id));
+  countEl.textContent = `${ids.length} document${ids.length === 1 ? '' : 's'} · ${es.length} relationship${es.length === 1 ? '' : 's'} · focus ${escapeHtml(rxFocus || '')}`;
+
+  let html = '';
+  if (rxView === 'list') {
+    const q = document.getElementById('poGraphListFilter').value.toLowerCase();
+    const nodesForList = ids.map((id) => (rxData.nodes || []).find((n) => n.id === id)).filter(Boolean)
+      .filter((n) => `${n.id} ${n.title}`.toLowerCase().includes(q));
+    html = `<div class="rx-tablewrap"><table class="rx-table"><thead><tr><th>Document</th><th>Title</th><th>WG</th></tr></thead><tbody>${
+      nodesForList.map((n) => `<tr><td><button type="button" data-rxnode="${escapeHtml(n.id)}">${escapeHtml(n.id)}</button></td><td>${escapeHtml(n.title || '')}</td><td>${escapeHtml(n.wg || '—')}</td></tr>`).join('')
+    }</tbody></table></div>`;
+  } else if (rxView === 'time') {
+    const sorted = ids.slice().sort((a, b) => rxNumValue(a) - rxNumValue(b));
+    html = `<div class="rx-lanehead">Publication order (by RFC number) · selected neighborhood</div><div class="rx-time">${
+      sorted.map((id) => `<div class="rx-row">${rxNode(id, id === rxFocus)}${es.filter((e) => e.source === id).map(rxEdgeButton).join('<br>')}</div>`).join('')
+    }</div>`;
+  } else {
+    const formal = es.filter((e) => e.kind === 'obsoletes' || e.kind === 'updates');
+    const earlier = formal.filter((e) => e.source === rxFocus);
+    const later = formal.filter((e) => e.target === rxFocus);
+    const related = es.filter((e) => e.kind !== 'obsoletes' && e.kind !== 'updates');
+    html = `<div class="rx-lanes">
+      <div><div class="rx-lanehead">Earlier specifications</div>${earlier.map((e) => rxNode(e.target) + rxEdgeButton(e)).join('') || '<p class="rx-sub">None captured</p>'}</div>
+      <div><div class="rx-lanehead">Selected RFC</div>${rxNode(rxFocus, true)}</div>
+      <div><div class="rx-lanehead">Later changes</div>${later.map((e) => rxNode(e.source) + rxEdgeButton(e)).join('') || '<p class="rx-sub">None captured</p>'}</div>
+    </div>` + (related.length ? `<div class="rx-reading"><div class="rx-lanehead">Related reading · not a formal lineage</div><div class="rx-readinggrid">${
+      related.map((e) => `<div>${rxNode(e.source === rxFocus ? e.target : e.source)}${rxEdgeButton(e)}</div>`).join('')
+    }</div></div>` : '');
+  }
+  canvasEl.innerHTML = html;
+  rxInspect();
+}
+
+function rxInspect() {
+  const el = document.getElementById('poGraphInspector');
+  if (rxSelected.edge !== undefined && rxSelected.edge !== null) {
+    const e = rxData.edges[rxSelected.edge];
+    if (!e) return;
+    const formal = e.kind === 'obsoletes' || e.kind === 'updates';
+    const label = EDGE_KIND_LABELS[e.kind] || e.kind;
+    const explain = formal
+      ? 'A formal specification relationship recorded by IETF Datatracker. The arrow points from the document making the change to the affected document.'
+      : e.kind === 'family'
+        ? 'A real citation, or an exact keyword match in the title — not, by itself, evidence of design influence.'
+        : 'A related-reading suggestion from this corpus’s own BM25 text ranking. Similarity is not a formal relationship.';
+    el.innerHTML = `
+      <div class="po-eyebrow">Selected relationship</div>
+      <h2>${escapeHtml(e.source)}<br>${escapeHtml(label)}<br>${escapeHtml(e.target)}</h2>
+      <p>${explain}</p>
+      <a href="https://datatracker.ietf.org/doc/${escapeHtml(e.source.toLowerCase())}/" target="_blank" rel="noopener">Open ${escapeHtml(e.source)} ↗</a>
+      <button type="button" data-rxfocus="${escapeHtml(e.source)}">Focus on ${escapeHtml(e.source)}</button>
+    `;
+  } else {
+    const id = rxSelected.node || rxFocus;
+    const n = (rxData.nodes || []).find((x) => x.id === id);
+    if (!n) { el.innerHTML = ''; return; }
+    const isCenter = id === rxFocus;
+    const meta = [n.wg, n.std_level ? n.std_level.toUpperCase() : ''].filter(Boolean).join(' · ');
+    el.innerHTML = `
+      <div class="po-eyebrow">Selected document</div>
+      <h2>${escapeHtml(id)}</h2>
+      <p>${escapeHtml(n.title || '')}</p>
+      <p class="rx-sub">${escapeHtml(meta)}</p>
+      <a href="https://datatracker.ietf.org/doc/${escapeHtml(id.toLowerCase())}/" target="_blank" rel="noopener">Open document ↗</a>
+      <button type="button" data-rxreaddoc="${escapeHtml(id)}">Read this RFC in Documents</button>
+      <button type="button" data-rxfocus="${escapeHtml(id)}">${isCenter ? 'Show direct connections' : 'Focus here'}</button>
+      <button type="button" data-rxexpand="${escapeHtml(id)}">Expand this RFC</button>
+      <p class="rx-sub">Select a relationship label to inspect its meaning and source.</p>
+    `;
+  }
+}
+
+function rxHandleClick(e) {
+  const b = e.target.closest('button');
+  if (!b) return;
+  if (b.dataset.rxnode) { rxSelected = { node: b.dataset.rxnode }; rxInspect(); }
+  else if (b.dataset.rxedge !== undefined) { rxSelected = { edge: Number(b.dataset.rxedge) }; rxInspect(); }
+  else if (b.dataset.rxreaddoc) { go('document'); goToDocument(b.dataset.rxreaddoc); }
+  else if (b.dataset.rxfocus) { document.getElementById('poGraphDepth').value = '1'; rxExplore(b.dataset.rxfocus); }
+  else if (b.dataset.rxexpand) { document.getElementById('poGraphDepth').value = '2'; rxExplore(b.dataset.rxexpand); }
+  else if (b.dataset.rxwg) { rxCorpusWg = b.dataset.rxwg; rxDrawCorpus(); }
+  else if (b.dataset.rxback === 'corpus') { rxCorpusWg = null; rxDrawCorpus(); }
+}
+document.getElementById('poGraphCanvas').addEventListener('click', rxHandleClick);
+document.getElementById('poGraphInspector').addEventListener('click', rxHandleClick);
+
+function rxLoadCorpus() {
+  const countEl = document.getElementById('poGraphCount');
+  if (rxGlobalData) { rxDrawCorpus(); return; }
+  countEl.textContent = 'Loading the whole-corpus Obsoletes/Updates graph…';
+  document.getElementById('poGraphCanvas').innerHTML = '';
+  document.getElementById('poGraphInspector').innerHTML = '';
+  const source = new EventSource(`${PRISM_PREFIX}/api/rfc-graph/global`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      countEl.textContent = msg.message || 'Working…';
+    } else if (msg.type === 'result') {
+      source.close();
+      if (msg.data.error) { countEl.textContent = msg.data.error; return; }
+      rxGlobalData = msg.data;
+      rxDrawCorpus();
+    } else if (msg.type === 'error') {
+      source.close();
+      countEl.textContent = msg.message;
+    }
+  };
+  source.onerror = () => { source.close(); countEl.textContent = 'Connection lost while loading the corpus graph.'; };
+}
+
+function rxDrawCorpus() {
+  if (!rxGlobalData) return;
+  const countEl = document.getElementById('poGraphCount');
+  const canvasEl = document.getElementById('poGraphCanvas');
+  const nodes = rxGlobalData.nodes || [];
+  const edges = rxGlobalData.edges || [];
+  countEl.textContent = `${nodes.length.toLocaleString()} documents · ${edges.length.toLocaleString()} relationships across the corpus`;
+  if (rxCorpusWg) {
+    const wgNodes = nodes.filter((n) => (n.wg || '(none)') === rxCorpusWg).slice().sort((a, b) => rxNumValue(a.id) - rxNumValue(b.id));
+    canvasEl.innerHTML = `
+      <button type="button" class="rx-edge" data-rxback="corpus">← Back to working groups</button>
+      <div class="rx-lanehead">${escapeHtml(rxCorpusWg)} · ${wgNodes.length} RFC${wgNodes.length === 1 ? '' : 's'}</div>
+      <div class="rx-tablewrap"><table class="rx-table"><thead><tr><th>Document</th><th>Title</th><th>Std level</th><th></th></tr></thead><tbody>${
+        wgNodes.map((n) => `<tr><td>${escapeHtml(n.id)}</td><td>${escapeHtml(n.title || '')}</td><td>${escapeHtml((n.std_level || '—').toUpperCase())}</td><td><button type="button" data-rxfocus="${escapeHtml(n.id)}">Focus →</button></td></tr>`).join('')
+      }</tbody></table></div>
+    `;
+  } else {
+    const counts = new Map();
+    nodes.forEach((n) => { const wg = n.wg || ''; if (wg) counts.set(wg, (counts.get(wg) || 0) + 1); });
+    const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const top = ranked.slice(0, 8);
+    const remaining = ranked.length - top.length;
+    canvasEl.innerHTML = `
+      <div class="rx-lanehead">Explore a working group</div>
+      <div class="rx-clusters">${top.map(([wg, count]) => `<button type="button" class="rx-cluster" data-rxwg="${escapeHtml(wg)}">${escapeHtml(wg.toUpperCase())}<span>${count} RFC${count === 1 ? '' : 's'}</span></button>`).join('')}</div>
+      <p class="rx-note">${remaining > 0 ? remaining + ' more working groups not shown here — ' : ''}Select a working group to see its RFCs, then focus on one to explore its full relationship map.</p>
+    `;
+  }
+  document.getElementById('poGraphInspector').innerHTML = `
+    <div class="po-eyebrow">Corpus overview</div>
+    <h2>${nodes.length.toLocaleString()} RFCs</h2>
+    <p class="rx-sub">${edges.length.toLocaleString()} real Obsoletes/Updates relationships, across every working group with at least one.</p>
+  `;
+}
+
+// -- Usage -- real /api/observability?days=N (org-wide, data-admin gated
+// server-side; a non-admin just sees the resulting {error} rendered
+// inline, same handling as every other gated fetch in this app). The
+// mockup's per-model filter has no real counterpart (this deployment has
+// one app, not per-model bucketed stats), so it's replaced by the date
+// range selector classic's own Usage tab already has; the mockup's "Model
+// calls" table becomes a real tool-call-frequency table since that's what
+// the backend actually tracks (MessageAgentThought rows), not per-call
+// token/cost line items. -------------------------------------------------
+function loadUsagePage() {
+  runUsage();
+  document.getElementById('poUsageRange').addEventListener('change', runUsage);
+}
+function formatCompactNumber(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+  return String(n);
+}
+function runUsage() {
+  const bodyEl = document.getElementById('poUsageBody');
+  const days = document.getElementById('poUsageRange').value;
+  bodyEl.innerHTML = '<p class="po-loading">Loading…</p>';
+  fetch(`${PRISM_PREFIX}/api/observability?days=${days}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    const totals = data.totals || {};
+    const daily = data.daily || [];
+    const toolUsage = data.tool_usage || [];
+    const maxCost = Math.max(0.01, ...daily.map((d) => d.cost));
+    bodyEl.innerHTML = `
+      <div class="pm-metrics">
+        <div class="pm-metric"><small>Total cost</small><strong>$${(totals.cost || 0).toFixed(2)}</strong><span>USD · last ${data.days || days} days</span></div>
+        <div class="pm-metric"><small>Turns</small><strong>${(totals.turns || 0).toLocaleString()}</strong><span>${(totals.sessions || 0).toLocaleString()} sessions · ${(totals.accounts || 0).toLocaleString()} accounts</span></div>
+        <div class="pm-metric"><small>Total tokens</small><strong>${formatCompactNumber(totals.tokens || 0)}</strong><span>avg latency ${(totals.avg_latency || 0).toFixed(1)}s · ${(totals.satisfaction_pct || 0).toFixed(0)}% 👍</span></div>
+      </div>
+      <div class="po-sectionhead"><h2>Daily spend</h2><small>USD · hover a bar for its amount</small></div>
+      <div class="pm-chart">${daily.length ? daily.map((d) => `
+        <div class="pm-barcolumn">
+          <button type="button" class="pm-bar" style="height:${Math.max(2, (d.cost / maxCost) * 110)}px" title="${escapeHtml(d.date)}: $${d.cost.toFixed(4)} · ${d.turns} turns"></button>
+          <small>${escapeHtml(d.date.slice(5))}</small>
+        </div>
+      `).join('') : '<p class="corpora-hint">No activity in this range.</p>'}</div>
+      <div class="po-sectionhead"><h2>Tool calls</h2><small>Frequency across the selected period</small></div>
+      <div class="pm-tablewrap"><table class="pm-table"><thead><tr><th>Tool</th><th>Calls</th></tr></thead><tbody>
+        ${toolUsage.length ? toolUsage.map((t) => `<tr><td>${escapeHtml(toolLabel(t.tool))}</td><td>${t.calls.toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="2" class="corpora-hint">No tool calls in this range.</td></tr>'}
+      </tbody></table></div>
+    `;
+  }).catch((err) => {
+    bodyEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load usage data.')}</div>`;
+  });
+}
+
+// -- Sources -- real /api/corpora/freshness (real Dify-dataset corpora +
+// locally-tracked-only sources, same merged list classic's Sources tab
+// shows), scoped to browse/sync/add -- classic's separate sparse/dense
+// (BM25/embedding) index-build controls are a deeper admin feature the
+// mockup doesn't represent either, so they're left to the classic page
+// (linked from the rail) rather than duplicated here. local-sync is used
+// for both adding a brand-new local source and refreshing an existing one
+// -- it's the same real backend action either way (draft+RFC+mail, all
+// idempotent), not two different mechanisms. -----------------------------
+function loadSourcesPage() {
+  fetchSources();
+}
+function setSourceQueueText(text) {
+  const queueEl = document.getElementById('poSourceQueue');
+  queueEl.hidden = false;
+  document.getElementById('poSourceQueueText').textContent = text;
+  queueEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+// Sync/build timestamps say WHAT happened but not WHEN -- ported from
+// classic's own formatRelativeTime so "synced 13d ago" reads the same way
+// here as it does there.
+function formatRelativeTime(unixSeconds) {
+  if (!unixSeconds) return null;
+  const diffSeconds = Math.max(0, Date.now() / 1000 - unixSeconds);
+  if (diffSeconds < 60) return 'just now';
+  const diffMinutes = Math.round(diffSeconds / 60);
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.round(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.round(diffHours / 24);
+  return `${diffDays}d ago`;
+}
+// Paged, filtered fetch -- confirmed live that pulling all ~45 registered
+// + local sources in one request took 1-2 minutes (each local-only entry
+// alone costs 2 live Datatracker calls just to resolve its own wg/rfc
+// number, before the per-entry mail/draft-relations lookups even start).
+// /api/corpora/freshness now takes page_size/offset/q/kind and only pays
+// that live-lookup cost for the page actually being shown -- fetchSources()
+// always means "reset to page 1 with the current filter" (initial load,
+// filter changes, and refreshes after a bulk action like a topic pull);
+// loadSourcesChunk() is the one that actually hits the network, appending
+// one page at a time via "Load more" rather than re-fetching everything.
+const SOURCE_PAGE_SIZE = 12;
+let sourceCorpora = [];
+let wgResourceState = {};
+let sourceOffset = 0;
+function fetchSources() {
+  sourceOffset = 0;
+  sourceCorpora = [];
+  wgResourceState = {};
+  document.getElementById('poSourcesList').innerHTML = '<p class="corpora-hint">Loading…</p>';
+  loadSourcesChunk();
+}
+function loadSourcesChunk() {
+  const listEl = document.getElementById('poSourcesList');
+  const q = document.getElementById('poSourceFilterText').value.trim();
+  const kind = document.getElementById('poSourceFilterKind').value;
+  const params = new URLSearchParams({ page_size: String(SOURCE_PAGE_SIZE), offset: String(sourceOffset) });
+  if (q) params.set('q', q);
+  if (kind !== 'all') params.set('kind', kind);
+  fetch(`${PRISM_PREFIX}/api/corpora/freshness?${params}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    const corpora = data.corpora || [];
+    const startIdx = sourceCorpora.length;
+    sourceCorpora = sourceCorpora.concat(corpora);
+    if (sourceOffset === 0) listEl.innerHTML = '';
+    const existingLoadMore = listEl.querySelector('.ps-loadmore');
+    if (existingLoadMore) existingLoadMore.remove();
+    // Wire listeners inside a detached fragment first, then move its
+    // children into the real list -- querying/wiring listEl directly
+    // would re-bind every earlier page's already-wired buttons too,
+    // firing their handlers twice on the next click.
+    const frag = document.createElement('div');
+    frag.innerHTML = corpora.map((c, i) => renderSourceGroup(c, startIdx + i)).join('');
+    wireSourceCardsIn(frag);
+    while (frag.firstChild) listEl.appendChild(frag.firstChild);
+    sourceOffset += corpora.length;
+    if (data.has_more) {
+      const remaining = (data.total || 0) - sourceOffset;
+      listEl.insertAdjacentHTML('beforeend', `<button type="button" class="ps-loadmore po-secondary">Load more (${remaining} remaining)</button>`);
+      listEl.querySelector('.ps-loadmore').addEventListener('click', (e) => {
+        e.target.disabled = true;
+        e.target.textContent = 'Loading…';
+        loadSourcesChunk();
+      });
+    }
+    if (!sourceCorpora.length) {
+      listEl.innerHTML = sourceOffset === corpora.length && !q && kind === 'all'
+        ? '<p class="corpora-hint">No sources yet -- use "+ Add source" above to add one.</p>'
+        : '<p class="corpora-hint">No sources match this filter.</p>';
+    }
+  }).catch((err) => {
+    listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
+  });
+}
+function wireSourceCardsIn(root) {
+  root.querySelectorAll('[data-sync-mail]').forEach((btn) => btn.addEventListener('click', () => runMailSync(btn)));
+  root.querySelectorAll('[data-download-rev]').forEach((btn) => btn.addEventListener('click', () => runDraftDownload(btn)));
+  root.querySelectorAll('[data-local-sync]').forEach((btn) => btn.addEventListener('click', () => runLocalSync(btn.dataset.localSync, btn)));
+  root.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
+  root.querySelectorAll('[data-local-index]').forEach((btn) => btn.addEventListener('click', () => runLocalIndex(btn)));
+  root.querySelectorAll('[data-local-embed]').forEach((btn) => btn.addEventListener('click', () => runLocalEmbed(btn)));
+  root.querySelectorAll('.ps-more').forEach((el) => {
+    el.addEventListener('toggle', () => {
+      const idx = Number(el.dataset.idx);
+      if (el.open && !wgResourceState[idx]) { wgResourceState[idx] = { loading: true }; loadWgResources(idx); }
+    });
+  });
+  root.querySelectorAll('.ps-onlyavailable').forEach((cb) => {
+    cb.addEventListener('change', () => renderWgResources(Number(cb.dataset.idx)));
+  });
+}
+// Refreshes exactly one already-loaded card in place (a single-entry
+// q= fetch, not a full re-page) after a mutating action -- re-running the
+// whole paged fetchSources() would reset the list back to page 1 and lose
+// however many "Load more" pages the caller had already pulled in.
+function refreshSingleSource(draftName) {
+  const idx = sourceCorpora.findIndex((c) => c.draft_name === draftName);
+  if (idx === -1) { fetchSources(); return; }
+  fetch(`${PRISM_PREFIX}/api/corpora/freshness?q=${encodeURIComponent(draftName)}&page_size=5`).then((r) => r.json()).then((data) => {
+    const updated = (data.corpora || []).find((c) => c.draft_name === draftName);
+    if (!updated) return;
+    sourceCorpora[idx] = updated;
+    const oldEl = document.querySelectorAll('.ps-source')[idx];
+    if (!oldEl) return;
+    const wasOpen = oldEl.open;
+    const frag = document.createElement('div');
+    frag.innerHTML = renderSourceGroup(updated, idx);
+    const newEl = frag.firstElementChild;
+    if (wasOpen) newEl.open = true;
+    wireSourceCardsIn(frag);
+    oldEl.replaceWith(newEl);
+  }).catch(() => {});
+}
+// Real per-source status pill -- "Indexed" only once both the sparse
+// (BM25) and dense (embeddings) indexes are actually built, "BM25
+// indexed" for the common in-between state, "Not indexed" (warn) for a
+// downloaded-but-unsearchable source, "Ready for research" for a real
+// Dify-dataset corpus (indexed through the existing Studio pipeline, not
+// this page's local-index routes at all).
+function sourceStatusPill(c) {
+  if (!c.is_local) return '<span class="po-pill">Ready for research</span>';
+  const idxStat = c.index_status || {};
+  const embStat = c.embedding_index_status || {};
+  if (idxStat.built && embStat.status === 'completed') return '<span class="po-pill">Indexed</span>';
+  if (idxStat.built) return '<span class="po-pill">BM25 indexed</span>';
+  return '<span class="po-pill po-warn">Not indexed</span>';
+}
+function renderSourceGroup(c, idx) {
+  const label = c.rfc_number ? `RFC ${escapeHtml(String(c.rfc_number))}` : escapeHtml(c.draft_name || 'Untitled source');
+  const subtitle = `${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''} &middot; ${c.is_local ? 'Local library' : 'Dify dataset'}`;
+  let bodyHtml;
+  if (c.is_local) {
+    const ls = c.local_status || {};
+    const mailMeta = c.wg ? `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}` : 'No WG for this draft';
+    const draftMeta = ls.revisions_downloaded
+      ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${escapeHtml(String(ls.latest_revision_downloaded || '?'))})${c.rfc_number ? (ls.rfc_downloaded ? ` &middot; RFC ${escapeHtml(String(c.rfc_number))} ✓` : ` &middot; RFC ${escapeHtml(String(c.rfc_number))} pending`) : ''}`
+      : 'No revisions downloaded yet';
+    // A local source downloads to disk but stays invisible to the agent's
+    // search_local_source tool until one of these is actually built --
+    // "download only" was never meant to mean "download and stop". Real
+    // same backend as classic's own local-index-table (POST local-index/
+    // local-embedding-index, GET .../status), reframed as a 3-stage
+    // content -> BM25 -> embeddings pipeline per the v2 mockup, not the
+    // disabled Extract-text/per-doctype variants that table also shows --
+    // those aren't functional in classic either.
+    const idxStat = c.index_status || {};
+    const embStat = c.embedding_index_status || { status: 'not_started' };
+    const embRunning = embStat.status === 'queued' || embStat.status === 'running';
+    const syncCaption = ls.last_synced_at ? `Synced ${formatRelativeTime(ls.last_synced_at)}` : 'Never synced';
+    const sparseCaption = idxStat.error ? idxStat.error : (idxStat.built ? `${idxStat.total_documents} passages indexed${idxStat.built_at ? ' &middot; built ' + formatRelativeTime(idxStat.built_at) : ''}` : 'Not built');
+    let denseCaption;
+    if (embRunning) denseCaption = escapeHtml(embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…'));
+    else if (embStat.status === 'error') denseCaption = escapeHtml(embStat.message || 'Failed');
+    else if (embStat.status === 'completed') denseCaption = `Built${embStat.updated_at ? ' ' + formatRelativeTime(embStat.updated_at) : ''}`;
+    else denseCaption = 'Not built';
+    const denseLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild' : 'Build');
+    bodyHtml = `
+      <div class="ps-meta">
+        <div>Email${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}<small>${escapeHtml(mailMeta)}</small></div>
+        <div>Drafts &amp; RFC<small>${draftMeta}</small>${c.rfc_number ? `<button type="button" class="po-linkbutton" style="margin-top:6px;" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}</div>
+      </div>
+      <div class="ps-label"><span>Source-wide operations</span><span>Each action includes both email and draft text.</span></div>
+      <div class="ps-pipeline">
+        <div class="ps-stage">
+          <span class="ps-number">01 / CONTENT</span>
+          <h3>Sync local copy</h3>
+          <p>Refresh the downloaded source material.</p>
+          <button type="button" class="po-secondary" data-local-sync="${escapeHtml(c.draft_name)}">${ls.last_synced_at ? 'Re-sync' : 'Sync'}</button>
+          <small>${escapeHtml(syncCaption)}</small>
+        </div>
+        <div class="ps-stage">
+          <span class="ps-number">02 / KEYWORD SEARCH</span>
+          <h3>Sparse index &middot; BM25</h3>
+          <p>Find exact terms and protocol identifiers.</p>
+          <button type="button" class="po-secondary" data-local-index="${escapeHtml(c.draft_name)}">${idxStat.built ? 'Rebuild' : 'Build'}</button>
+          <small>${sparseCaption}</small>
+        </div>
+        <div class="ps-stage">
+          <span class="ps-number">03 / SEMANTIC SEARCH</span>
+          <h3>Dense index &middot; embeddings</h3>
+          <p>Find related meaning beyond exact words.</p>
+          <button type="button" class="${embStat.status === 'completed' ? 'po-secondary' : 'po-primary'}" data-local-embed="${escapeHtml(c.draft_name)}" ${embRunning ? 'disabled' : ''}>${denseLabel}</button>
+          <small>${denseCaption}</small>
+        </div>
+      </div>
+      ${c.wg ? `
+      <details class="ps-more" data-idx="${idx}">
+        <summary>Additional working-group materials</summary>
+        <p class="ps-resources-intro">Download meeting and administrative resources by type. Text extraction isn't built yet, so their own BM25/embedding indexes stay unavailable -- same real boundary classic's page has.</p>
+        <div class="ps-resourcefilter">
+          <label><input type="checkbox" class="ps-onlyavailable" data-idx="${idx}" checked>Only show available materials</label>
+          <span class="ps-resourcecount" id="ps-rescount-${idx}"></span>
+        </div>
+        <div class="ps-resourcelist" id="pm-wgres-${idx}"><p class="po-loading">Checking agenda, minutes, slides, charter, …</p></div>
+      </details>` : ''}
+    `;
+  } else {
+    const ms = c.mail_status || {};
+    const mailValue = c.wg
+      ? (ms.error ? escapeHtml(ms.error) : `${ms.message_count != null ? ms.message_count.toLocaleString() : '?'} messages`)
+      : 'No WG for this draft';
+    const dr = c.draft_relations || {};
+    const draftValue = dr.error ? escapeHtml(dr.error) : (dr.latest_rev ? `Latest: rev ${escapeHtml(String(dr.latest_rev))}` : 'Unknown');
+    bodyHtml = `
+      <div class="ps-meta">
+        <div>Email${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}<small>${mailValue}</small></div>
+        <div>Drafts &amp; RFC<small>${draftValue}</small></div>
+      </div>
+      <p class="po-tiny">Registered Dify dataset -- keep its dataset status separate from local download and index status above.</p>
+      <div class="po-actions" style="margin-top:14px;">
+        ${c.wg ? `<button type="button" class="po-secondary" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}" data-draft="${escapeHtml(c.draft_name)}">Sync mail</button>` : ''}
+        ${c.rfc_number ? `<button type="button" class="po-secondary" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}
+        ${dr.latest_rev ? `<button type="button" class="po-secondary" data-download-rev="1" data-draft="${escapeHtml(c.draft_name)}" data-rev="${escapeHtml(String(dr.latest_rev))}">Download latest rev</button>` : ''}
+      </div>
+    `;
+  }
+  return `
+    <details class="ps-source" data-kind="${c.is_local ? 'local' : 'dataset'}">
+      <summary>
+        <span class="ps-source-title"><strong>${label}</strong><small>${subtitle}</small></span>
+        ${sourceStatusPill(c)}
+      </summary>
+      <div class="ps-body">${bodyHtml}</div>
+    </details>`;
+}
+function runLocalIndex(btn) {
+  const draftName = btn.dataset.localIndex;
+  btn.disabled = true;
+  btn.textContent = 'Indexing…';
+  setSourceQueueText(`${draftName}: building sparse (BM25) index…`);
+  fetch(`${PRISM_PREFIX}/api/corpora/local-index`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft_name: draftName }),
+  }).then(async (r) => {
+    if (!r.ok) {
+      const result = await r.json().catch(() => ({}));
+      setSourceQueueText(`${draftName}: ${result.error || 'sparse index failed.'}`);
+    } else {
+      setSourceQueueText(`${draftName}: sparse index built.`);
+    }
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: sparse index failed.`); refreshSingleSource(draftName); });
+}
+// The embedding build is fire-and-forget server-side (a Celery task, not a
+// blocking request) -- POST just returns the initial queued/running state,
+// so progress comes from polling the status route every 2s until it lands
+// on completed/error, same as classic's own startEmbedPollingIfNeeded.
+const activeEmbedPolls = new Set();
+function runLocalEmbed(btn) {
+  const draftName = btn.dataset.localEmbed;
+  btn.disabled = true;
+  btn.textContent = 'Building…';
+  setSourceQueueText(`${draftName}: starting embeddings build…`);
+  fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft_name: draftName }),
+  }).then((r) => r.json()).then((status) => {
+    setSourceQueueText(`${draftName}: ${status.message || status.status || 'embeddings build started.'}`);
+    pollEmbedStatus(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: couldn’t start embeddings build.`); refreshSingleSource(draftName); });
+}
+function pollEmbedStatus(draftName) {
+  if (activeEmbedPolls.has(draftName)) return;
+  activeEmbedPolls.add(draftName);
+  const poll = () => {
+    fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index/status?draft_name=${encodeURIComponent(draftName)}`).then((r) => r.json()).then((status) => {
+      if (status.status === 'queued' || status.status === 'running') {
+        setSourceQueueText(`${draftName}: ${status.message || status.status}…`);
+        setTimeout(poll, 2000);
+      } else {
+        activeEmbedPolls.delete(draftName);
+        setSourceQueueText(`${draftName}: embeddings ${status.status === 'completed' ? 'build complete.' : (status.message || 'build failed.')}`);
+        refreshSingleSource(draftName);
+      }
+    }).catch(() => { activeEmbedPolls.delete(draftName); });
+  };
+  poll();
+}
+function loadWgResources(idx) {
+  const listEl = document.getElementById(`pm-wgres-${idx}`);
+  const wg = sourceCorpora[idx].wg;
+  listEl.innerHTML = '<p class="po-loading">Checking agenda, minutes, slides, charter, …</p>';
+  fetch(`${PRISM_PREFIX}/api/sources/types`).then((r) => r.json()).then((typesData) => {
+    const types = typesData.types || [];
+    return Promise.all(types.map((t) =>
+      fetch(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(wg)}/${encodeURIComponent(t.key)}`)
+        .then((r) => r.json())
+        .then((data) => ({ ...t, ...data }))
+        .catch((err) => ({ ...t, error: String(err) }))
+    ));
+  }).then((resources) => {
+    wgResourceState[idx] = { loading: false, resources };
+    renderWgResources(idx);
+  }).catch((err) => {
+    listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load WG resources.')}</div>`;
+  });
+}
+// Per-type disclosure (ps-resource), each with a real Sync action and a
+// disabled Extract-text/Build-BM25/Build-embeddings group -- those three
+// aren't functional in classic's own table either (WG-resource downloads
+// are PDF/PPTX/etc., and nothing in this backend converts them to plain
+// text yet), so the honest move is a labeled disabled state, not silently
+// omitting them.
+function renderWgResources(idx) {
+  const listEl = document.getElementById(`pm-wgres-${idx}`);
+  const state = wgResourceState[idx];
+  if (!state || state.loading) return;
+  const resources = state.resources || [];
+  const onlyAvailableEl = document.querySelector(`.ps-onlyavailable[data-idx="${idx}"]`);
+  const onlyAvailable = onlyAvailableEl ? onlyAvailableEl.checked : true;
+  const availableCount = resources.filter((r) => (r.count || 0) > 0).length;
+  const countEl = document.getElementById(`ps-rescount-${idx}`);
+  if (countEl) countEl.textContent = `${availableCount} of ${resources.length} types`;
+  const visible = resources.filter((r) => !onlyAvailable || (r.count || 0) > 0 || r.error);
+  if (!visible.length) {
+    listEl.innerHTML = '<p class="corpora-hint">No materials match this filter.</p>';
+    return;
+  }
+  listEl.innerHTML = visible.map((r) => {
+    const available = (r.count || 0) > 0;
+    const meta = r.error
+      ? escapeHtml(r.error)
+      : available ? `${r.downloaded_count || 0} / ${r.count} downloaded` : (r.key === 'recording' ? 'External links only' : 'No materials found');
+    const syncDisabled = r.error || !available || r.key === 'recording';
+    const syncCaption = r.key === 'recording' ? 'Recording links are not downloaded.' : (r.downloaded_count ? `Synced ${r.last_synced_at ? formatRelativeTime(r.last_synced_at) : ''}` : 'Never synced');
+    return `
+      <details class="ps-resource" data-available="${available}">
+        <summary><strong>${escapeHtml(r.label)}</strong><span>${meta}</span></summary>
+        <div class="ps-resource-inside">
+          <div>
+            <button type="button" class="po-secondary" data-wgres-download="${idx}" data-type="${escapeHtml(r.key)}" ${syncDisabled ? 'disabled' : ''}>Sync</button>
+            <p>${syncCaption}</p>
+          </div>
+          <div>
+            <div class="ps-disabledgroup">
+              <button type="button" class="ps-disabled" disabled>Extract text</button>
+              <button type="button" class="ps-disabled" disabled>Build BM25</button>
+              <button type="button" class="ps-disabled" disabled>Build embeddings</button>
+            </div>
+            <p>Text extraction is not built yet. Both indexes depend on extracted text.</p>
+          </div>
+        </div>
+      </details>`;
+  }).join('');
+  listEl.querySelectorAll('[data-wgres-download]:not(:disabled)').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      runWgResourceDownload(Number(btn.dataset.wgresDownload), btn.dataset.type, btn);
+    });
+  });
+}
+function runWgResourceDownload(idx, docType, btn) {
+  const wg = sourceCorpora[idx].wg;
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  setSourceQueueText(`${wg}/${docType}: downloading…`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/sources/${encodeURIComponent(wg)}/${encodeURIComponent(docType)}/download`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      setSourceQueueText(`${wg}/${docType}: ${msg.message || 'downloading…'}`);
+    } else if (msg.type === 'result') {
+      source.close();
+      const ok = (msg.data.results || []).filter((r) => r.ok).length;
+      setSourceQueueText(`${wg}/${docType}: downloaded ${ok}/${(msg.data.results || []).length}.`);
+      delete wgResourceState[idx];
+      loadWgResources(idx);
+    } else if (msg.type === 'error') {
+      source.close();
+      setSourceQueueText(`${wg}/${docType}: ${msg.message}`);
+      btn.disabled = false;
+      btn.textContent = 'Sync';
+    }
+  };
+  source.onerror = () => {
+    source.close();
+    setSourceQueueText(`${wg}/${docType}: connection lost while downloading.`);
+    btn.disabled = false;
+    btn.textContent = 'Sync';
+  };
+}
+function runMailSync(btn) {
+  const wg = btn.dataset.wg;
+  const draftName = btn.dataset.draft;
+  btn.disabled = true;
+  btn.textContent = 'Syncing…';
+  fetch(`${PRISM_PREFIX}/api/corpora/mail-sync`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ list_name: wg }),
+  }).then((r) => r.json()).then((data) => {
+    setSourceQueueText(data.error ? `${wg}: ${data.error}` : `${wg}: mail sync triggered.`);
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${wg}: sync failed.`); refreshSingleSource(draftName); });
+}
+function runDraftDownload(btn) {
+  const draftName = btn.dataset.draft;
+  const rev = btn.dataset.rev;
+  btn.disabled = true;
+  btn.textContent = 'Downloading…';
+  fetch(`${PRISM_PREFIX}/api/corpora/draft-download`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ draft_name: draftName, revision: rev }),
+  }).then((r) => r.json()).then((data) => {
+    setSourceQueueText(data.error ? `${draftName}: ${data.error}` : `${draftName}-${rev}: downloaded.`);
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: download failed.`); refreshSingleSource(draftName); });
+}
+function runLocalSync(draftName, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
+  setSourceQueueText(`Syncing ${draftName}…`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/local-sync?draft_name=${encodeURIComponent(draftName)}`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      setSourceQueueText(msg.message || `Syncing ${draftName}…`);
+    } else if (msg.type === 'result') {
+      source.close();
+      setSourceQueueText(msg.data.error ? `${draftName}: ${msg.data.error}` : `${draftName}: sync complete.`);
+      refreshSingleSource(draftName);
+    } else if (msg.type === 'error') {
+      source.close();
+      setSourceQueueText(`${draftName}: ${msg.message}`);
+      refreshSingleSource(draftName);
+    }
+  };
+  source.onerror = () => { source.close(); setSourceQueueText(`${draftName}: connection lost while syncing.`); refreshSingleSource(draftName); };
+}
+
+// -- Filter bar -- now a real server-side query (q/kind on
+// /api/corpora/freshness) rather than hiding already-rendered cards,
+// since the whole point of paging is to never have the full library
+// loaded client-side to filter over in the first place.
+let sourceFilterDebounce = null;
+document.getElementById('poSourceFilterText').addEventListener('input', () => {
+  clearTimeout(sourceFilterDebounce);
+  sourceFilterDebounce = setTimeout(fetchSources, 300);
+});
+document.getElementById('poSourceFilterKind').addEventListener('change', fetchSources);
+
+// -- Add-source dialog -- a real <dialog> with two tabs, matching classic's
+// own modal-based flow (and the v2 mockup's) instead of the inline search
+// bar the first cut used. ---------------------------------------------
+const poSourceAddDialogEl = document.getElementById('poSourceAddDialog');
+document.getElementById('poSourceAddOpenBtn').addEventListener('click', () => poSourceAddDialogEl.showModal());
+document.getElementById('poSourceAddCloseBtn').addEventListener('click', () => poSourceAddDialogEl.close());
+poSourceAddDialogEl.querySelectorAll('[data-addmode]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    poSourceAddDialogEl.querySelectorAll('[data-addmode]').forEach((b) => b.setAttribute('aria-pressed', String(b === btn)));
+    document.getElementById('poSourceOneForm').hidden = btn.dataset.addmode !== 'one';
+    document.getElementById('poSourceTopicPanel').hidden = btn.dataset.addmode !== 'topic';
+  });
+});
+
+// The sidecar's suggestions search is picky about an "RFC " prefix --
+// "RFC 9114" (a natural way to type a lookup) returns zero results where
+// "9114" alone finds it, confirmed live. Stripping the prefix before
+// querying, same normalization matchDocuments() already applies to its
+// own bare-RFC-number matching elsewhere on this page.
+function normalizeSourceQuery(q) {
+  return q.replace(/^rfc\s*/i, '').trim() || q;
+}
+function resolveDraftNameFromRfcSuggestion(s) {
+  return s.draft_base_name || (s.draft_names && s.draft_names[0]) || s.doc_id || '';
+}
+
+// "Find one" tab -- typeahead fills an explicit, editable Draft name
+// field (same real UX classic's own Add-source modal has) rather than
+// resolving on submit against whatever was typed, since a real field the
+// user can see and correct beats a guess made at submit time.
+let sourceOneDebounce = null;
+const poSourceOneSearchEl = document.getElementById('poSourceOneSearch');
+const poSourceOneResultsEl = document.getElementById('poSourceOneResults');
+const poSourceDraftNameEl = document.getElementById('poSourceDraftName');
+poSourceOneSearchEl.addEventListener('input', () => {
+  clearTimeout(sourceOneDebounce);
+  const query = normalizeSourceQuery(poSourceOneSearchEl.value.trim());
+  if (!query) { poSourceOneResultsEl.hidden = true; return; }
+  sourceOneDebounce = setTimeout(() => {
+    fetch(`${PRISM_PREFIX}/api/corpora/rfc-suggestions?query=${encodeURIComponent(query)}`).then((r) => r.json()).then((data) => {
+      const suggestions = (data.suggestions || []).slice(0, 8);
+      if (!suggestions.length) { poSourceOneResultsEl.hidden = true; return; }
+      poSourceOneResultsEl.innerHTML = suggestions.map((s) => `
+        <button type="button" data-draft="${escapeHtml(resolveDraftNameFromRfcSuggestion(s))}" data-label="${escapeHtml((s.doc_id || '').toUpperCase())}${s.title ? ' — ' + escapeHtml(s.title) : ''}">
+          ${escapeHtml((s.doc_id || '').toUpperCase())}${s.title ? ' — ' + escapeHtml(s.title) : ''}<small>${escapeHtml(s.wg || s.stream || '')}</small>
+        </button>`).join('');
+      poSourceOneResultsEl.hidden = false;
+      poSourceOneResultsEl.querySelectorAll('button').forEach((b) => {
+        b.addEventListener('click', () => {
+          poSourceOneResultsEl.hidden = true;
+          poSourceDraftNameEl.value = b.dataset.draft;
+          poSourceOneSearchEl.value = b.dataset.label;
+        });
+      });
+    }).catch(() => {});
+  }, 300);
+});
+document.getElementById('poSourceOneForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const draftName = poSourceDraftNameEl.value.trim();
+  if (!draftName) return;
+  poSourceAddDialogEl.close();
+  runLocalSync(draftName, null);
+});
+
+// "Discover a topic" tab -- real /api/corpora/topic-discover (BM25 +
+// semantic over the whole RFC corpus, plus best-effort roadmap/family
+// detection) and /api/corpora/topic-pull (each selected RFC synced +
+// indexed), not the mockup's own fabricated illustrative family. -------
+document.getElementById('poSourceTopicForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const topic = document.getElementById('poSourceTopicInput').value.trim();
+  if (!topic) return;
+  const resultsEl = document.getElementById('poSourceTopicResults');
+  resultsEl.hidden = false;
+  resultsEl.innerHTML = '<p class="po-loading">Searching the RFC corpus…</p>';
+  fetch(`${PRISM_PREFIX}/api/corpora/topic-discover?query=${encodeURIComponent(topic)}`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    renderTopicResults(data);
+  }).catch((err) => {
+    resultsEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Topic search failed.')}</div>`;
+  });
+});
+function topicResultRow(rfc, title, role, alreadyLocal) {
+  return `<label class="ps-topicresult">
+    <input type="checkbox" class="ps-topiccheck" value="${escapeHtml(rfc)}" ${alreadyLocal ? 'disabled checked' : ''}>
+    <span>RFC ${escapeHtml(rfc)}${title ? ' &middot; ' + escapeHtml(title) : ''}${alreadyLocal ? ' <em>(already added)</em>' : ''}<small>${escapeHtml(role || '')}</small></span>
+  </label>`;
+}
+function renderTopicResults(data) {
+  const resultsEl = document.getElementById('poSourceTopicResults');
+  const rows = [];
+  if (data.roadmap) {
+    rows.push(`<div class="ps-miniheading">${escapeHtml(data.roadmap.title || ('RFC ' + data.roadmap.rfc))} family</div>`);
+    data.roadmap.family.forEach((m) => rows.push(topicResultRow(m.rfc, m.title, m.role, m.already_local)));
+  }
+  if (data.other && data.other.length) {
+    if (data.roadmap) rows.push('<div class="ps-miniheading">Other matches</div>');
+    data.other.slice(0, 15).forEach((m) => rows.push(topicResultRow(m.rfc, m.title, null, m.already_local)));
+  }
+  if (!rows.length) {
+    resultsEl.innerHTML = '<p class="corpora-hint">No matching RFCs found for this topic.</p>';
+    return;
+  }
+  resultsEl.innerHTML = rows.join('') + `
+    <div class="ps-dialogfoot">
+      <label><input type="checkbox" class="ps-selectall">Select all</label>
+      <button type="button" class="po-primary ps-pull" disabled>Pull selected (0)</button>
+    </div>`;
+  wireTopicSelection();
+}
+function wireTopicSelection() {
+  const resultsEl = document.getElementById('poSourceTopicResults');
+  const checks = () => [...resultsEl.querySelectorAll('.ps-topiccheck:not(:disabled)')];
+  const update = () => {
+    const selected = checks().filter((c) => c.checked);
+    const pullBtn = resultsEl.querySelector('.ps-pull');
+    pullBtn.disabled = selected.length === 0;
+    pullBtn.textContent = `Pull selected (${selected.length})`;
+    const all = resultsEl.querySelector('.ps-selectall');
+    all.checked = checks().length > 0 && selected.length === checks().length;
+    all.indeterminate = selected.length > 0 && selected.length < checks().length;
+  };
+  checks().forEach((c) => c.addEventListener('change', update));
+  resultsEl.querySelector('.ps-selectall').addEventListener('change', (e) => {
+    checks().forEach((c) => { c.checked = e.target.checked; });
+    update();
+  });
+  resultsEl.querySelector('.ps-pull').addEventListener('click', () => {
+    const selected = checks().filter((c) => c.checked).map((c) => c.value);
+    if (!selected.length) return;
+    poSourceAddDialogEl.close();
+    runTopicPull(selected);
+  });
+  update();
+}
+function runTopicPull(rfcNumbers) {
+  setSourceQueueText(`Pulling ${rfcNumbers.length} RFC${rfcNumbers.length === 1 ? '' : 's'}…`);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/topic-pull?rfc_numbers=${encodeURIComponent(rfcNumbers.join(','))}`);
+  source.onmessage = (ev) => {
+    const msg = JSON.parse(ev.data);
+    if (msg.type === 'progress') {
+      setSourceQueueText(msg.message || 'Pulling…');
+    } else if (msg.type === 'result') {
+      source.close();
+      const results = msg.data.results || [];
+      const ok = results.filter((r) => r.ok).length;
+      setSourceQueueText(`Pulled ${ok}/${results.length}.`);
+      fetchSources();
+    } else if (msg.type === 'error') {
+      source.close();
+      setSourceQueueText(msg.message || 'Pull failed.');
+      fetchSources();
+    }
+  };
+  source.onerror = () => { source.close(); setSourceQueueText('Connection lost while pulling.'); fetchSources(); };
+}
+// Reset both tabs' transient state whenever the dialog closes, so
+// reopening it never shows a stale search or a previous topic's results.
+poSourceAddDialogEl.addEventListener('close', () => {
+  poSourceOneSearchEl.value = '';
+  poSourceDraftNameEl.value = '';
+  poSourceOneResultsEl.hidden = true;
+  document.getElementById('poSourceTopicInput').value = '';
+  document.getElementById('poSourceTopicResults').hidden = true;
+});
+</script>
+</body>
+</html>

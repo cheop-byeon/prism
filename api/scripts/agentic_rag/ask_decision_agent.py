@@ -271,11 +271,13 @@ _MAX_ITERATIONS = 10
 _DEFAULT_MODEL_PROVIDER = "langgenius/openrouter/openrouter"
 _DEFAULT_MODEL_NAME = "google/gemini-2.5-flash"
 
-# Deep Dive tab: a genuinely more thorough pass, not just a different render
-# of the same events -- ask() takes both as optional overrides (see its
-# docstring), so the Ask/Investigate tabs' behavior is completely unaffected.
-_DEEP_DIVE_MAX_ITERATIONS = 20
-_DEEP_DIVE_ADDENDUM = (
+# The single Research entry point: one genuinely thorough pass that decides
+# its own scope, replacing the old Deep Dive/Panorama split -- ask() takes
+# both as optional overrides (see its docstring), so a direct ask() call
+# (eval/battery scripts, the old Ask/Investigate baseline) that omits them
+# is completely unaffected.
+_RESEARCH_MAX_ITERATIONS = 20
+_RESEARCH_ADDENDUM = (
     "Go deeper than usual on this question: don't settle for the first search "
     "result. If evidence looks thin, ambiguous, or contradictory, try at "
     "least one differently-phrased search before concluding there's nothing "
@@ -284,19 +286,11 @@ _DEEP_DIVE_ADDENDUM = (
     "evolution dataset's diff alone, and use diff_ietf_draft_revisions as an "
     "independent second opinion on a change that matters. Prioritize "
     "thoroughness over speed -- more tool calls are fine if they add real "
-    "evidence, not just repetition."
-)
-
-# Panorama tab: a third tier, not a modification of Deep Dive -- Deep Dive
-# stays exactly as it was (verify-one-RFC-deeply), tested and working;
-# Panorama is untested new ground for the opposite direction (find and
-# connect several RFCs), kept as a separate endpoint/addendum specifically
-# so it can be iterated on and even get it wrong without touching Deep
-# Dive's already-working behavior.
-_PANORAMA_MAX_ITERATIONS = 20
-_PANORAMA_ADDENDUM = (
-    "This question is about the WIDER RFC landscape, not just one draft or RFC's own history. "
-    "Proactively use get_rfc_relations, find_related_rfc_family, and search_rfc_corpus_bm25 to "
+    "evidence, not just repetition.\n\n"
+    "Early on, decide for yourself whether this question is scoped to one draft or RFC's own "
+    "history, or whether it's actually about the WIDER RFC landscape -- and proceed accordingly; "
+    "don't assume it's narrow just because it names one draft. When it needs the wider landscape, "
+    "proactively use get_rfc_relations, find_related_rfc_family, and search_rfc_corpus_bm25 to "
     "find other RFCs connected to the one in question -- structurally (obsoletes/updates), by "
     "citation (find_related_rfc_family), and by topic (search_rfc_corpus_bm25, which takes an RFC "
     "number directly as its query and searches using that RFC's own title+abstract). "
@@ -317,8 +311,8 @@ _PANORAMA_ADDENDUM = (
     "thread. So if the central RFCs you found span more than one WG (each add_local_source/"
     "list_available_ietf_corpora result names the WG), pull and search at least one representative "
     "draft from EACH distinct WG before concluding the discussion was narrow -- stopping at the first "
-    "WG that returns a hit, when the question is genuinely cross-WG, understates the very breadth this "
-    "tier exists to find."
+    "WG that returns a hit, when the question is genuinely cross-WG, understates the breadth a "
+    "wide-scope question actually needs."
 )
 
 _ARCHIVE_BASE = "https://www.ietf.org/archive/id/"
@@ -858,18 +852,36 @@ def decision_thread(
         if on_event:
             on_event({"stage": stage, "message": message})
 
+    # _list_available_corpora() only covers drafts registered as a real Dify
+    # dataset (an evolution_dataset_id to query DocumentSegment rows from) --
+    # a locally-downloaded-only source (see IetfImportService.
+    # register_local_source, and the Sources page's own "Local library" vs
+    # "Dify dataset" distinction) has no such table, so it can never resolve
+    # here no matter how the hint is spelled. Both ValueErrors below say so
+    # explicitly rather than just naming the query/hint, since "no known
+    # draft" reads as a bug report otherwise -- confirmed live this is
+    # genuinely confusing without the reason spelled out.
     _, catalog = _list_available_corpora()
     if draft_hint and draft_hint.strip():
         _emit("resolving", f"Resolving draft {draft_hint!r}…")
         resolved = _resolve_draft_hint(draft_hint, catalog)
         if not resolved:
-            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none found)"
-            raise ValueError(f"{draft_hint!r} did not match exactly one known draft. Known drafts: {known}")
+            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
+            raise ValueError(
+                f"{draft_hint!r} did not match exactly one draft registered as a Dify dataset. "
+                f"Track a Decision only searches drafts imported that way, not locally-downloaded-only "
+                f"sources -- see the Sources page for which is which. Registered drafts: {known}"
+            )
     else:
         _emit("resolving", f"No draft given -- searching every known draft for {query!r}…")
         matching_drafts = _drafts_with_matches(query, catalog)
         if not matching_drafts:
-            raise ValueError(f"No known draft has any revision mentioning {query!r}.")
+            known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
+            raise ValueError(
+                f"No draft registered as a Dify dataset has any revision mentioning {query!r}. "
+                f"Track a Decision only searches drafts imported that way, not locally-downloaded-only "
+                f"sources -- see the Sources page for which is which. Registered drafts: {known}"
+            )
         if len(matching_drafts) > 1:
             raise ValueError(
                 f"{query!r} matches more than one draft ({', '.join(matching_drafts)}) -- pick one specific draft."
@@ -1054,10 +1066,14 @@ def _retrieve_documents(dataset, query: str, top_k: int) -> list:
     )
 
 
-def _format_hits(hits: list[str]) -> str:
+def _format_hits(hits: list[str], start: int = 1) -> str:
+    """start lets a caller keep citation numbers globally unique across
+    multiple search calls in the same ask() run (pass len(evidence-so-far)
+    + 1) -- defaults to 1 so every existing caller/test is unaffected.
+    """
     if not hits:
         return "(no results)"
-    return "\n\n".join(f"[{i}] {hit}" for i, hit in enumerate(hits, start=1))
+    return "\n\n".join(f"[{i}] {hit}" for i, hit in enumerate(hits, start=start))
 
 
 _EVOLUTION_HEADER_RE = re.compile(r"^ietf-evolution draft:(\S+) from:(\S+) to:(\S+)")
@@ -1082,7 +1098,7 @@ def _iddiff_page_url(draft_name: str, from_rev: str, to_rev: str) -> str:
     return f"{_IDDIFF_TOOL_BASE}?{urlencode(params)}"
 
 
-def _format_evolution_hits(hits: list[str]) -> tuple[str, list[tuple[str, str, str, str]]]:
+def _format_evolution_hits(hits: list[str], start: int = 1) -> tuple[str, list[tuple[str, str, str, str]]]:
     """Like _format_hits, but appends a cheap, always-available "Live diff"
     citation URL to each hit -- parsed straight from the hit's own
     self-describing header (draft:X from:A to:B), zero extra network calls.
@@ -1096,12 +1112,14 @@ def _format_evolution_hits(hits: list[str]) -> tuple[str, list[tuple[str, str, s
     than blindly citing rank [1] (confirmed necessary: a real run cited the
     correct revision pair inline in its own text while the top-ranked
     evolution hit for that query was a *different*, less relevant pair).
+
+    start: see _format_hits -- same global-numbering purpose.
     """
     if not hits:
         return "(no results)", []
     blocks = []
     citations: list[tuple[str, str, str, str]] = []
-    for i, hit in enumerate(hits, start=1):
+    for i, hit in enumerate(hits, start=start):
         match = _EVOLUTION_HEADER_RE.match(hit)
         if match:
             draft_name, from_rev, to_rev = match.groups()
@@ -1166,6 +1184,114 @@ def _fetch_rfc_text(rfc_number: str, query: str | None) -> str:
     if text is None:
         return f"Could not fetch {url} -- check the RFC number."
     return _filter_primary_source_text(text, query, source_label=f"RFC{number}")
+
+
+def _resolve_latest_draft_revision(draft_name: str) -> str | None:
+    """Live lookup of a draft's current revision number ("09") via the same
+    Datatracker doc-record endpoint _resolve_wg_for_draft already uses --
+    its `rev` field is always the latest, unlike the evolution dataset
+    (which only has whichever revisions happened to get indexed). Returns
+    None on any lookup failure."""
+    import httpx
+
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            resp = client.get(f"{_DATATRACKER_BASE}/api/v1/doc/document/{draft_name}/", params={"format": "json"})
+            if resp.status_code != 200:
+                return None
+            return resp.json().get("rev")
+    except httpx.HTTPError:
+        return None
+
+
+# Matches a flush-left "5.1.  Connection ID" style heading line -- IETF
+# plaintext convention indents body text (3 spaces) but never section
+# headings, so requiring no leading whitespace plus the numbered-dot
+# prefix is enough to tell a heading from a normal line without a real
+# document-structure parser. Two+ spaces before the title (also
+# convention) avoids matching a body sentence that happens to start with
+# "5.1 was...".
+_SECTION_HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)[ \t]{2,}([A-Z][^\n]{0,78})[ \t]*$", re.MULTILINE)
+_DOCUMENT_SECTION_MAX_CHARS = 4000
+
+
+def _cap_section_text(text: str) -> tuple[str, bool]:
+    """(possibly-truncated text, was it truncated) -- explicit about a cap
+    having been hit, matching the honesty convention _filter_primary_source_text
+    already uses elsewhere, rather than silently handing back a cut-off
+    section with no indication anything was left out."""
+    if len(text) <= _DOCUMENT_SECTION_MAX_CHARS:
+        return text, False
+    return text[:_DOCUMENT_SECTION_MAX_CHARS], True
+
+
+def _segment_document_text(text: str) -> list[dict]:
+    """Split raw RFC/draft plaintext into {number, title, text, truncated}
+    sections on its own numbered headings. Falls back to one whole-document
+    section (no number/title) if nothing matches -- an unusual format, not
+    an error -- rather than returning nothing for a real document."""
+    matches = list(_SECTION_HEADING_RE.finditer(text))
+    if not matches:
+        capped, truncated = _cap_section_text(text)
+        return [{"number": "", "title": "Full text", "text": capped, "truncated": truncated}]
+
+    sections: list[dict] = []
+    for i, m in enumerate(matches):
+        body_start = m.end()
+        body_end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[body_start:body_end].strip()
+        if not body:
+            continue
+        capped, truncated = _cap_section_text(body)
+        sections.append(
+            {
+                "number": m.group(1).rstrip("."),
+                "title": m.group(2).strip(),
+                "text": capped,
+                "truncated": truncated,
+            }
+        )
+    if sections:
+        return sections
+    capped, truncated = _cap_section_text(text)
+    return [{"number": "", "title": "Full text", "text": capped, "truncated": truncated}]
+
+
+def resolve_document_text(hint: str) -> dict | None:
+    """The Documents page's one real lookup: given an RFC number, a draft
+    name, or a WG/topic hint, resolve it to a real document (reusing the
+    same catalog + _resolve_draft_hint every other draft-hint resolution
+    in this file already uses) and return its full text, segmented into
+    navigable sections. Returns None if the hint can't be resolved to
+    anything, or the resolved document's text can't be fetched.
+    """
+    bare_rfc = re.sub(r"^rfc\s*", "", hint.strip(), flags=re.IGNORECASE)
+    if bare_rfc.isdigit():
+        text = _http_get_text(f"{_RFC_EDITOR_BASE}rfc{bare_rfc}.txt")
+        if text is None:
+            return None
+        return {
+            "doc_id": f"RFC {bare_rfc}",
+            "title": f"RFC {bare_rfc}",
+            "sections": _segment_document_text(text),
+        }
+
+    _, catalog = _list_available_corpora()
+    entry = _resolve_draft_hint(hint, catalog)
+    if entry is None:
+        return None
+    draft_name = entry["draft_name"]
+    revision = _resolve_latest_draft_revision(draft_name)
+    if revision is None:
+        return None
+    text = _http_get_text(f"{_ARCHIVE_BASE}{draft_name}-{revision}.txt")
+    if text is None:
+        return None
+    return {
+        "doc_id": draft_name,
+        "title": f"{draft_name} (rev {revision})" + (f", RFC {entry['rfc_number']}" if entry.get("rfc_number") else ""),
+        "sections": _segment_document_text(text),
+    }
 
 
 # Where the Sources tab's "Add sources" downloads land (services/ietf_import_service.py
@@ -1603,6 +1729,26 @@ def _verify_answer(
     return content if isinstance(content, str) else str(content)
 
 
+# Matches verify_skill.md's "CLAIM [N]: stated|inferred|unresolved" line
+# convention -- same regex-over-a-text-convention approach as
+# _extract_message_links elsewhere in this file, not a new architectural
+# pattern. There's no structured-output mode in play here, just a line
+# format the verifier is asked to follow.
+_CLAIM_LABEL_RE = re.compile(r"^CLAIM \[(\d+)\]:\s*(stated|inferred|unresolved)\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def _parse_claim_labels(verify_response: str) -> dict[int, str]:
+    """Extracts verify_answer's per-citation classification into
+    {citation_number: status}. A citation the verifier didn't emit a CLAIM
+    line for at all is simply absent from this dict -- the caller (ask())
+    defaults an unclassified citation to "unresolved" rather than this
+    function guessing, since failing toward under-claiming confidence is
+    the whole point of having three named states instead of a numeric
+    score.
+    """
+    return {int(n): status.lower() for n, status in _CLAIM_LABEL_RE.findall(verify_response)}
+
+
 def _tool(name: str, description: str, properties: dict, required: list[str]):
     from dify_graph.model_runtime.entities import PromptMessageTool
 
@@ -2003,6 +2149,8 @@ def ask(
     usage: list[dict] | None = None,
     cancel_event=None,
     model_tenant_id: str | None = None,
+    claim_labels: dict[int, str] | None = None,
+    evidence: list[dict] | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -2060,6 +2208,28 @@ def ask(
     nothing bespoke), that's what gets used, billed to their own key.
     None (the default, every existing caller) leaves model resolution
     exactly as before, against the dataset's own tenant.
+
+    claim_labels: optional out-param dict (same pattern as `trace`/`usage`)
+    -- populated with {citation_number: "stated"|"inferred"|"unresolved"},
+    parsed from verify_answer's own per-citation audit (see
+    _parse_claim_labels/verify_skill.md), for a caller that wants to show
+    each [N] citation's evidence strength rather than a bare bracket. A
+    citation verify_answer never classified is simply absent here -- the
+    caller should treat a missing entry the same as "unresolved" (fail
+    toward under-claiming confidence, not over-claiming it). None (the
+    default) skips this entirely; every existing caller is unaffected.
+
+    evidence: optional out-param list of {"text": str, "kind": "mail"|
+    "evolution"} (same pattern as `trace`/`usage`) -- populated with every
+    mailarchive/evolution search hit actually seen this call, un-truncated,
+    in the same globally-unique numbering the model itself cites (so entry
+    N-1 is what citation [N] in the answer refers to) -- for a caller that
+    wants to show a citation's real source text, not just trace's own
+    400-char observation_preview. Only these two tools' results are ever
+    numbered at all (every other tool's output is
+    unnumbered text the model can quote but never bracket-cite), so this is
+    not the same list as everything ask() retrieved overall. None (the
+    default) skips this entirely; every existing caller is unaffected.
     """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import (
@@ -2194,6 +2364,26 @@ def ask(
     evidence_log: list[str] = []  # every dataset/fetch observation, fed to verify_answer
     evolution_citations: list[tuple[str, str, str, str]] = []  # (header, from_rev, to_rev, url), every hit ever seen
     usage_log: list = []  # every LLMUsage seen this call (main loop + any verify_answer), summarized in _finish
+    # Reflects whichever verify_answer call was most recent when the loop
+    # exits -- if the model revises its draft again after that call without
+    # a further verify_answer pass (the safety net only guarantees at least
+    # one, not one on every subsequent edit), these labels can trail the
+    # exact final wording slightly. Citation numbers themselves stay valid
+    # regardless (numbered_evidence below is append-only, never renumbered),
+    # so this already-accepted gap in the verify-then-revise design is minor
+    # here.
+    last_verify_response = ""
+    # Flat, one-entry-per-hit list backing the [N] citations the model
+    # actually writes in its answer -- NOT the same as evidence_log above,
+    # which holds one entry per TOOL CALL (each internally containing
+    # possibly several hits) for verify_answer's own content-based fact-
+    # checking, which never needed numeric alignment with the answer's own
+    # citations. Only mailarchive/evolution search hits are ever numbered at
+    # all (see the shared dispatch branch below) -- every other tool
+    # (fetch_draft_text, search_wg_minutes, get_iesg_ballot_comments, ...)
+    # returns unnumbered text the model can quote but never bracket-cite, so
+    # there is nothing to track here for those.
+    numbered_evidence: list[dict] = []
 
     def _mentions_revision_pair(text: str, from_rev: str, to_rev: str) -> bool:
         def mentions(rev: str) -> bool:
@@ -2252,6 +2442,10 @@ def ask(
         final = _finalize_answer(content)
         if usage is not None:
             usage.append(_summarize_usage(usage_log))
+        if claim_labels is not None:
+            claim_labels.update(_parse_claim_labels(last_verify_response))
+        if evidence is not None:
+            evidence.extend(numbered_evidence)
         return final
 
     def _run_tool_call(tool_name: str, args: dict, iteration: int, forced: bool = False) -> str:
@@ -2308,6 +2502,7 @@ def ask(
         # ruff's FURB154 wants these merged, which would violate E501 instead.
         nonlocal mailarchive_called, last_evolution_call, verify_called, discovery_called  # noqa: FURB154
         nonlocal evolution_dataset_id_candidate, mailarchive_dataset_id_candidate
+        nonlocal last_verify_response
 
         if tool_name == discovery_tool_name:
             discovery_called = True
@@ -2340,15 +2535,22 @@ def ask(
                     file=sys.stderr,
                 )
             hits = _retrieve(dataset, refined_query, top_k=top_k)
+            # Global, ever-increasing start rather than each call restarting
+            # at 1 -- otherwise "[1]" from this search and "[1]" from an
+            # earlier one would both appear in the model's own answer text
+            # meaning two different things, with nothing to tell them apart.
+            citation_start = len(numbered_evidence) + 1
             if is_mailarchive:
-                observation = _format_hits(hits)
+                observation = _format_hits(hits, start=citation_start)
                 mailarchive_called = True
                 mailarchive_dataset_id_candidate = dataset_id
             else:
-                observation, citations = _format_evolution_hits(hits)
+                observation, citations = _format_evolution_hits(hits, start=citation_start)
                 evolution_citations.extend(citations)
                 last_evolution_call = (refined_query, observation)
                 evolution_dataset_id_candidate = dataset_id
+            kind = "mail" if is_mailarchive else "evolution"
+            numbered_evidence.extend({"text": h, "kind": kind} for h in hits)
             evidence_log.append(observation)
             return observation
 
@@ -2409,7 +2611,8 @@ def ask(
             if verbose:
                 print(f"[iter {iteration}] {tool_name} draft_answer_len={len(draft_answer)}", file=sys.stderr)
             verify_called = True
-            return _verify_answer(draft_answer, evidence_log, model_instance, usage_sink=usage_log)
+            last_verify_response = _verify_answer(draft_answer, evidence_log, model_instance, usage_sink=usage_log)
+            return last_verify_response
 
         if tool_name == minutes_tool_name:
             wg = args.get("wg", "")

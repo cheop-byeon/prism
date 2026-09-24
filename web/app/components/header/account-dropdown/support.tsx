@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next'
 import { DropdownMenuGroup, DropdownMenuItem, DropdownMenuLinkItem, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger } from '@/app/components/base/ui/dropdown-menu'
 import { toggleZendeskWindow } from '@/app/components/base/zendesk/utils'
 import { Plan } from '@/app/components/billing/type'
-import { SUPPORT_EMAIL_ADDRESS, ZENDESK_WIDGET_KEY } from '@/config'
+import { PRISM_CLASSIC_URL, PRISM_SPECTRUM_URL, SUPPORT_EMAIL_ADDRESS, ZENDESK_WIDGET_KEY } from '@/config'
 import { useAppContext } from '@/context/app-context'
 import { useProviderContext } from '@/context/provider-context'
 import { mailToSupport } from '../utils/util'
@@ -84,6 +84,39 @@ export default function Support({ closeAccountDropdown }: SupportProps) {
               trailing={<ExternalLinkIndicator />}
             />
           </DropdownMenuLinkItem>
+          {/* This deployment's own Prism IETF research tool -- unset (hidden)
+              unless NEXT_PUBLIC_PRISM_CLASSIC_URL/_SPECTRUM_URL are
+              configured, so this never appears for any other Dify
+              deployment. Not run through t() since it's a plain,
+              deployment-specific label, not a real Dify product string. */}
+          {PRISM_CLASSIC_URL && (
+            <DropdownMenuLinkItem
+              className="justify-between"
+              href={PRISM_CLASSIC_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <MenuItemContent
+                iconClassName="i-ri-flask-line"
+                label="Prism (Classic)"
+                trailing={<ExternalLinkIndicator />}
+              />
+            </DropdownMenuLinkItem>
+          )}
+          {PRISM_SPECTRUM_URL && (
+            <DropdownMenuLinkItem
+              className="justify-between"
+              href={PRISM_SPECTRUM_URL}
+              rel="noopener noreferrer"
+              target="_blank"
+            >
+              <MenuItemContent
+                iconClassName="i-ri-flask-line"
+                label="Prism (Spectrum)"
+                trailing={<ExternalLinkIndicator />}
+              />
+            </DropdownMenuLinkItem>
+          )}
         </DropdownMenuGroup>
       </DropdownMenuSubContent>
     </DropdownMenuSub>

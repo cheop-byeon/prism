@@ -62,14 +62,14 @@ from libs.helper import RateLimiter
 # this change doesn't touch at all.
 _ACTIVE_CANCEL_EVENTS: dict[str, threading.Event] = {}
 
-# Deep Dive/Panorama are the expensive tiers -- multi-iteration agent loops,
-# each iteration a real LLM call -- unlike Ask/Investigate's single-pass
-# budget. Reuses Dify's own generic Redis sliding-window limiter (already
-# used for things like password-reset throttling) rather than hand-rolling
-# one; keyed per-account now that these routes require real login. 20/hour
-# is a starting guess for a small-team internal tool, not a measured number.
-_DEEP_DIVE_RATE_LIMITER = RateLimiter(prefix="prism_deepdive", max_attempts=20, time_window=3600)
-_PANORAMA_RATE_LIMITER = RateLimiter(prefix="prism_panorama", max_attempts=20, time_window=3600)
+# Research is the single expensive path now -- a multi-iteration agent loop,
+# each iteration a real LLM call, always at the old Deep Dive/Panorama
+# budget (there's no cheaper tier left to fall back to). Reuses Dify's own
+# generic Redis sliding-window limiter (already used for things like
+# password-reset throttling) rather than hand-rolling one; keyed per-account
+# now that this route requires real login. 20/hour is a starting guess for a
+# small-team internal tool, not a measured number.
+_RESEARCH_RATE_LIMITER = RateLimiter(prefix="prism_research", max_attempts=20, time_window=3600)
 
 # Purely a visual grouping -- unlike the old uniform "custom" badge, this
 # actually varies per tool. Descriptions themselves come from
@@ -302,6 +302,15 @@ def _tool_info() -> list[dict]:
 
 _PAGE_HTML = (Path(__file__).parent / "serve_ui_template.html").read_text(encoding="utf-8")
 _LOGIN_PAGE_TEMPLATE = (Path(__file__).parent / "login_template.html").read_text(encoding="utf-8")
+# A separate, from-scratch page following the prism-spectrum mockup's own
+# design system (po-shell/po-rail/po-viewtabs, its own --po-* palette) --
+# deliberately not a variant of _PAGE_HTML, so the two never mix mid-
+# migration (see commit reverting the earlier in-place attempt). Served on
+# its own port (_SPECTRUM_PORT below) rather than a second route on 8765,
+# so it's a genuinely separate page to open side by side, not a mode
+# switch inside the existing one.
+_SPECTRUM_PAGE_HTML = (Path(__file__).parent / "serve_ui_spectrum_template.html").read_text(encoding="utf-8")
+_SPECTRUM_PORT = 8766
 # Resized/re-encoded from the original (1122x1402, 1.7MB) down to ~95KB --
 # this loads on every visit to the login page, unauthenticated, so size
 # matters here in a way it doesn't for the rest of this app.
@@ -388,6 +397,26 @@ def _render_index_page(account) -> str:
     initial = (account.email or "?")[0].upper()
     return (
         _PAGE_HTML.replace("__API_BASE__", api_base)
+        .replace("__CONSOLE_WEB_URL__", console_web_url)
+        .replace("__ACCOUNT_EMAIL__", account.email)
+        .replace("__ACCOUNT_INITIAL__", initial)
+        .replace("__PRISM_URL_PREFIX__", _URL_PREFIX)
+    )
+
+
+def _render_spectrum_page(account) -> str:
+    """Same placeholder-fill as _render_index_page, against
+    _SPECTRUM_PAGE_HTML instead -- kept as a separate function (not a
+    parameter on _render_index_page) since the two pages' placeholder needs
+    are expected to diverge as the spectrum page grows its own account/nav
+    chrome."""
+    from configs import dify_config
+
+    api_base = dify_config.CONSOLE_API_URL or "http://localhost:5001"
+    console_web_url = dify_config.CONSOLE_WEB_URL or "http://localhost:3000"
+    initial = (account.email or "?")[0].upper()
+    return (
+        _SPECTRUM_PAGE_HTML.replace("__API_BASE__", api_base)
         .replace("__CONSOLE_WEB_URL__", console_web_url)
         .replace("__ACCOUNT_EMAIL__", account.email)
         .replace("__ACCOUNT_INITIAL__", initial)
@@ -608,6 +637,12 @@ def main() -> None:
 
     @app.route(f"{_URL_PREFIX}/", methods=["GET"])
     def index():
+        # Same app/routes bound to two ports (see main()) -- request.host
+        # carries whichever port the browser actually connected to, so this
+        # is the one place the two pages fork, rather than duplicating every
+        # /api/* route under a second prefix.
+        if request.host.endswith(f":{_SPECTRUM_PORT}"):
+            return _render_spectrum_page(g.account)
         return _render_index_page(g.account)
 
     @app.route(f"{_URL_PREFIX}/api/models", methods=["GET"])
@@ -698,6 +733,28 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    @app.route(f"{_URL_PREFIX}/api/document-text", methods=["GET"])
+    def api_document_text():
+        """The Documents page's one real backend need: given an RFC number,
+        draft name, or WG/topic hint, fetch that document's real text and
+        return it pre-segmented into sections -- everything else on that
+        page (the lookup itself, passage selection, "Explain this
+        decision") is client-side against this one payload.
+        """
+        from scripts.agentic_rag.ask_decision_agent import resolve_document_text
+
+        hint = (request.args.get("q") or "").strip()
+        if not hint:
+            return jsonify({"error": "q is required"}), 400
+        try:
+            result = resolve_document_text(hint)
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+        if result is None:
+            return jsonify({"error": f"Couldn't find or fetch a document for {hint!r}."}), 404
+        return jsonify(result)
+
     @app.route(f"{_URL_PREFIX}/api/corpora/freshness", methods=["GET"])
     def api_corpora_freshness():
         """Per-corpus live state for the Corpora tab -- what the sidecar/
@@ -713,6 +770,21 @@ def main() -> None:
         same way, just flagged `is_local` so the frontend can add the
         raw-download actions a real corpus doesn't need (it already has an
         indexed dataset; a local source only has whatever's on disk).
+
+        Pagination (page_size/offset) and filtering (q/kind) are opt-in via
+        query params -- confirmed live that a full unpaginated fetch across
+        ~45 registered+local entries takes 1-2 minutes (each local-only
+        entry alone costs 2 live Datatracker calls just to resolve its own
+        wg/rfc_number, on top of the per-entry mail/draft-relations lookups
+        below), which is what actually made the Prism-Spectrum Sources page
+        slow enough to prompt paging it. Omitting every one of these params
+        reproduces the
+        original unpaginated behavior exactly, so the classic page's own
+        call site (which passes none) is unaffected. When page_size is
+        given, the expensive local-only wg/rfc_number resolution itself
+        also only runs for that page's entries -- slicing after building
+        the enrichment rows would still pay that cost for every local
+        source up front, defeating the point.
         """
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
         from services.ietf_import_service import IetfImportService
@@ -724,23 +796,69 @@ def main() -> None:
             return jsonify({"error": str(exc)}), 500
 
         registered_names = {entry["draft_name"] for entry in catalog}
-        entries = list(catalog)
+        # Identity only at this point -- catalog entries already carry a
+        # real rfc_number/wg with no live lookup; local-only entries defer
+        # that live resolution until after paging/filtering below, since
+        # it's the expensive part.
+        identities = [{**entry, "is_local": False} for entry in catalog]
         for draft_name in IetfImportService.list_local_source_names():
             if draft_name in registered_names:
                 continue
-            entries.append(
-                {
-                    "draft_name": draft_name,
-                    "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
-                    "wg": IetfImportService.resolve_wg_for_draft(draft_name),
-                    "evolution_dataset_id": None,
-                    "mailarchive_dataset_id": None,
-                    "is_local": True,
-                }
-            )
+            identities.append({"draft_name": draft_name, "is_local": True})
 
-        corpora = []
-        for entry in entries:
+        query = (request.args.get("q") or "").strip().lower()
+        kind = (request.args.get("kind") or "").strip().lower()
+        if query:
+            identities = [
+                e
+                for e in identities
+                if query in e["draft_name"].lower()
+                or query in str(e.get("rfc_number") or "").lower()
+                or query in str(e.get("wg") or "").lower()
+            ]
+        if kind in ("local", "dataset"):
+            identities = [e for e in identities if e["is_local"] == (kind == "local")]
+
+        # Stable order so paging through "load more" never reshuffles
+        # already-seen rows underneath the caller.
+        import operator
+
+        identities.sort(key=operator.itemgetter("is_local", "draft_name"))
+        total = len(identities)
+
+        page_size_param = request.args.get("page_size")
+        offset_param = request.args.get("offset")
+        paginated = page_size_param is not None or offset_param is not None
+        if paginated:
+            try:
+                page_size = max(1, min(50, int(page_size_param or 12)))
+            except ValueError:
+                page_size = 12
+            try:
+                offset = max(0, int(offset_param or 0))
+            except ValueError:
+                offset = 0
+            identities = identities[offset : offset + page_size]
+        else:
+            offset = 0
+            page_size = total
+
+        def _enrich(entry: dict) -> dict:
+            # Identity resolution AND enrichment for one entry, run off the
+            # main thread below -- confirmed live that even a single local
+            # entry's full cost (2 live calls just to resolve its own wg/
+            # rfc_number, plus mail/draft-relations/local-status lookups)
+            # is several real Datatracker round trips; doing that
+            # sequentially for a 12-entry page still took ~2 minutes.
+            # Independent per entry, so running the whole page concurrently
+            # instead cuts total time to roughly the slowest single entry.
+            if entry["is_local"]:
+                entry = dict(entry)
+                entry["rfc_number"] = IetfImportService.resolve_rfc_number_for_draft(entry["draft_name"])
+                entry["wg"] = IetfImportService.resolve_wg_for_draft(entry["draft_name"])
+                entry["evolution_dataset_id"] = None
+                entry["mailarchive_dataset_id"] = None
+
             row = dict(entry)
             wg = entry.get("wg")
             if wg:
@@ -775,8 +893,21 @@ def main() -> None:
                     }
                 except Exception as exc:
                     row["embedding_index_status"] = {"status": "error", "message": str(exc)}
-            corpora.append(row)
-        return jsonify({"corpora": corpora})
+            return row
+
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=min(12, max(1, len(identities)))) as pool:
+            corpora = list(pool.map(_enrich, identities))
+        return jsonify(
+            {
+                "corpora": corpora,
+                "total": total,
+                "offset": offset,
+                "page_size": page_size,
+                "has_more": paginated and offset + page_size < total,
+            }
+        )
 
     @app.route(f"{_URL_PREFIX}/api/corpora/rfc-suggestions", methods=["GET"])
     def api_corpora_rfc_suggestions():
@@ -1324,11 +1455,11 @@ def main() -> None:
         model_provider=None,
         model_name=None,
     ):
-        """Shared body for /api/ask, /api/deep-dive, /api/panorama: resumes
-        (or creates) a Conversation owned by `account`, splices its prior
-        turns in as history, runs the agent, then persists the new turn as
-        a real Message -- so any of the three tiers can continue the same
-        saved conversation, and it's the same account on every message.
+        """Shared body for /api/research: resumes (or creates) a
+        Conversation owned by `account`, splices its prior turns in as
+        history, runs the agent, then persists the new turn as a real
+        Message -- so a session can be continued across multiple asks, and
+        it's the same account on every message.
 
         `account` is a plain argument, not read from flask.g inside work()
         -- flask.g is request-context-scoped, and work() runs in a
@@ -1384,6 +1515,8 @@ def main() -> None:
 
                 trace: list[dict] = []
                 usage: list[dict] = []
+                claim_labels: dict[int, str] = {}
+                evidence: list[dict] = []
                 answer = ask_decision_agent(
                     query=query,
                     draft=draft,
@@ -1395,6 +1528,8 @@ def main() -> None:
                     usage=usage,
                     cancel_event=cancel_event,
                     model_tenant_id=model_tenant_id,
+                    claim_labels=claim_labels,
+                    evidence=evidence,
                     **model_kwargs,
                 )
                 usage_summary = usage[0] if usage else None
@@ -1408,6 +1543,8 @@ def main() -> None:
                     usage=usage_summary,
                     model_provider=model_provider,
                     model_name=model_name,
+                    claim_labels=claim_labels,
+                    evidence=evidence,
                 )
                 # _summarize_usage's total_price is a Decimal -- fine for the
                 # DB column above, but the SSE payload below goes through a
@@ -1430,97 +1567,45 @@ def main() -> None:
                     "session_id": session_id,
                     "message_id": message_id,
                     "usage": usage_for_client,
+                    "claim_labels": claim_labels,
+                    "evidence": evidence,
                 }
             finally:
                 _ACTIVE_CANCEL_EVENTS.pop(request_id, None)
 
         return work
 
-    @app.route(f"{_URL_PREFIX}/api/ask", methods=["GET"])
-    def api_ask():
-        query = (request.args.get("query") or "").strip()
-        draft = request.args.get("draft") or None
-        session_id = request.args.get("session_id") or None
-        # Investigate is a different live-reasoning render of this same
-        # endpoint, not a separate route -- the tier tag persisted with the
-        # turn still needs to tell the two apart, so the caller passes it.
-        tier = request.args.get("tier") or "ask"
-        if tier not in ("ask", "investigate"):
-            tier = "ask"
-        if not query:
-            return jsonify({"error": "query is required"}), 400
-
-        work = _make_research_work(
-            tier=tier,
-            query=query,
-            draft=draft,
-            session_id=session_id,
-            account=g.account,
-            model_provider=request.args.get("model_provider") or None,
-            model_name=request.args.get("model_name") or None,
-        )
-        return _sse_stream(app, work)
-
-    @app.route(f"{_URL_PREFIX}/api/deep-dive", methods=["GET"])
-    def api_deep_dive():
-        """Same agent/tools/endpoint shape as /api/ask, but a genuinely more
-        thorough pass -- more iterations budgeted, and an addendum telling
-        the model to verify against primary sources and try a second query
-        rather than settle for the first result. Not just a different
-        render of the same events (that's what Investigate already is).
+    @app.route(f"{_URL_PREFIX}/api/research", methods=["GET"])
+    def api_research():
+        """The single research entry point: always the old Deep Dive/
+        Panorama iteration budget, with an addendum that also asks the
+        model to decide for itself, early in the run, whether the question
+        needs the wider RFC landscape -- no separate tier/endpoint for that
+        choice anymore (see _RESEARCH_ADDENDUM in ask_decision_agent.py).
+        The old Ask/Investigate single-pass, no-addendum behavior isn't
+        gone -- it's just ask()'s own default when max_iterations/
+        extra_instruction are omitted, still usable directly from Python
+        (eval/battery scripts) as a baseline, just no longer exposed here.
         """
-        from scripts.agentic_rag.ask_decision_agent import _DEEP_DIVE_ADDENDUM, _DEEP_DIVE_MAX_ITERATIONS
+        from scripts.agentic_rag.ask_decision_agent import _RESEARCH_ADDENDUM, _RESEARCH_MAX_ITERATIONS
 
         query = (request.args.get("query") or "").strip()
         draft = request.args.get("draft") or None
         session_id = request.args.get("session_id") or None
         if not query:
             return jsonify({"error": "query is required"}), 400
-        if _DEEP_DIVE_RATE_LIMITER.is_rate_limited(g.account.id):
-            return jsonify({"error": "Deep Dive rate limit reached -- try again later."}), 429
-        _DEEP_DIVE_RATE_LIMITER.increment_rate_limit(g.account.id)
+        if _RESEARCH_RATE_LIMITER.is_rate_limited(g.account.id):
+            return jsonify({"error": "Research rate limit reached -- try again later."}), 429
+        _RESEARCH_RATE_LIMITER.increment_rate_limit(g.account.id)
 
         work = _make_research_work(
-            tier="deepdive",
+            tier="research",
             query=query,
             draft=draft,
             session_id=session_id,
             account=g.account,
-            max_iterations=_DEEP_DIVE_MAX_ITERATIONS,
-            extra_instruction=_DEEP_DIVE_ADDENDUM,
-            model_provider=request.args.get("model_provider") or None,
-            model_name=request.args.get("model_name") or None,
-        )
-        return _sse_stream(app, work)
-
-    @app.route(f"{_URL_PREFIX}/api/panorama", methods=["GET"])
-    def api_panorama():
-        """Same agent/tools/endpoint shape as /api/ask and /api/deep-dive,
-        but a separate third tier pointed outward at the wider RFC
-        landscape -- deliberately not a modification of Deep Dive (which
-        stays exactly as it was, verified working for single-RFC depth) so
-        this untested new direction (finding and connecting SEVERAL RFCs)
-        can be iterated on independently.
-        """
-        from scripts.agentic_rag.ask_decision_agent import _PANORAMA_ADDENDUM, _PANORAMA_MAX_ITERATIONS
-
-        query = (request.args.get("query") or "").strip()
-        draft = request.args.get("draft") or None
-        session_id = request.args.get("session_id") or None
-        if not query:
-            return jsonify({"error": "query is required"}), 400
-        if _PANORAMA_RATE_LIMITER.is_rate_limited(g.account.id):
-            return jsonify({"error": "Panorama rate limit reached -- try again later."}), 429
-        _PANORAMA_RATE_LIMITER.increment_rate_limit(g.account.id)
-
-        work = _make_research_work(
-            tier="panorama",
-            query=query,
-            draft=draft,
-            session_id=session_id,
-            account=g.account,
-            max_iterations=_PANORAMA_MAX_ITERATIONS,
-            extra_instruction=_PANORAMA_ADDENDUM,
+            max_iterations=_RESEARCH_MAX_ITERATIONS,
+            extra_instruction=_RESEARCH_ADDENDUM,
             model_provider=request.args.get("model_provider") or None,
             model_name=request.args.get("model_name") or None,
         )
@@ -1701,6 +1786,19 @@ def main() -> None:
             return decision_thread(draft, query, on_event=on_event)
 
         return _sse_stream(app, work)
+
+    print(f"Prism spectrum UI running -- open http://0.0.0.0:{_SPECTRUM_PORT}/ in your browser")
+    # Same app object, same route table (including every /api/* route) bound
+    # to a second port in its own thread -- index() (above) is the only
+    # place that forks behavior between the two, by which port the request
+    # actually arrived on. This avoids standing up a second process, a
+    # second set of route registrations, or any cross-origin/CORS concern
+    # between the two pages, since each port serves its own page and APIs
+    # from the same origin.
+    threading.Thread(
+        target=lambda: app.run(host="0.0.0.0", port=_SPECTRUM_PORT, debug=False, threaded=True),
+        daemon=True,
+    ).start()
 
     print("Decision Rationale Agent UI running -- open http://0.0.0.0:8765/ in your browser")
     # threaded=True: an open SSE stream (ask/decision-thread) holds its

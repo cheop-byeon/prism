@@ -12,6 +12,7 @@ from scripts.agentic_rag.ask_decision_agent import (
     _iddiff_page_url,
     _parse_evolution_body,
     _resolve_draft_hint,
+    _segment_document_text,
     _summarize_usage,
     tool_display_name,
 )
@@ -135,6 +136,13 @@ class TestFormatHits:
     def test_numbers_hits_from_one(self):
         assert _format_hits(["first", "second"]) == "[1] first\n\n[2] second"
 
+    def test_start_offsets_numbering_for_a_later_search_call(self):
+        # ask() passes start=len(numbered_evidence)+1 so a second search
+        # call's hits keep counting up from an earlier one instead of both
+        # restarting at [1] -- the model would otherwise write "[1]" in its
+        # final answer meaning two different, ambiguous things.
+        assert _format_hits(["third", "fourth"], start=3) == "[3] third\n\n[4] fourth"
+
 
 class TestFormatEvolutionHits:
     def test_empty_hits_reports_no_results_and_no_citations(self):
@@ -165,6 +173,10 @@ class TestFormatEvolutionHits:
         assert citations == [
             ("ietf-evolution draft:draft-ietf-example-thing from:05 to:06", "05", "06", expected_url)
         ]
+
+    def test_start_offsets_numbering_for_a_later_search_call(self):
+        text, _citations = _format_evolution_hits(["plain hit, no header"], start=5)
+        assert text == "[5] plain hit, no header"
 
 
 class TestIddiffPageUrl:
@@ -244,7 +256,7 @@ class TestFilterPrimarySourceText:
     def test_query_no_match_says_so_explicitly(self):
         result = _filter_primary_source_text(self._text, "nomatch", "draft-x-01")
 
-        assert result == "[draft-x-01] No paragraph containing 'nomatch' was found in this document."
+        assert result == "[draft-x-01] No paragraph containing all of 'nomatch''s words was found in this document."
 
     def test_query_match_truncates_over_cap(self):
         result = _filter_primary_source_text("X" * 20 + " INIT_CWND", "INIT_CWND", "draft-x-01", max_chars=10)
@@ -287,3 +299,60 @@ class TestToolDisplayName:
 
     def test_unknown_tool_falls_back_to_the_raw_name(self):
         assert tool_display_name("totally_unknown_tool") == "totally_unknown_tool"
+
+
+class TestSegmentDocumentText:
+    def test_splits_on_flush_left_numbered_headings(self):
+        text = (
+            "5.1.  Connection ID\n\n"
+            "   Each connection possesses a set of connection identifiers.\n\n"
+            "5.2.  Matching Packets to Connections\n\n"
+            "   When a packet is received, it is associated with a connection.\n"
+        )
+        sections = _segment_document_text(text)
+        assert [s["number"] for s in sections] == ["5.1", "5.2"]
+        assert sections[0]["title"] == "Connection ID"
+        assert "Each connection possesses" in sections[0]["text"]
+        assert sections[1]["title"] == "Matching Packets to Connections"
+
+    def test_body_text_stays_with_its_own_section_not_the_next_heading(self):
+        text = "1.  Introduction\n\n   Intro text here.\n\n2.  Terminology\n\n   Term text here.\n"
+        sections = _segment_document_text(text)
+        assert sections[0]["text"] == "Intro text here."
+        assert sections[1]["text"] == "Term text here."
+
+    def test_indented_line_that_looks_like_a_heading_is_not_matched(self):
+        # Body text is indented (IETF plaintext convention); a would-be
+        # heading pattern inside a paragraph shouldn't split it -- only a
+        # genuinely flush-left line counts.
+        text = "1.  Introduction\n\n   See 5.1.  Connection ID for details.\n\n2.  Terminology\n\n   More text.\n"
+        sections = _segment_document_text(text)
+        assert len(sections) == 2
+        assert "See 5.1.  Connection ID for details." in sections[0]["text"]
+
+    def test_no_headings_falls_back_to_one_whole_document_section(self):
+        text = "Just plain prose with no numbered section headings at all.\n"
+        sections = _segment_document_text(text)
+        assert len(sections) == 1
+        assert sections[0]["number"] == ""
+        assert sections[0]["title"] == "Full text"
+        assert sections[0]["text"] == text
+
+    def test_empty_section_body_is_dropped(self):
+        # Two headings back-to-back with nothing between them -- a real
+        # document wouldn't do this, but a malformed/truncated fetch might.
+        text = "1.  Introduction\n\n2.  Terminology\n\n   Term text here.\n"
+        sections = _segment_document_text(text)
+        assert [s["number"] for s in sections] == ["2"]
+
+    def test_oversized_section_is_capped_and_flagged_truncated(self):
+        body = "x" * 5000
+        text = f"1.  Introduction\n\n   {body}\n"
+        sections = _segment_document_text(text)
+        assert sections[0]["truncated"] is True
+        assert len(sections[0]["text"]) == 4000
+
+    def test_normal_sized_section_is_not_flagged_truncated(self):
+        text = "1.  Introduction\n\n   Short body.\n"
+        sections = _segment_document_text(text)
+        assert sections[0]["truncated"] is False

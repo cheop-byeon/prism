@@ -69,19 +69,34 @@
 
     --focus-ring: 0 0 0 3px rgba(124, 158, 255, 0.35);
 
-    /* Research tier accents -- reuses colors that already exist elsewhere
-       in this file (the RFC Graph's own citation/topic-match line colors),
-       so tier identity threads existing color meaning through rather than
-       inventing a new palette. Ask keeps the plain --accent blue since
-       it's the default/baseline tier, not a fourth new hue. */
-    --tier-ask: var(--accent);
-    --tier-ask-bg: var(--accent-dim);
-    --tier-investigate: #4fd1c5;
-    --tier-investigate-bg: #123331;
-    --tier-deepdive: #b98cf0;
-    --tier-deepdive-bg: #2a2040;
-    --tier-panorama: #e0a94a;
-    --tier-panorama-bg: #3a2f16;
+    /* Research scope badge -- the model now decides at run time whether a
+       question stays within one draft's own history or needs the wider
+       RFC landscape (see _RESEARCH_ADDENDUM), so there are only two states
+       to color, derived from the turn's own trace, not four pre-chosen
+       tiers. --scope-narrow keeps the plain --accent blue since it's the
+       default/baseline case; --scope-expanded reuses Deep Dive's old
+       purple for the less common, more expensive case. */
+    --scope-narrow: var(--accent);
+    --scope-narrow-bg: var(--accent-dim);
+    --scope-expanded: #b98cf0;
+    --scope-expanded-bg: #2a2040;
+
+    /* Decision-brief answer + evidence panel only (Prism redesign phase 1)
+       -- deliberately separate from --accent/--panel above rather than
+       reusing them, since this re-themes just that one surface, not the
+       whole app. "Prismatic" per user direction; --claim-stated/inferred/
+       unresolved reuse the diff-view green/amber/muted semantics already
+       established for --added/--modified elsewhere in this file, rather
+       than inventing a new three-color scale from scratch. */
+    --brief-accent: #a7b6ff;
+    --brief-accent-dim: #2c3450;
+    --brief-serif: Georgia, "Times New Roman", serif;
+    --claim-stated: var(--added);
+    --claim-stated-bg: var(--added-bg);
+    --claim-inferred: var(--modified);
+    --claim-inferred-bg: var(--modified-bg);
+    --claim-unresolved: var(--text-tertiary);
+    --claim-unresolved-bg: var(--panel-2);
   }
   * { box-sizing: border-box; }
   body {
@@ -271,39 +286,14 @@
   .session-empty-hint { color: var(--text-quaternary); font-size: var(--text-xs); padding: 8px; }
   .research-main { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-y: auto; }
 
-  /* ---- Research tier selector: replaces four near-identical tabs (Ask /
-     Investigate / Deep Dive / Panorama -- same select+input+button+
-     conversation shape, differentiated only by a paragraph of hint text
-     above the input) with one tab and a visible, always-on mode switch, so
-     the tier you're in shows up in the layout itself. ---- */
+  /* ---- Research controls: one always-on entry point now -- the scope
+     badge on each answer (.turn-tag, styled below) is what shows whether
+     the model stayed within this draft or expanded, derived from its
+     trace after the fact, not a mode picked before asking. ---- */
   .tier-pane { padding-top: 18px; }
   .tier-label {
     font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.08em;
     color: var(--text-quaternary); margin: 0 0 10px;
-  }
-  .tier-selector { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
-  .tier-card {
-    background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--radius-md);
-    padding: 10px 12px; cursor: pointer; text-align: left; font-family: var(--sans); color: var(--text);
-    display: flex; flex-direction: column; gap: 5px; position: relative; overflow: hidden;
-    transition: border-color 0.15s ease, background 0.15s ease;
-  }
-  .tier-card::before {
-    content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
-    background: var(--tier-color, var(--border)); opacity: 0.5; transition: opacity 0.15s ease;
-  }
-  .tier-card:hover { border-color: var(--tier-color, var(--border)); }
-  .tier-card.active { border-color: var(--tier-color, var(--accent)); background: var(--tier-bg, var(--panel-2)); }
-  .tier-card.active::before { opacity: 1; }
-  .tier-card .tier-head { display: flex; align-items: center; gap: 7px; }
-  .tier-card .tier-head .icon { color: var(--tier-color, var(--text-dim)); }
-  .tier-card .tier-name { font-size: var(--text-sm); font-weight: 700; }
-  .tier-card .tier-desc { font-size: var(--text-xs); color: var(--text-tertiary); line-height: 1.4; }
-  .mode-badge {
-    display: inline-flex; align-items: center; gap: 5px; font-size: var(--text-2xs); font-weight: 700;
-    text-transform: uppercase; letter-spacing: 0.04em; color: var(--tier-color, var(--accent));
-    background: var(--tier-bg, var(--accent-dim)); border-radius: var(--radius-pill); padding: 4px 10px;
-    flex-shrink: 0;
   }
 
   .conversation, .thread-body-wrap { flex: 1; overflow-y: auto; padding: 20px 0; }
@@ -361,6 +351,76 @@
   .trace-item .args { color: var(--text-dim); margin-top: 4px; word-break: break-all; }
   .trace-item .preview { color: var(--text-dim); margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
   .loading { color: var(--text-dim); font-size: var(--text-md); padding: 4px 0; }
+
+  /* Decision-brief answer (Prism redesign phase 1) -- replaces .answer's
+     old plain pre-wrap prose block for the research-answer path
+     specifically. white-space reset to normal since real <section>/<p>
+     elements now carry the paragraph structure the old bare pre-wrap text
+     relied on line breaks for. */
+  .decision-brief { white-space: normal; font-family: var(--brief-serif); }
+  .brief-lede { font-size: var(--text-lg); line-height: 1.6; margin: 0 0 14px; }
+  .brief-section { padding-top: 14px; margin-top: 14px; border-top: 1px solid var(--border); }
+  .brief-section:first-child { padding-top: 0; margin-top: 0; border-top: none; }
+  .brief-heading {
+    font-family: var(--sans); font-size: var(--text-xs); font-weight: 700; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--brief-accent); margin: 0 0 8px;
+  }
+  .brief-body { font-size: var(--text-lg); line-height: 1.7; }
+  .brief-body code, .brief-lede code {
+    font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 4px; font-size: 0.9em;
+  }
+
+  /* [N] citations become clickable claim buttons carrying a fixed, named
+     status pill -- stated/inferred/unresolved, never a numeric confidence
+     score, per explicit design direction. */
+  .claim-cite {
+    display: inline-flex; align-items: center; gap: 4px; background: var(--brief-accent-dim);
+    color: var(--brief-accent); border: none; border-radius: var(--radius-sm); padding: 1px 6px 1px 7px;
+    font-family: var(--sans); font-size: 0.72em; font-weight: 600; cursor: pointer; vertical-align: 0.1em;
+  }
+  .claim-cite:hover { filter: brightness(1.2); }
+  .claim-pill {
+    font-family: var(--sans); font-size: 0.9em; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
+    padding: 0 5px; border-radius: 3px;
+  }
+  .claim-pill-stated { color: var(--claim-stated); background: var(--claim-stated-bg); }
+  .claim-pill-inferred { color: var(--claim-inferred); background: var(--claim-inferred-bg); }
+  .claim-pill-unresolved { color: var(--claim-unresolved); background: var(--claim-unresolved-bg); }
+
+  /* Evidence panel -- slides in over the content on demand from the right
+     edge; deliberately an overlay rather than a permanent third flex
+     column of .research-layout, since the full resizable 3-panel
+     workspace shell is a later phase, not this one. */
+  .evidence-panel {
+    position: fixed; top: 0; right: 0; width: 380px; max-width: 90vw; height: 100vh;
+    background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg);
+    z-index: 60; display: flex; flex-direction: column; transform: translateX(100%);
+    transition: transform 0.2s ease; overflow-y: auto;
+  }
+  .evidence-panel.open { transform: translateX(0); }
+  .evidence-panel-head {
+    display: flex; align-items: center; justify-content: space-between; padding: 16px 18px;
+    border-bottom: 1px solid var(--border); font-size: var(--text-xs); color: var(--text-tertiary);
+    text-transform: uppercase; letter-spacing: 0.06em; flex-shrink: 0;
+  }
+  .evidence-panel-close {
+    background: transparent; border: none; color: var(--text-dim); font-size: 20px; line-height: 1;
+    cursor: pointer; padding: 2px 4px;
+  }
+  .evidence-panel-close:hover { color: var(--text); }
+  .evidence-panel-body { padding: 18px; }
+  .evidence-source {
+    font-family: var(--mono); font-size: var(--text-sm); color: var(--text-dim); margin-bottom: 12px;
+  }
+  .evidence-excerpt {
+    font-family: var(--brief-serif); font-size: var(--text-md); line-height: 1.7; color: var(--text);
+    border-left: 2px solid var(--brief-accent); padding-left: 12px; margin: 0 0 18px; white-space: pre-wrap;
+  }
+  .evidence-relation {
+    font-size: var(--text-xs); color: var(--text-tertiary); padding-top: 12px; border-top: 1px solid var(--border);
+  }
+  .evidence-relation strong { display: block; color: var(--text-dim); font-weight: 500; margin-top: 3px; }
+  .evidence-link { display: inline-block; margin-top: 14px; font-size: var(--text-sm); color: var(--brief-accent); }
 
   .step-diagram { display: flex; align-items: center; gap: 0; margin-bottom: 10px; flex-wrap: wrap; }
   .step-node {
@@ -963,6 +1023,7 @@
     <div class="account-dropdown" id="accountDropdown" hidden>
       <div class="account-dropdown-email">__ACCOUNT_EMAIL__</div>
       <a class="account-dropdown-item" href="__CONSOLE_WEB_URL__/apps?action=showSettings&amp;tab=provider" target="_blank" rel="noopener">Settings</a>
+      <a class="account-dropdown-item" id="spectrumLink" href="#" target="_blank" rel="noopener">Try the new design →</a>
       <button type="button" class="account-dropdown-item" id="accountLogoutBtn">Log out</button>
     </div>
   </div>
@@ -997,30 +1058,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       </aside>
       <div class="research-main">
         <div class="tier-pane">
-          <p class="tier-label">Research tier -- pick depth vs. breadth</p>
-          <div class="tier-selector" id="tierSelector">
-            <button class="tier-card active" data-tier="ask" style="--tier-color: var(--tier-ask); --tier-bg: var(--tier-ask-bg);">
-              <span class="tier-head"><svg class="icon"><use href="#icon-bolt"/></svg><span class="tier-name">Ask</span></span>
-              <span class="tier-desc">One quick pass over this draft's own history.</span>
-            </button>
-            <button class="tier-card" data-tier="investigate" style="--tier-color: var(--tier-investigate); --tier-bg: var(--tier-investigate-bg);">
-              <span class="tier-head"><svg class="icon"><use href="#icon-search"/></svg><span class="tier-name">Investigate</span></span>
-              <span class="tier-desc">Same tools and pass as Ask -- a different view of the same run, showing the real path taken instead of a fixed rail.</span>
-            </button>
-            <button class="tier-card" data-tier="deepdive" style="--tier-color: var(--tier-deepdive); --tier-bg: var(--tier-deepdive-bg);">
-              <span class="tier-head"><svg class="icon"><use href="#icon-layers"/></svg><span class="tier-name">Deep Dive</span></span>
-              <span class="tier-desc">More iterations budgeted; verifies against primary sources and tries a 2nd query rather than settle for the first result.</span>
-            </button>
-            <button class="tier-card" data-tier="panorama" style="--tier-color: var(--tier-panorama); --tier-bg: var(--tier-panorama-bg);">
-              <span class="tier-head"><svg class="icon"><use href="#icon-expand"/></svg><span class="tier-name">Panorama</span></span>
-              <span class="tier-desc">Pointed outward at the wider RFC landscape -- other RFCs and working groups, not just this draft's own history.</span>
-            </button>
-          </div>
-          <div class="controls" id="researchControls" style="--tier-color: var(--tier-ask); --tier-bg: var(--tier-ask-bg);">
-            <span class="mode-badge" id="researchModeBadge">
-              <svg class="icon-sm"><use href="#icon-bolt"/></svg>
-              <span id="researchModeBadgeLabel">Ask</span>
-            </span>
+          <div class="controls" id="researchControls">
             <select id="researchDraft"><option value="">(let the agent discover)</option></select>
             <select id="researchModel"><option value="">(default model)</option></select>
             <input id="researchQuery" type="text" placeholder="Why was INIT_CWND set to 4?" />
@@ -1031,6 +1069,13 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <div class="conversation" id="researchConversation"></div>
       </div>
     </div>
+    <aside class="evidence-panel" id="evidencePanel" aria-label="Evidence inspector">
+      <div class="evidence-panel-head">
+        <span>Evidence <span id="evidencePanelNo"></span></span>
+        <button type="button" class="evidence-panel-close" id="evidencePanelClose" aria-label="Close evidence">&times;</button>
+      </div>
+      <div class="evidence-panel-body" id="evidencePanelBody"></div>
+    </aside>
   </section>
 
   <section class="tab-pane" id="pane-familydemo">
@@ -1260,6 +1305,17 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 // button calls, then returns here to show the login page.
 const accountMenuBtnEl = document.getElementById('accountMenuBtn');
 const accountDropdownEl = document.getElementById('accountDropdown');
+// Same reciprocal link the spectrum page's own "Classic view" link uses,
+// just the other direction (session cookies aren't port-scoped, so this
+// opens already signed in, same as Settings above). See that link's own
+// comment for why this branches on PRISM_PREFIX: locally each page is its
+// own port with no prefix; behind nginx in production only one origin is
+// exposed at all, and nginx maps spectrum to PRISM_PREFIX (e.g. "/prism")
+// itself on that origin, classic to PRISM_PREFIX + "/classic/" -- so from
+// here, spectrum is just PRISM_PREFIX on the same host, not a different port.
+document.getElementById('spectrumLink').href = PRISM_PREFIX
+  ? `${location.protocol}//${location.host}${PRISM_PREFIX}/`
+  : `${location.protocol}//${location.hostname}:8766${PRISM_PREFIX}/`;
 
 accountMenuBtnEl.addEventListener('click', (e) => {
   e.stopPropagation();
@@ -1281,50 +1337,19 @@ const researchQueryEl = document.getElementById('researchQuery');
 const researchBtnEl = document.getElementById('researchBtn');
 const researchConvEl = document.getElementById('researchConversation');
 const sessionUsageBarEl = document.getElementById('sessionUsageBar');
-const researchControlsEl = document.getElementById('researchControls');
-const researchModeBadgeEl = document.getElementById('researchModeBadge');
-const researchModeBadgeLabelEl = document.getElementById('researchModeBadgeLabel');
 const toolsEl = document.getElementById('tools');
 const sessionListEl = document.getElementById('sessionList');
 const newSessionBtnEl = document.getElementById('newSessionBtn');
 const sessionSearchInputEl = document.getElementById('sessionSearchInput');
 let currentSessionId = null;
 
-// One shared Research tab replaces four near-identical tabs (Ask /
-// Investigate / Deep Dive / Panorama -- same select+input+button+
-// conversation shape, differentiated only by a paragraph of hint text
-// above the input) with one tab and a visible, always-on tier switch. This
-// is the single source of truth for what each tier actually does
-// differently: which backend endpoint it calls, and its icon/placeholder.
-const TIERS = {
-  ask: { name: 'Ask', endpoint: `${PRISM_PREFIX}/api/ask`, icon: 'icon-bolt', placeholder: 'Why was INIT_CWND set to 4?' },
-  investigate: {
-    name: 'Investigate', endpoint: `${PRISM_PREFIX}/api/ask`, icon: 'icon-search',
-    placeholder: 'Why was INIT_CWND set to 4?',
-  },
-  deepdive: { name: 'Deep Dive', endpoint: `${PRISM_PREFIX}/api/deep-dive`, icon: 'icon-layers', placeholder: 'Why was INIT_CWND set to 4?' },
-  panorama: {
-    name: 'Panorama', endpoint: `${PRISM_PREFIX}/api/panorama`, icon: 'icon-expand',
-    placeholder: "What's the broader RFC family behind RFC 6378's linear protection design?",
-  },
-};
-let currentTier = 'ask';
-
-function setTier(key) {
-  currentTier = key;
-  const t = TIERS[key];
-  document.querySelectorAll('.tier-card').forEach((c) => c.classList.toggle('active', c.dataset.tier === key));
-  researchControlsEl.style.setProperty('--tier-color', `var(--tier-${key})`);
-  researchControlsEl.style.setProperty('--tier-bg', `var(--tier-${key}-bg)`);
-  researchModeBadgeLabelEl.textContent = t.name;
-  researchModeBadgeEl.querySelector('use').setAttribute('href', `#${t.icon}`);
-  researchQueryEl.placeholder = t.placeholder;
-}
-
-document.getElementById('tierSelector').addEventListener('click', (e) => {
-  const card = e.target.closest('.tier-card');
-  if (card) setTier(card.dataset.tier);
-});
+// The old four near-identical tabs (Ask / Investigate / Deep Dive /
+// Panorama -- same select+input+button+conversation shape, differentiated
+// only by which backend endpoint they called) are now one Research tab
+// with a single always-thorough entry point: the model decides its own
+// scope at run time instead of the tier being chosen up front (see
+// _RESEARCH_ADDENDUM in ask_decision_agent.py).
+const RESEARCH_ENDPOINT = `${PRISM_PREFIX}/api/research`;
 
 function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -1384,14 +1409,123 @@ function linkify(text) {
 // correctly without one -- just the inline emphasis markers that plain
 // linkify() left untouched. Escapes first, same as linkify, so this can
 // never introduce unescaped HTML from the model's own output.
-function renderMarkdown(text) {
+// Same inline formatting the old renderMarkdown did (code/bold/italic/
+// links, headings flattened to bold since this app has no real markdown
+// parser), plus turning [N] citations into clickable claim buttons that
+// carry a fixed, named status pill (claimLabels[N]) instead of rendering
+// as plain bracketed text with no connection to its evidence.
+function renderClaimText(text, claimLabels) {
   let html = escapeHtml(text);
   html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
   html = html.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
   html = html.replace(/(^|[\s(])\*([^*\n]+?)\*(?=[\s).,!?]|$)/g, '$1<em>$2</em>');
   html = html.replace(/^#{1,6} (.+)$/gm, '<strong>$1</strong>');
-  return html.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  html = html.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+  return html.replace(/\[(\d+)\]/g, (whole, n) => {
+    const status = (claimLabels || {})[n];
+    const pillHtml = status ? `<span class="claim-pill claim-pill-${status}">${status}</span>` : '';
+    return `<button type="button" class="claim-cite" data-n="${n}">[${n}]${pillHtml}</button>`;
+  });
 }
+
+// Decision-brief rendering (Prism redesign phase 1) -- splits the answer
+// on the 5 known headings (Decision/Rationale/Alternatives/Evolution/
+// Uncertainty, the bold-markdown convention agent_skill.md asks the model
+// for) into distinct sections. A heading the model never wrote -- because
+// the evidence didn't support that section -- is simply absent from the
+// split, not rendered as an empty block. Falls back to one plain block
+// (still with clickable citations) if the text doesn't contain any of
+// these headings yet, e.g. real answers before agent_skill.md itself is
+// updated to ask for this exact heading set.
+const _BRIEF_HEADINGS = ['Decision', 'Rationale', 'Alternatives', 'Evolution', 'Uncertainty'];
+const _BRIEF_HEADING_RE = new RegExp(`\\*\\*(${_BRIEF_HEADINGS.join('|')})\\*\\*:?`, 'g');
+
+function renderDecisionBrief(answerText, claimLabels) {
+  const parts = String(answerText || '').split(_BRIEF_HEADING_RE);
+  if (parts.length === 1) {
+    return `<div class="decision-brief">${renderClaimText(answerText, claimLabels)}</div>`;
+  }
+  let html = '';
+  const lede = parts[0].trim();
+  if (lede) html += `<p class="brief-lede">${renderClaimText(lede, claimLabels)}</p>`;
+  for (let i = 1; i < parts.length; i += 2) {
+    const body = (parts[i + 1] || '').trim();
+    if (!body) continue;
+    html += `<section class="brief-section">`
+      + `<h3 class="brief-heading">${escapeHtml(parts[i])}</h3>`
+      + `<div class="brief-body">${renderClaimText(body, claimLabels)}</div>`
+      + `</section>`;
+  }
+  return `<div class="decision-brief">${html}</div>`;
+}
+
+// Evidence panel (Prism redesign phase 1) -- opens on demand when a claim
+// citation is clicked, rather than a references list at the end of the
+// answer, so the relationship between one specific claim and its one
+// specific evidence item is visible instead of implied. Evidence data is
+// stashed per-turn (turn._prismEvidence/_prismClaimLabels, set where each
+// turn is rendered) since citation numbering is only unique WITHIN one
+// ask() call -- "[1]" in one turn (a separate question/call) is unrelated
+// to "[1]" in another, even though within a single turn it's now globally
+// unique across every search that turn ran (see ask_decision_agent.py's
+// numbered_evidence).
+const evidencePanelEl = document.getElementById('evidencePanel');
+const evidencePanelBodyEl = document.getElementById('evidencePanelBody');
+const evidencePanelNoEl = document.getElementById('evidencePanelNo');
+
+function openEvidencePanel(n, item) {
+  evidencePanelNoEl.textContent = `/ ${n}`;
+  if (!item) {
+    evidencePanelBodyEl.innerHTML = `<p class="evidence-source">No evidence recorded for citation [${escapeHtml(String(n))}].</p>`;
+  } else {
+    const sourceLabel = item.label || toolLabel(item.source) || 'Source';
+    const relationLine = item.relation
+      ? `<div class="evidence-relation">${escapeHtml(item.relation)}<strong>${escapeHtml(item.relation_note || '')}</strong></div>`
+      : '';
+    const linkHtml = item.url
+      ? `<a class="evidence-link" href="${escapeHtml(item.url)}" target="_blank" rel="noopener">Inspect original source ↗</a>`
+      : '';
+    evidencePanelBodyEl.innerHTML = `<div class="evidence-source">${escapeHtml(sourceLabel)}</div>`
+      + `<blockquote class="evidence-excerpt">${escapeHtml(item.excerpt || '')}</blockquote>`
+      + relationLine + linkHtml;
+  }
+  evidencePanelEl.classList.add('open');
+}
+
+function closeEvidencePanel() {
+  evidencePanelEl.classList.remove('open');
+}
+
+document.getElementById('evidencePanelClose').addEventListener('click', closeEvidencePanel);
+
+// evidence from the server is a plain list, one entry per numbered hit in
+// citation order ({text, kind}) -- citation [N] is evidence[N-1], not
+// evidence[N] (JS's own "1" string key on an array would silently be the
+// *second* element, an off-by-one this size subtracts explicitly for).
+// label/relation are derived here rather than sent pre-built from the
+// server, matching how trace/toolLabel already keep presentation mapping
+// on the frontend instead of duplicating it server-side.
+const EVIDENCE_KIND_LABELS = { mail: 'Mailing-list search', evolution: 'Draft evolution search' };
+
+researchConvEl.addEventListener('click', (e) => {
+  const citeBtn = e.target.closest('.claim-cite');
+  if (!citeBtn) return;
+  const turn = citeBtn.closest('.turn');
+  const evidenceList = (turn && turn._prismEvidence) || [];
+  const claimLabels = (turn && turn._prismClaimLabels) || {};
+  const n = citeBtn.dataset.n;
+  const raw = evidenceList[parseInt(n, 10) - 1];
+  let item = null;
+  if (raw) {
+    const status = claimLabels[n];
+    item = {
+      label: EVIDENCE_KIND_LABELS[raw.kind] || 'Source',
+      excerpt: raw.text,
+      relation: (status === 'stated' || status === 'inferred') ? 'Supports' : 'Does not establish',
+    };
+  }
+  openEvidencePanel(n, item);
+});
 
 document.querySelectorAll('.tab-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -3309,29 +3443,39 @@ function renderPlan(steps) {
   return `<div class="agent-plan">${items}</div>`;
 }
 
-// Drives all four research tiers now (Ask included, since it merged into
-// this shared flow) -- they differ only in which backend endpoint they call
-// (identical agent/tools for Ask/Investigate; more iterations and a depth-
-// or breadth-focused system-prompt addendum for Deep Dive/Panorama -- see
-// /api/deep-dive and /api/panorama in serve_ui.py) and in tierKey, used only
-// to tag the rendered turn with that tier's name/color so a conversation
-// mixing tiers stays legible when scrolled back through.
+// Whether this question needed the wider RFC landscape is now the model's
+// own call, made mid-run (see _RESEARCH_ADDENDUM in ask_decision_agent.py)
+// rather than a tier picked before the run started -- so the turn's badge
+// is derived from which tools it actually ended up calling (real trace
+// data), the same "frontend derives display labels from raw data"
+// convention toolLabel/the evidence-panel relation text already use,
+// rather than trusting the model's own prose or inventing a new backend
+// field just to carry a label.
+const CROSS_WG_TOOLS = new Set(['get_rfc_relations', 'find_related_rfc_family', 'search_rfc_corpus_bm25']);
+function scopeInfo(trace) {
+  const expanded = (trace || []).some((t) => CROSS_WG_TOOLS.has(t.tool));
+  return expanded
+    ? { color: 'var(--scope-expanded)', icon: 'icon-expand', label: 'Scope: expanded' }
+    : { color: 'var(--scope-narrow)', icon: 'icon-layers', label: 'Scope: this draft' };
+}
+function scopeTagHtml(scope) {
+  return `<span class="turn-tag"><svg class="icon-sm"><use href="#${scope.icon}"/></svg>${escapeHtml(scope.label)}</span>`;
+}
+
 // Holds the current run's own stop() trigger, or null if none is active --
 // lets the (single, static) button click handler below decide whether a
 // click means "start" or "stop" without runAgentFlow needing to know about
 // the button's own click listener.
 let activeResearchStop = null;
 
-function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) {
+function runAgentFlow(draftSelectEl, queryEl, btnEl, convEl) {
   const query = queryEl.value.trim();
   if (!query) return;
 
-  const tier = TIERS[tierKey];
   const turn = document.createElement('div');
   turn.className = 'turn';
   const draftLabel = draftSelectEl.value ? ` <em>(draft: ${escapeHtml(draftSelectEl.value)})</em>` : '';
   const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(query)}${draftLabel}</div>`;
-  const tagHtml = `<span class="turn-tag"><svg class="icon-sm"><use href="#${tier.icon}"/></svg>${escapeHtml(tier.name)}</span>`;
 
   const steps = [];
   let pendingReason = null;
@@ -3345,7 +3489,7 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
   convEl.appendChild(turn);
   turn.scrollIntoView({behavior: 'smooth'});
 
-  const params = new URLSearchParams({query, tier: tierKey});
+  const params = new URLSearchParams({query});
   if (draftSelectEl.value) params.set('draft', draftSelectEl.value);
   if (currentSessionId) params.set('session_id', currentSessionId);
   if (researchModelEl.value) {
@@ -3353,13 +3497,9 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
     params.set('model_provider', modelProvider);
     params.set('model_name', modelName);
   }
-  const source = new EventSource(`${endpoint}?${params}`);
+  const source = new EventSource(`${RESEARCH_ENDPOINT}?${params}`);
   let finished = false;
 
-  // Restored verbatim in stop() below -- this button's label doesn't
-  // actually vary by tier today (it's always "Ask" in the markup
-  // regardless of currentTier), so restoring tier.name here instead of
-  // whatever it actually said would be an unrelated behavior change.
   const originalBtnText = btnEl.textContent;
   btnEl.textContent = 'Stop';
   // Actually cancels ask()'s background loop server-side (see ask()'s
@@ -3389,7 +3529,7 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
     if (retryBtn) {
       retryBtn.addEventListener('click', () => {
         queryEl.value = query;
-        runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey);
+        runAgentFlow(draftSelectEl, queryEl, btnEl, convEl);
       });
     }
   };
@@ -3409,16 +3549,18 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
       render(steps.length ? '' : '<div class="loading">Starting…</div>');
     } else if (msg.type === 'result') {
       if (steps.length) steps[steps.length - 1].status = 'done';
+      turn._prismEvidence = msg.data.evidence || [];
+      turn._prismClaimLabels = msg.data.claim_labels || {};
+      const scope = scopeInfo(msg.data.trace);
       render(
-        `<div class="answer" style="--turn-color: var(--tier-${tierKey});">${tagHtml}${renderMarkdown(msg.data.answer)}</div>`
+        `<div class="answer" style="--turn-color: ${scope.color};">${scopeTagHtml(scope)}${renderDecisionBrief(msg.data.answer, msg.data.claim_labels)}</div>`
         + renderTrace(msg.data.trace)
         + renderFeedback(msg.data.message_id, null, msg.data.answer)
         + renderUsage(msg.data.usage)
       );
       updateSessionUsageBar();
       if (msg.data.session_id) {
-        // Every tier can create/continue the same saved session -- refresh
-        // the sidebar so a brand-new session appears (and recency reorders).
+        // Refresh the sidebar so a brand-new session appears (and recency reorders).
         currentSessionId = msg.data.session_id;
         loadSessionList();
       }
@@ -3441,25 +3583,29 @@ function runAgentFlow(endpoint, draftSelectEl, queryEl, btnEl, convEl, tierKey) 
 
 researchBtnEl.addEventListener('click', () => {
   if (activeResearchStop) { activeResearchStop(); return; }
-  runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier);
+  runAgentFlow(researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl);
 });
 researchQueryEl.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !activeResearchStop) {
-    runAgentFlow(TIERS[currentTier].endpoint, researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl, currentTier);
+    runAgentFlow(researchDraftEl, researchQueryEl, researchBtnEl, researchConvEl);
   }
 });
 
 // Renders one turn loaded back from a saved session (GET /api/sessions/<id>)
 // -- same markup as a live turn's finished state, minus the plan/step
-// scaffolding that only makes sense while a run is in progress.
+// scaffolding that only makes sense while a run is in progress. t.tier may
+// still hold a legacy value ("ask"/"deepdive"/"panorama"/...) from before
+// tiers were retired -- it's inert now, the badge is derived from t.trace
+// like every other turn instead.
 function renderStaticTurn(t) {
-  const tier = TIERS[t.tier] || TIERS.ask;
   const turn = document.createElement('div');
   turn.className = 'turn';
   const qHtml = `<div class="q"><strong>Q:</strong> ${escapeHtml(t.query)}</div>`;
-  const tagHtml = `<span class="turn-tag"><svg class="icon-sm"><use href="#${tier.icon}"/></svg>${escapeHtml(tier.name)}</span>`;
+  const scope = scopeInfo(t.trace);
+  turn._prismEvidence = t.evidence || [];
+  turn._prismClaimLabels = t.claim_labels || {};
   turn.innerHTML = qHtml
-    + `<div class="answer" style="--turn-color: var(--tier-${t.tier});">${tagHtml}${renderMarkdown(t.answer)}</div>`
+    + `<div class="answer" style="--turn-color: ${scope.color};">${scopeTagHtml(scope)}${renderDecisionBrief(t.answer, t.claim_labels)}</div>`
     + renderTrace(t.trace || [])
     + renderFeedback(t.message_id, t.feedback || null, t.answer)
     + renderUsage(t.usage);
