@@ -637,11 +637,23 @@ def main() -> None:
 
     @app.route(f"{_URL_PREFIX}/", methods=["GET"])
     def index():
-        # Same app/routes bound to two ports (see main()) -- request.host
-        # carries whichever port the browser actually connected to, so this
-        # is the one place the two pages fork, rather than duplicating every
-        # /api/* route under a second prefix.
-        if request.host.endswith(f":{_SPECTRUM_PORT}"):
+        # Same app/routes bound to two ports (see main()) -- this is the one
+        # place the two pages fork, rather than duplicating every /api/*
+        # route under a second prefix.
+        #
+        # Deliberately keyed on the WSGI environ's SERVER_PORT, not
+        # request.host: request.host reflects the HTTP Host header, which
+        # nginx forwards UNCHANGED from the client's original request
+        # (proxy_set_header Host $host in proxy.conf.template) regardless of
+        # which internal port it actually proxied to -- confirmed live that
+        # behind nginx, request.host is "prism.uiocloud.no" whether the
+        # request came in through the :8765 (classic) or :8766 (spectrum)
+        # location block, so a request.host check can never fork correctly
+        # in production, only when a browser connects directly to a port in
+        # local dev. SERVER_PORT is a WSGI-server-level fact (the actual
+        # socket Werkzeug accepted this connection on) that a Host header
+        # can't override, so it stays correct either way.
+        if request.environ.get("SERVER_PORT") == str(_SPECTRUM_PORT):
             return _render_spectrum_page(g.account)
         return _render_index_page(g.account)
 
