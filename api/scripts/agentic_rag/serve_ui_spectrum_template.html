@@ -2,6 +2,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+// Applies any saved manual theme choice to <html> before first paint, so
+// the page never flashes the auto (OS-driven) theme first and then
+// snaps to the user's actual light/dark pick a moment later -- same
+// blocking-inline-script technique next-themes uses on Dify's own pages.
+// Absence of prism.theme (or a value of 'auto') leaves no attribute set,
+// which is exactly the pre-existing behavior: :root's color-scheme: light
+// dark lets light-dark() follow the OS/browser preference.
+(function() {
+  try {
+    var t = localStorage.getItem('prism.theme');
+    if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-po-theme', t);
+  } catch (e) {}
+})();
+</script>
 <title>Prism</title>
 <style>
   /* Prismatic palette, taken directly from the prism-spectrum mockup's own
@@ -9,14 +24,22 @@
      second) -- not translated into a different app's token names, per the
      explicit direction to build this as its own page, not a migration of
      the old one. color-scheme: light dark lets light-dark() resolve to
-     whichever the OS/browser prefers automatically, with no manual toggle
-     -- the mockup itself has none either.
+     whichever the OS/browser prefers automatically -- this is the 'auto'
+     option of the light/dark/auto toggle below (default), overridden by
+     data-po-theme when the user picks light or dark explicitly.
      --po-added/--po-added-bg/--po-modified/--po-modified-bg aren't part of
      the mockup's own token set (they're this app's claim-pill colors); their
      light-mode halves are derived to match the same darker-saturated-text-
      on-pale-background relationship the mockup's other tokens use. */
   :root {
     color-scheme: light dark;
+  }
+  /* Overrides the default 'light dark' above so light-dark() resolves to
+     one fixed value regardless of OS/browser preference -- the actual
+     light/dark halves of the manual toggle. */
+  html[data-po-theme="light"] { color-scheme: light; }
+  html[data-po-theme="dark"] { color-scheme: dark; }
+  :root {
     --po-bg: light-dark(#f5f6ff, #0c1020); --po-paper: light-dark(#ffffff, #151b30);
     --po-soft: light-dark(#eaedfc, #1d2540); --po-ink: light-dark(#25284c, #eff1ff);
     --po-muted: light-dark(#636987, #a5aecb); --po-line: light-dark(#dce0f4, #2d3656);
@@ -118,6 +141,13 @@
   .po-classiclink:hover { color: var(--po-accent); }
   .po-logout:hover, .po-settingslink:hover { color: var(--po-ink); }
   .po-profilelinks { display: flex; gap: 8px; }
+  .po-theme-toggle { display: flex; gap: 2px; background: var(--po-shell); border: 1px solid var(--po-line); border-radius: 7px; padding: 2px; }
+  .po-theme-toggle button {
+    background: none; color: var(--po-muted); font-size: 11px; padding: 4px 9px; border-radius: 5px;
+  }
+  .po-theme-toggle button[aria-pressed="true"] { background: var(--po-tint); color: var(--po-accent); }
+  .po-theme-toggle button:hover { color: var(--po-ink); }
+  .po-theme-toggle button[aria-pressed="true"]:hover { color: var(--po-accent); }
 
   /* Main column */
   .po-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100vh; }
@@ -624,7 +654,14 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
   <div class="po-main">
     <header class="po-top">
       <span id="poBreadcrumb">Investigations</span>
-      <span class="po-preview">Prism</span>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <div class="po-theme-toggle" role="group" aria-label="Theme">
+          <button type="button" data-theme="light" aria-pressed="false">Light</button>
+          <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
+          <button type="button" data-theme="auto" aria-pressed="true">Auto</button>
+        </div>
+        <span class="po-preview">Prism</span>
+      </div>
     </header>
 
     <section class="po-page" data-page="workspace" hidden>
@@ -869,6 +906,29 @@ document.getElementById('poClassicLink').href = PRISM_PREFIX
 function escapeHtml(s) {
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// -- Light/dark/auto theme toggle -- 'auto' (default) stores nothing and
+// leaves color-scheme: light dark in charge (follows OS/browser
+// preference); the head's own blocking inline script mirrors this same
+// key/logic before first paint so an explicit choice never flashes auto
+// first. -----------------------------------------------------------------
+const THEME_KEY = 'prism.theme';
+function applyTheme(theme) {
+  if (theme === 'light' || theme === 'dark') document.documentElement.setAttribute('data-po-theme', theme);
+  else document.documentElement.removeAttribute('data-po-theme');
+  document.querySelectorAll('.po-theme-toggle button').forEach((b) => {
+    b.setAttribute('aria-pressed', String(b.dataset.theme === theme));
+  });
+}
+function setTheme(theme) {
+  if (theme === 'auto') localStorage.removeItem(THEME_KEY);
+  else localStorage.setItem(THEME_KEY, theme);
+  applyTheme(theme);
+}
+document.querySelectorAll('.po-theme-toggle button').forEach((b) => {
+  b.addEventListener('click', () => setTheme(b.dataset.theme));
+});
+applyTheme(localStorage.getItem(THEME_KEY) || 'auto');
 
 // -- Page + sub-view switching (mockup's go()/view() functions, ported
 // verbatim) --------------------------------------------------------------
