@@ -2355,7 +2355,10 @@ function rxDraw() {
   const es = rxVisibleEdges();
   const nodeIds = new Set((rxData.nodes || []).map((n) => n.id));
   const ids = [...new Set([rxFocus, ...es.flatMap((e) => [e.source, e.target])])].filter((id) => nodeIds.has(id));
-  countEl.textContent = `${ids.length} document${ids.length === 1 ? '' : 's'} · ${es.length} relationship${es.length === 1 ? '' : 's'} · focus ${escapeHtml(rxFocus || '')}`;
+  const warnings = [...(rxData.warnings || [])];
+  if (rxData.truncated) warnings.unshift('neighborhood expansion cap reached');
+  const warningText = warnings.length ? ` · Partial: ${warnings.map(escapeHtml).join('; ')}` : '';
+  countEl.textContent = `${ids.length} document${ids.length === 1 ? '' : 's'} · ${es.length} relationship${es.length === 1 ? '' : 's'} · focus ${escapeHtml(rxFocus || '')}${warningText}`;
 
   let html = '';
   if (rxView === 'list') {

@@ -1499,6 +1499,11 @@ class IetfImportService:
             return structural
         family = IetfImportService.find_related_rfc_family(rfc_number)
         center = structural["center"]
+        warnings: list[str] = []
+        if family.get("error"):
+            warnings.append(f"Could not load citation-family relationships: {family['error']}")
+        if family.get("note"):
+            warnings.append(family["note"])
 
         edges = list(structural["edges"])
         for entry in family.get("family", []):
@@ -1531,7 +1536,7 @@ class IetfImportService:
         valid_ids = {n["id"] for n in nodes}
         edges = IetfImportService._dedupe_edges(edges, valid_ids)
 
-        return {"center": center, "nodes": nodes, "edges": edges}
+        return {"center": center, "nodes": nodes, "edges": edges, "warnings": warnings}
 
     @staticmethod
     def build_focus_neighborhood(rfc_number: str, max_hops: int = 2, on_event=None) -> dict:
@@ -1583,6 +1588,7 @@ class IetfImportService:
         frontier = [center]
         expansions = 0
         truncated = False
+        warnings: list[str] = []
 
         for hop in range(1, max_hops + 1):
             next_frontier: list[str] = []
@@ -1597,7 +1603,11 @@ class IetfImportService:
                 else:
                     result = IetfImportService._structural_neighbors(node_id)
                 if result.get("error"):
+                    if node_id == center:
+                        return result
+                    warnings.append(f"Could not expand {node_id}: {result['error']}")
                     continue  # one bad node shouldn't fail the whole neighborhood
+                warnings.extend(result.get("warnings", []))
                 for n in result.get("nodes", []):
                     all_nodes.setdefault(n["id"], n)
                     if n["id"] not in hop_of:
@@ -1618,7 +1628,7 @@ class IetfImportService:
         valid_ids = set(all_nodes)
         edges = IetfImportService._dedupe_edges(list(all_edges.values()), valid_ids)
 
-        result = {"center": center, "nodes": nodes, "edges": edges}
+        result = {"center": center, "nodes": nodes, "edges": edges, "warnings": warnings}
         if truncated:
             result["truncated"] = True
         return result
