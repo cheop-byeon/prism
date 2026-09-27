@@ -17,24 +17,20 @@ SERVICES=(api worker worker_beat ietfdata_service)
 # script (set -euo pipefail) and break rebuilding api/worker/etc too, not
 # just skip the one service that doesn't apply elsewhere.
 #
-# docker-compose.prism-cloud.yaml (deployment-only: sets PRISM_URL_PREFIX
-# and the CONSOLE_API_URL/etc. family to the public HTTPS domain instead of
-# localhost -- see that file's own header) is gated on the exact same check
-# and always included alongside ietf-ui.yaml, never on its own: confirmed
-# live on the cloud VM that recreating ietf_decision_agent_ui with only
-# ietf-ui.yaml (no prism-cloud.yaml) silently drops PRISM_URL_PREFIX back to
-# unset, which breaks the /login page's own before_request exemption (it
-# compares request.path against the bare "/login", but every real request
-# arrives as "/prism/login" -- only correctly stripped when PRISM_URL_PREFIX
-# is actually set) and 401s the login page itself on a cloud deployment.
-# This script still runs correctly on a plain local dev machine, where
-# prism-cloud.yaml doesn't exist at all and this block is a no-op.
+# docker-compose.prism-cloud.yaml is deployment-only (sets
+# PRISM_URL_PREFIX=/prism and the CONSOLE_API_URL/etc. family to the public
+# HTTPS domain instead of localhost -- see that file's own header) and is
+# deliberately NOT included here, unlike deploy/rebuild (the VM script).
+# Unlike ietf-ui.yaml, this file IS tracked in git, so it exists on every
+# clone -- if it were gated only on ietf-ui.yaml's presence like on the VM,
+# any local dev machine that also happens to have docker-compose.ietf-ui.yaml
+# checked out (e.g. for testing Prism locally) would silently pick up
+# production's PRISM_URL_PREFIX/CONSOLE_API_URL, breaking the local login
+# page's URL (/prism/login instead of /login) and pointing auth at the
+# production server instead of localhost.
 if [ -f docker-compose.ietf-ui.yaml ]; then
   COMPOSE_FILES+=(-f docker-compose.ietf-ui.yaml)
   SERVICES+=(ietf_decision_agent_ui)
-  if [ -f docker-compose.prism-cloud.yaml ]; then
-    COMPOSE_FILES+=(-f docker-compose.prism-cloud.yaml)
-  fi
 fi
 
 echo "==> Removing old dify-local-api:dev image, dangling images, and build cache..."

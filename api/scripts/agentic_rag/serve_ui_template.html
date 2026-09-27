@@ -3335,9 +3335,13 @@ function runFocus() {
         return;
       }
       mergeGraphData(msg.data);
-      rfcGraphStatusEl.innerHTML = msg.data.truncated
-        ? '<div class="loading">Note: this neighborhood was unusually large and got capped -- showing a partial expansion.</div>'
-        : '';
+      const graphWarnings = [...(msg.data.warnings || [])];
+      if (msg.data.truncated) {
+        graphWarnings.unshift('This neighborhood was unusually large and got capped -- showing a partial expansion.');
+      }
+      rfcGraphStatusEl.innerHTML = graphWarnings
+        .map((warning) => `<div class="loading">Note: ${escapeHtml(warning)}</div>`)
+        .join('');
       rfcGraphLayoutEl.hidden = false;
       rfcTableToggleBtnEl.hidden = false;
       refreshRfcViews();
