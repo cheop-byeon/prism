@@ -210,6 +210,29 @@ _LLM_RETRIES = 2
 _LLM_RETRY_SECONDS = 8
 
 
+_LEADING_THINK_BLOCK_RE = re.compile(r"^\s*<think>.*?</think>\s*", re.DOTALL)
+
+
+def _strip_reasoning_tags(text: str) -> str:
+    """Strip a leading <think>...</think> block some models (confirmed:
+    GLM-5.3 via an OpenAI-API-compatible endpoint) inline directly into
+    message.content instead of returning it in a separate reasoning field
+    the way Claude's/Gemini's own thinking blocks are kept out of the
+    visible answer. Left unstripped, this dumps the model's raw internal
+    monologue in front of every answer a real Prism user sees. Anchored at
+    the start and looped (not a single global replace) so back-to-back
+    leading blocks are all removed without risking a match on literal
+    "<think>" text the model might legitimately quote later in a real
+    answer -- confirmed live: the RFC 1752/1715 IPv6 address-size answer
+    ran through this exact path.
+    """
+    while True:
+        new_text = _LEADING_THINK_BLOCK_RE.sub("", text, count=1)
+        if new_text == text:
+            return text
+        text = new_text
+
+
 def _invoke_llm_with_retry(model_instance, usage_sink: list | None = None, **kwargs):
     from core.plugin.impl.exc import PluginInvokeError
     from dify_graph.model_runtime.errors.invoke import InvokeError
@@ -219,6 +242,8 @@ def _invoke_llm_with_retry(model_instance, usage_sink: list | None = None, **kwa
             result = model_instance.invoke_llm(**kwargs)
             if usage_sink is not None:
                 usage_sink.append(result.usage)
+            if isinstance(result.message.content, str) and "<think>" in result.message.content:
+                result.message.content = _strip_reasoning_tags(result.message.content)
             return result
         except (PluginInvokeError, InvokeError):
             if attempt == _LLM_RETRIES:
@@ -268,8 +293,21 @@ _MAX_ITERATIONS = 10
 # decision_thread() each used to hardcode this pair as their own default
 # parameter values, which could silently drift out of sync on a future
 # edit to just one of them.
-_DEFAULT_MODEL_PROVIDER = "langgenius/openrouter/openrouter"
-_DEFAULT_MODEL_NAME = "google/gemini-2.5-flash"
+#
+# Deliberately empty, not a literal provider/model -- per explicit user
+# direction: whichever model is configured as the tenant's own Dify
+# Settings -> Model Provider -> System Model default should always be
+# what every caller with no explicit override actually runs, without
+# needing a code change here every time that setting changes (this
+# already happened once: langgenius/anthropic/anthropic, picked when
+# Anthropic credits were available, stopped being usable when they
+# expired). ModelManager.get_model_instance() already implements exactly
+# this fallback on its own -- passing an empty/falsy provider makes it
+# call get_default_model_instance(), which reads the tenant's actual
+# TenantDefaultModel row -- so leaving these empty is sufficient; no
+# separate lookup needs writing here.
+_DEFAULT_MODEL_PROVIDER = ""
+_DEFAULT_MODEL_NAME = ""
 
 # The single Research entry point: one genuinely thorough pass that decides
 # its own scope, replacing the old Deep Dive/Panorama split -- ask() takes
@@ -2864,8 +2902,14 @@ def main() -> None:
             "of those are given. Omit to let the agent discover it from the question itself."
         ),
     )
-    parser.add_argument("--model", default="google/gemini-2.5-flash")
-    parser.add_argument("--model-provider", default="langgenius/openrouter/openrouter")
+    parser.add_argument(
+        "--model", default=_DEFAULT_MODEL_NAME, help="omit to use the tenant's own configured default model"
+    )
+    parser.add_argument(
+        "--model-provider",
+        default=_DEFAULT_MODEL_PROVIDER,
+        help="omit to use the tenant's own configured default model",
+    )
     parser.add_argument("--mail-top-k", type=int, default=50)
     parser.add_argument(
         "--verbose", action="store_true", help="print each tool call (seeded and self-directed) to stderr"

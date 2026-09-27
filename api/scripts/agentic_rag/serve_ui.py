@@ -672,18 +672,22 @@ def main() -> None:
         (/api/my-llm-credentials below), including ones the shared admin
         tenant has never configured at all.
 
-        "default" names ask()/decision_thread()'s actual hardcoded fallback
-        (imported from there directly, not a second copy of the literal) --
-        there's no real "no model chosen" state once a request reaches the
-        agent, so the picker selects this for real on load instead of
-        showing a vague "(default model)" placeholder that hides which
-        concrete model is actually about to run.
+        "default" names ask()/decision_thread()'s actual fallback -- which
+        is this tenant's own Settings -> Model Provider -> System Model
+        default (ask() passes an empty provider/model down to
+        ModelManager.get_model_instance(), which resolves it to exactly
+        this same TenantDefaultModel row -- see _DEFAULT_MODEL_PROVIDER/
+        _DEFAULT_MODEL_NAME's own comment). Looked up live here, not a
+        hardcoded literal, so the picker always shows and pre-selects
+        whatever model actually runs right now, even after that Settings
+        page changes -- there's no real "no model chosen" state once a
+        request reaches the agent, so a vague "(default model)" placeholder
+        would hide which concrete model is actually about to run.
         """
         from core.provider_manager import ProviderManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
         from extensions.ext_database import db
         from models.account import Tenant
-        from scripts.agentic_rag.ask_decision_agent import _DEFAULT_MODEL_NAME, _DEFAULT_MODEL_PROVIDER
         from services.agentic_rag_session_service import get_owned_tenant_id
 
         admin_tenant_id = db.session.query(Tenant).first().id
@@ -717,10 +721,17 @@ def main() -> None:
                         "byok": True,
                     }
 
+        default_model_entity = ProviderManager().get_default_model(tenant_id=admin_tenant_id, model_type=ModelType.LLM)
+        default_entry = (
+            {"provider": default_model_entity.provider.provider, "model": default_model_entity.model}
+            if default_model_entity
+            else {"provider": "", "model": ""}
+        )
+
         return jsonify(
             {
                 "models": list(entries.values()),
-                "default": {"provider": _DEFAULT_MODEL_PROVIDER, "model": _DEFAULT_MODEL_NAME},
+                "default": default_entry,
             }
         )
 
@@ -1729,6 +1740,13 @@ def main() -> None:
         dataset context to derive a tenant from -- this demo never touches
         a real Dify dataset at all, so it always falls back to the first
         tenant, same as ask() does in that situation.
+
+        Provider/model deliberately left empty, not a hardcoded literal --
+        ModelManager.get_model_instance() treats an empty provider as "use
+        this tenant's configured default" (see ask_decision_agent.py's
+        _DEFAULT_MODEL_PROVIDER/_DEFAULT_MODEL_NAME for the full reasoning),
+        so this always follows whatever's set in Settings -> Model Provider
+        -> System Model, the same as every other caller.
         """
         from core.model_manager import ModelManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
@@ -1738,9 +1756,9 @@ def main() -> None:
         tenant_id = db.session.query(Tenant).first().id
         return ModelManager().get_model_instance(
             tenant_id=tenant_id,
-            provider="langgenius/openrouter/openrouter",
+            provider="",
             model_type=ModelType.LLM,
-            model="google/gemini-2.5-flash",
+            model="",
         )
 
     @app.route(f"{_URL_PREFIX}/api/family-search-demo/roots", methods=["GET"])
