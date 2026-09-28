@@ -409,7 +409,14 @@ def _render_spectrum_page(account) -> str:
     _SPECTRUM_PAGE_HTML instead -- kept as a separate function (not a
     parameter on _render_index_page) since the two pages' placeholder needs
     are expected to diverge as the spectrum page grows its own account/nav
-    chrome."""
+    chrome.
+
+    __IS_DATA_ADMIN__: lets the page hide the Library/Operations nav
+    (Sources, Usage, How it works) for everyone except real data admins --
+    ordinary Prism users are meant to just ask questions and get answers,
+    not see library-management or org-wide-usage chrome for actions
+    _DATA_ADMIN_ONLY_EXACT_PATHS would reject anyway.
+    """
     from configs import dify_config
 
     api_base = dify_config.CONSOLE_API_URL or "http://localhost:5001"
@@ -421,6 +428,7 @@ def _render_spectrum_page(account) -> str:
         .replace("__ACCOUNT_EMAIL__", account.email)
         .replace("__ACCOUNT_INITIAL__", initial)
         .replace("__PRISM_URL_PREFIX__", _URL_PREFIX)
+        .replace("__IS_DATA_ADMIN__", "true" if _is_data_admin(account) else "false")
     )
 
 
