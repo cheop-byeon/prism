@@ -463,8 +463,6 @@
      at once. */
   .ps-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; margin-bottom: 21px; flex-wrap: wrap; }
   .ps-head p { font-size: 13px; color: var(--po-muted); margin-top: 9px; }
-  .ps-boundary { font-size: 12px; color: var(--po-muted); padding: 13px 16px; border: 1px solid var(--po-line); border-radius: 9px; background: var(--po-paper); margin-bottom: 22px; }
-  .ps-boundary strong { color: var(--po-cyan); font-weight: 500; }
   .ps-filters { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .ps-filters input { min-width: 0; flex: 1; padding: 11px 12px; border: 1px solid var(--po-line); border-radius: 7px; background: var(--po-paper); font-size: 13px; color: var(--po-ink); }
   .ps-filters select { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px; padding: 9px; font-size: 12px; color: var(--po-ink); }
@@ -813,7 +811,6 @@ const IS_DATA_ADMIN = "__IS_DATA_ADMIN__" === "true";</script>
         <div><h1 class="po-title">From archive to evidence.</h1><p>Manage downloaded content and the indexes that make it searchable.</p></div>
         <button class="po-primary" type="button" id="poSourceAddOpenBtn"><span>+</span>Add source</button>
       </div>
-      <div class="ps-boundary"><strong>Local library ≠ Dify dataset.</strong> Downloads and local indexes are managed here. Attaching material to a Dify dataset is still a separate Studio step.</div>
       <div class="ps-filters">
         <input id="poSourceFilterText" class="ps-librarysearch" placeholder="Filter by RFC, draft, or working group…" aria-label="Filter sources">
         <select id="poSourceFilterKind" class="ps-libraryfilter" aria-label="Source type">
