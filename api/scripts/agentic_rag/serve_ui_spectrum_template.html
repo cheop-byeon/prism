@@ -209,6 +209,10 @@
   .po-context { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
   .po-context code { background: var(--po-soft); padding: 3px 6px; border-radius: 4px; color: var(--po-ink); font-size: 11px; font-family: var(--po-mono); }
   .po-invest-title { font: 500 26px/1.3 var(--po-serif); letter-spacing: -0.6px; max-width: 640px; margin-bottom: 12px; }
+  /* Once a question has actually been asked, this is restating the
+     caller's own input, not a page headline -- full hero size reads as
+     shouting back what was just typed. Sized like a subheading instead. */
+  .po-invest-title.is-asked { font: 500 18px/1.4 var(--po-serif); letter-spacing: -0.2px; max-width: 720px; color: var(--po-muted); }
   .po-pill {
     display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px;
     background: var(--po-tint); color: var(--po-accent); font-size: 10px; margin-right: 6px;
@@ -222,6 +226,7 @@
      on Workspace, which isn't built yet -- see plan; this is a deliberate
      temporary bridge so the core research flow is actually usable now). */
   .po-composer-bar { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+  .po-composer-bar[hidden] { display: none; }
   .po-composer-bar select, .po-composer-bar input[type=text] {
     background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px;
     padding: 9px 10px; font-size: 13px; color: var(--po-ink);
@@ -720,7 +725,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <h1 class="po-invest-title" id="poInvestTitle">Ask a question about an RFC or draft</h1>
       <div id="poInvestPills" style="margin-bottom:14px;"></div>
 
-      <div class="po-composer-bar">
+      <div class="po-composer-bar" id="poComposerBar">
         <select id="poDraft"><option value="">(let the agent discover)</option></select>
         <select id="poModel"><option value="">(default model)</option></select>
         <input id="poQuery" type="text" placeholder="Why was INIT_CWND set to 4?">
@@ -736,7 +741,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 
       <div data-panel="findings">
         <div id="poConversation"></div>
-        <form class="po-composer-bar" id="poFollowupForm" style="margin-top:16px;">
+        <!-- Same runAsk()/poQuery/poDraft/poModel state as poComposerBar
+             above -- a follow-up IS another turn in this session, not a
+             different action, so only one of these two ever shows at once
+             (see updateInvestigationComposerVisibility) instead of offering
+             two identical-looking ways to type into the same conversation. -->
+        <form class="po-composer-bar" id="poFollowupForm" style="margin-top:16px;" hidden>
           <input id="poFollowupQuery" type="text" placeholder="Ask a follow-up, or challenge a claim…">
           <button class="po-primary" type="submit">Follow up →</button>
         </form>
@@ -1036,6 +1046,7 @@ document.getElementById('poNewBtn').addEventListener('click', () => {
   document.getElementById('poInvestPills').innerHTML = '';
   document.getElementById('poUsageBar').textContent = '';
   document.getElementById('poInvestTitle').textContent = 'Ask a question about an RFC or draft';
+  updateInvestigationComposerVisibility();
   poSessionSearchEl.value = '';
   loadSessionList({ q: '' });
 });
@@ -1267,6 +1278,7 @@ function openSession(id) {
     const convEl = document.getElementById('poConversation');
     convEl.innerHTML = '';
     (data.turns || []).forEach((t) => convEl.appendChild(renderStaticTurn(t)));
+    updateInvestigationComposerVisibility();
     updateSessionUsageBar();
     const lastTurn = (data.turns || [])[(data.turns || []).length - 1];
     if (lastTurn) {
@@ -1464,6 +1476,18 @@ document.getElementById('poConversation').addEventListener('click', (e) => {
 // -- The real research flow, ported from runAgentFlow, restyled ----------
 let activeAskStop = null;
 
+// poComposerBar (the entry form, above the conversation) and poFollowupForm
+// (below it) both just write into poQuery and call runAsk() -- identical
+// action, so only one should ever show: the entry form before anything's
+// been asked yet, the follow-up form once poConversation actually has a
+// turn in it. Call this any time poConversation's turn count changes.
+function updateInvestigationComposerVisibility() {
+  const hasConversation = document.getElementById('poConversation').children.length > 0;
+  document.getElementById('poComposerBar').hidden = hasConversation;
+  document.getElementById('poFollowupForm').hidden = !hasConversation;
+  document.getElementById('poInvestTitle').classList.toggle('is-asked', hasConversation);
+}
+
 function runAsk() {
   const queryEl = document.getElementById('poQuery');
   const query = queryEl.value.trim();
@@ -1486,6 +1510,7 @@ function runAsk() {
 
   render('<div class="po-loading">Starting…</div>');
   convEl.appendChild(turn);
+  updateInvestigationComposerVisibility();
   turn.scrollIntoView({ behavior: 'smooth' });
 
   const params = new URLSearchParams({ query });
