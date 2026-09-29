@@ -382,7 +382,7 @@ _MAILARCHIVE_REGISTRY: dict[str, str] = {
 }
 
 
-def _discover_evolution_corpora() -> list[dict]:
+def _discover_evolution_corpora(viewer_account_id: str | None = None) -> list[dict]:
     """Auto-discover evolution datasets by content signature, not by name.
 
     Every chunk generate_draft_evolution produces starts with a self-describing
@@ -390,13 +390,26 @@ def _discover_evolution_corpora() -> list[dict]:
     regardless of how the dataset's display name was later edited by hand
     (the live datasets table has exactly this problem: "draft-ietf-ledbat-..."
     vs "draft-ietf-ledbat-congestion-evolution-paragraph" for the same draft).
+
+    viewer_account_id filters which datasets are even visible: a dataset's
+    own creator sees it regardless of permission, everyone else only sees it
+    once its Dify Studio permission is anything other than the ONLY_ME
+    default -- reusing Dify's own dataset-sharing control (set in Studio,
+    not by Prism) as the "shared" signal, rather than inventing a second one.
+    Omitting viewer_account_id (an internal/no-viewer-context caller) sees
+    only already-shared datasets, same fail-closed default as
+    IetfImportService.list_local_source_names.
     """
     from extensions.ext_database import db
-    from models.dataset import Dataset, DocumentSegment
+    from models.dataset import Dataset, DatasetPermissionEnum, DocumentSegment
 
     header_re = re.compile(r"^ietf-evolution draft:(\S+)")
     results: list[dict] = []
     for dataset in db.session.query(Dataset).all():
+        is_owner = bool(viewer_account_id) and dataset.created_by == viewer_account_id
+        shared = dataset.permission != DatasetPermissionEnum.ONLY_ME
+        if not (is_owner or shared):
+            continue
         segment = (
             db.session.query(DocumentSegment)
             .filter_by(dataset_id=dataset.id)
@@ -414,6 +427,8 @@ def _discover_evolution_corpora() -> list[dict]:
                 "dataset_name": dataset.name,
                 "draft_name": match.group(1),
                 "created_at": dataset.created_at,
+                "owner_account_id": dataset.created_by,
+                "shared": shared,
             }
         )
     return results
@@ -467,7 +482,7 @@ def _resolve_rfc_number_for_draft(draft_name: str) -> str | None:
         return None
 
 
-def _list_available_corpora() -> tuple[str, list[dict]]:
+def _list_available_corpora(viewer_account_id: str | None = None) -> tuple[str, list[dict]]:
     """Return (formatted catalog for the tool observation, structured catalog).
 
     The structured form is `[{draft_name, rfc_number, wg, evolution_dataset_id,
@@ -482,8 +497,12 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
     people reasonably refer to a published spec by its RFC number, not its
     draft name, and the draft name alone (the only thing the content-signature
     discovery in _discover_evolution_corpora can see) doesn't carry that.
+
+    viewer_account_id is passed straight through to _discover_evolution_corpora
+    and to the local-sources listing below it -- see _discover_evolution_corpora's
+    own docstring for the visibility rule (own datasets + anything shared).
     """
-    corpora = _discover_evolution_corpora()
+    corpora = _discover_evolution_corpora(viewer_account_id)
     by_draft: dict[str, list[dict]] = {}
     for entry in corpora:
         by_draft.setdefault(entry["draft_name"], []).append(entry)
@@ -507,6 +526,8 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
                     "wg": wg,
                     "evolution_dataset_id": newest["dataset_id"],
                     "mailarchive_dataset_id": mailarchive_dataset_id,
+                    "owner_account_id": newest["owner_account_id"],
+                    "shared": newest["shared"],
                 }
             )
             rfc_suffix = f", published as RFC {rfc_number}" if rfc_number else " (not yet published as an RFC)"
@@ -529,7 +550,7 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
     # them, since there's no other discovery path that would tell it these
     # exist at all.
     registered_names = set(by_draft.keys())
-    local_lines = _list_indexed_local_sources(exclude=registered_names)
+    local_lines = _list_indexed_local_sources(exclude=registered_names, viewer_account_id=viewer_account_id)
     if local_lines:
         lines.append("")
         lines.append(
@@ -542,17 +563,21 @@ def _list_available_corpora() -> tuple[str, list[dict]]:
     return "\n".join(lines), catalog
 
 
-def _list_indexed_local_sources(exclude: set[str]) -> list[str]:
+def _list_indexed_local_sources(exclude: set[str], viewer_account_id: str | None = None) -> list[str]:
     """One line per locally-tracked source that actually has a built
     search_local_source index -- an unindexed local source (downloaded but
     "Build index" never clicked) has nothing for the tool to search, so
     it's left out rather than advertising a call that would just fail.
+
+    viewer_account_id restricts this to sources visible to that account
+    (their own pulls plus anything shared) -- see
+    IetfImportService.list_local_source_names.
     """
     from services.ietf_import_service import IetfImportService
     from services.local_source_index_service import LocalSourceIndexService
 
     lines = []
-    for draft_name in IetfImportService.list_local_source_names():
+    for draft_name in IetfImportService.list_local_source_names(viewer_account_id):
         if draft_name in exclude:
             continue
         status = LocalSourceIndexService.get_index_status(draft_name)
@@ -851,6 +876,7 @@ def decision_thread(
     model_provider: str = _DEFAULT_MODEL_PROVIDER,
     model_name: str = _DEFAULT_MODEL_NAME,
     on_event=None,
+    viewer_account_id: str | None = None,
 ) -> dict:
     """Trace one specific decision's actual text across every revision where
     it changed, compressing over every revision where it didn't -- unlike
@@ -899,7 +925,7 @@ def decision_thread(
     # explicitly rather than just naming the query/hint, since "no known
     # draft" reads as a bug report otherwise -- confirmed live this is
     # genuinely confusing without the reason spelled out.
-    _, catalog = _list_available_corpora()
+    _, catalog = _list_available_corpora(viewer_account_id)
     if draft_hint and draft_hint.strip():
         _emit("resolving", f"Resolving draft {draft_hint!r}…")
         resolved = _resolve_draft_hint(draft_hint, catalog)
@@ -1516,7 +1542,7 @@ def _search_local_source(draft_name: str, query: str, top_k: int) -> str:
 _RFC_IDENTIFIER_RE = re.compile(r"^(?:rfc)?\s*(\d+)$", re.IGNORECASE)
 
 
-def _add_local_source(identifier: str) -> str:
+def _add_local_source(identifier: str, owner_account_id: str | None = None) -> str:
     """The one tool in this agent with a real side effect: given an RFC
     number or a draft name, actually pull it -- register it as a tracked
     local source, download every revision + its RFC + its WG's mail (raw
@@ -1527,6 +1553,11 @@ def _add_local_source(identifier: str) -> str:
     real time -- seconds to roughly a minute depending on the WG's mail
     volume), which is why every call is announced as a progress step, not
     silently absorbed into "thinking".
+
+    owner_account_id: the asking account, forwarded to
+    IetfImportService.sync_local_source so a source the agent pulls mid-
+    conversation is owned by whoever asked the question, private by
+    default like any other pull.
 
     Accepts an RFC number (resolved to its draft name via
     IetfImportService.resolve_draft_name_for_rfc -- the reverse of the
@@ -1551,7 +1582,7 @@ def _add_local_source(identifier: str) -> str:
     else:
         draft_name = identifier
 
-    result = IetfImportService.sync_local_source(draft_name)
+    result = IetfImportService.sync_local_source(draft_name, owner_account_id=owner_account_id)
     if result.get("error"):
         return f"Could not sync {draft_name!r}: {result['error']}"
 
@@ -2189,6 +2220,7 @@ def ask(
     model_tenant_id: str | None = None,
     claim_labels: dict[int, str] | None = None,
     evidence: list[dict] | None = None,
+    viewer_account_id: str | None = None,
 ) -> str:
     """... (see module docstring for the full design).
 
@@ -2211,6 +2243,16 @@ def ask(
     before returning, for a caller that wants to persist cost/token totals
     for the turn (e.g. onto a Message row). None (the default) skips this
     entirely; every existing caller is unaffected.
+
+    viewer_account_id: the account asking this question, threaded into every
+    corpus-discovery call this turn makes (_list_available_corpora and,
+    through it, _discover_evolution_corpora/IetfImportService.
+    list_local_source_names) so the agent only ever searches/cites datasets
+    and local sources that account can actually see -- its own pulls plus
+    anything shared. Also attributes ownership if this turn ends up calling
+    the add_local_source tool. None (the default, every existing caller)
+    means "no known viewer": discovery falls back to shared-only, the same
+    fail-closed default those functions use with no other caller context.
 
     cancel_event: optional threading.Event -- checked once at the top of
     each main-loop iteration; if set, the loop stops immediately and
@@ -2319,7 +2361,7 @@ def ask(
     # the agent skips discovery entirely, same efficiency win raw ids give.
     # Doesn't override raw ids if both are somehow given.
     if draft and not (evolution_dataset_id_candidate and mailarchive_dataset_id_candidate):
-        _, draft_catalog = _list_available_corpora()
+        _, draft_catalog = _list_available_corpora(viewer_account_id)
         resolved = _resolve_draft_hint(draft, draft_catalog)
         if not resolved:
             known = ", ".join(entry["draft_name"] for entry in draft_catalog) or "(none found)"
@@ -2544,7 +2586,7 @@ def ask(
 
         if tool_name == discovery_tool_name:
             discovery_called = True
-            catalog_text, catalog = _list_available_corpora()
+            catalog_text, catalog = _list_available_corpora(viewer_account_id)
             if verbose:
                 print(f"[iter {iteration}] {tool_name}", file=sys.stderr)
             if len(catalog) == 1:
@@ -2722,7 +2764,7 @@ def ask(
             identifier = args.get("identifier", "")
             if verbose:
                 print(f"[iter {iteration}] {tool_name} identifier={identifier!r}", file=sys.stderr)
-            observation = _add_local_source(identifier)
+            observation = _add_local_source(identifier, owner_account_id=viewer_account_id)
             evidence_log.append(observation)
             return observation
 

@@ -525,36 +525,23 @@ def _authenticate_console_request(request):
     return AccountService.load_logged_in_account(account_id=user_id)
 
 
-# Mutating data-sync/download actions -- restricted to real members of the
-# tenant that owns the actual IETF datasets (see _is_data_admin), not just
-# anyone logged into Prism. Without this, every self-service sign-up could
-# independently trigger a full mailarchive IMAP sync, draft download, BM25
-# rebuild, or bulk RFC pull -- all hitting the same shared data one person
-# already maintains, not per-user data each visitor is supposed to own.
-# Read-only browsing of what's already synced (GET /api/corpora,
-# /api/sources/<wg>/<doc_type>, topic-discover, ...) stays open to everyone,
-# same as Research/Sessions/Feedback -- only the actions that write/fetch
-# new data are gated here.
+# Formerly gated every mail-sync/draft-download/local-sync/topic-pull route
+# to members of one specific tenant (see _is_data_admin) -- replaced by real
+# per-source ownership (IetfLocalSource.owner_account_id / Dataset.created_by,
+# see IetfImportService.register_local_source and
+# ask_decision_agent._discover_evolution_corpora): any logged-in account may
+# now pull its own sources, own what it pulls, and choose whether to share
+# it, the same way Sessions/Research already worked. Only /api/observability
+# remains gated here -- it's org-wide cost/usage across every account, not
+# one account's own data, so it stays restricted rather than opened to every
+# self-service sign-up.
 _DATA_ADMIN_ONLY_EXACT_PATHS = {
-    "/api/corpora/mail-sync",
-    "/api/corpora/draft-download",
-    "/api/corpora/draft-download-all",
-    "/api/corpora/local-sync",
-    "/api/corpora/local-index",
-    "/api/corpora/local-embedding-index",
-    "/api/corpora/topic-pull",
-    # Read-only, but org-wide across every account -- not one account's own
-    # data the way Sessions/Research are, so it's gated the same as the
-    # mutating actions above rather than left open to every self-service
-    # sign-up.
     "/api/observability",
 }
 
 
 def _is_data_admin_route(path: str) -> bool:
-    if path in _DATA_ADMIN_ONLY_EXACT_PATHS:
-        return True
-    return path.startswith("/api/sources/") and path.endswith("/download")
+    return path in _DATA_ADMIN_ONLY_EXACT_PATHS
 
 
 def _is_data_admin(account) -> bool:
@@ -750,7 +737,7 @@ def main() -> None:
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
 
         try:
-            _text, catalog = _list_available_corpora()
+            _text, catalog = _list_available_corpora(g.account.id)
             return jsonify({"catalog": catalog})
         except Exception as exc:
             traceback.print_exc()
@@ -809,11 +796,13 @@ def main() -> None:
         the enrichment rows would still pay that cost for every local
         source up front, defeating the point.
         """
+        from extensions.ext_database import db
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
         from services.ietf_import_service import IetfImportService
 
+        viewer_account_id = g.account.id
         try:
-            _text, catalog = _list_available_corpora()
+            _text, catalog = _list_available_corpora(viewer_account_id)
         except Exception as exc:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
@@ -822,12 +811,28 @@ def main() -> None:
         # Identity only at this point -- catalog entries already carry a
         # real rfc_number/wg with no live lookup; local-only entries defer
         # that live resolution until after paging/filtering below, since
-        # it's the expensive part.
-        identities = [{**entry, "is_local": False} for entry in catalog]
-        for draft_name in IetfImportService.list_local_source_names():
+        # it's the expensive part. is_owner is the same "does this account's
+        # id match the recorded owner" check for both branches -- datasets
+        # via Dataset.created_by (see _discover_evolution_corpora), local
+        # sources via IetfLocalSource.owner_account_id -- surfaced so the
+        # frontend only offers a share/unshare control to the real owner.
+        identities = [
+            {**entry, "is_local": False, "is_owner": entry["owner_account_id"] == viewer_account_id}
+            for entry in catalog
+        ]
+        for draft_name in IetfImportService.list_local_source_names(viewer_account_id):
             if draft_name in registered_names:
                 continue
-            identities.append({"draft_name": draft_name, "is_local": True})
+            owner_info = IetfImportService.get_local_source_owner_info(draft_name) or {}
+            identities.append(
+                {
+                    "draft_name": draft_name,
+                    "is_local": True,
+                    "owner_account_id": owner_info.get("owner_account_id"),
+                    "shared": owner_info.get("shared", False),
+                    "is_owner": owner_info.get("owner_account_id") == viewer_account_id,
+                }
+            )
 
         query = (request.args.get("q") or "").strip().lower()
         kind = (request.args.get("kind") or "").strip().lower()
@@ -865,6 +870,19 @@ def main() -> None:
         else:
             offset = 0
             page_size = total
+
+        # Batched, and only for this page -- an owner badge is cosmetic, not
+        # worth a per-entry query across all ~45 rows on every request.
+        owner_ids = {e["owner_account_id"] for e in identities if e.get("owner_account_id")}
+        owner_emails = {}
+        if owner_ids:
+            from models.account import Account
+
+            owner_emails = dict(
+                db.session.query(Account.id, Account.email).filter(Account.id.in_(owner_ids)).all()
+            )
+        for entry in identities:
+            entry["owner_email"] = owner_emails.get(entry.get("owner_account_id"))
 
         def _enrich(entry: dict) -> dict:
             # Identity resolution AND enrichment for one entry, run off the
@@ -1052,9 +1070,12 @@ def main() -> None:
         draft_name = (request.args.get("draft_name") or "").strip()
         if not draft_name:
             return jsonify({"error": "draft_name is required"}), 400
+        account_id = g.account.id
 
         def work(on_event):
-            return IetfImportService.download_all_draft_revisions_to_local(draft_name, on_event=on_event)
+            return IetfImportService.download_all_draft_revisions_to_local(
+                draft_name, on_event=on_event, owner_account_id=account_id
+            )
 
         return _sse_stream(app, work)
 
@@ -1074,9 +1095,10 @@ def main() -> None:
         draft_name = (request.args.get("draft_name") or "").strip()
         if not draft_name:
             return jsonify({"error": "draft_name is required"}), 400
+        account_id = g.account.id
 
         def work(on_event):
-            return IetfImportService.sync_local_source(draft_name, on_event=on_event)
+            return IetfImportService.sync_local_source(draft_name, on_event=on_event, owner_account_id=account_id)
 
         return _sse_stream(app, work)
 
@@ -1147,6 +1169,26 @@ def main() -> None:
             return jsonify({"status": "not_found"})
         return jsonify(status)
 
+    @app.route(f"{_URL_PREFIX}/api/corpora/local-share", methods=["POST"])
+    def api_corpora_local_share():
+        """Toggle a local source's visibility to every other Prism account.
+        Owner-only -- IetfImportService.set_local_source_shared itself
+        refuses anyone else, this just surfaces that as a normal 403 instead
+        of a 200 wrapping an {"error": ...} body.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        data = request.get_json(silent=True) or {}
+        draft_name = (data.get("draft_name") or "").strip()
+        shared = bool(data.get("shared"))
+        if not draft_name:
+            return jsonify({"error": "draft_name is required"}), 400
+        result = IetfImportService.set_local_source_shared(draft_name, g.account.id, shared)
+        if result.get("error"):
+            status_code = 404 if "not a tracked" in result["error"] else 403
+            return jsonify(result), status_code
+        return jsonify(result)
+
     @app.route(f"{_URL_PREFIX}/api/corpora/topic-discover", methods=["GET"])
     def api_corpora_topic_discover():
         """Discover RFCs for a bare topic phrase (e.g. "DNSSEC") -- no LLM
@@ -1209,9 +1251,9 @@ def main() -> None:
         # Known RFC numbers this instance already has -- real corpora and
         # already-added local sources alike -- so the UI can badge/pre-uncheck
         # them instead of offering to "add" something already tracked.
-        _text, catalog = _list_available_corpora()
+        _text, catalog = _list_available_corpora(g.account.id)
         known_rfc_numbers = {str(entry["rfc_number"]) for entry in catalog if entry.get("rfc_number")}
-        for draft_name in IetfImportService.list_local_source_names():
+        for draft_name in IetfImportService.list_local_source_names(g.account.id):
             rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
             if rfc_number:
                 known_rfc_numbers.add(str(rfc_number))
@@ -1277,6 +1319,7 @@ def main() -> None:
         if not rfc_numbers_param:
             return jsonify({"error": "rfc_numbers is required"}), 400
         rfc_numbers = [n.strip() for n in rfc_numbers_param.split(",") if n.strip()]
+        account_id = g.account.id
 
         def work(on_event):
             results = []
@@ -1293,7 +1336,7 @@ def main() -> None:
                 if not draft_name:
                     results.append({"rfc": rfc_number, "ok": False, "error": "could not resolve a draft name"})
                     continue
-                sync_result = IetfImportService.sync_local_source(draft_name)
+                sync_result = IetfImportService.sync_local_source(draft_name, owner_account_id=account_id)
                 if sync_result.get("error"):
                     results.append(
                         {"rfc": rfc_number, "draft_name": draft_name, "ok": False, "error": sync_result["error"]}
@@ -1553,6 +1596,7 @@ def main() -> None:
                     model_tenant_id=model_tenant_id,
                     claim_labels=claim_labels,
                     evidence=evidence,
+                    viewer_account_id=account.id,
                     **model_kwargs,
                 )
                 usage_summary = usage[0] if usage else None
@@ -1653,8 +1697,10 @@ def main() -> None:
     @app.route(f"{_URL_PREFIX}/api/observability", methods=["GET"])
     def api_observability():
         """Org-wide usage/cost/quality trends -- gated to data admins by
-        _require_console_login (see _DATA_ADMIN_ONLY_EXACT_PATHS), same as
-        every other action that reaches beyond one account's own data.
+        _require_console_login (see _DATA_ADMIN_ONLY_EXACT_PATHS): the one
+        remaining action that reaches beyond what one account owns or has
+        been shared, everything else now being covered by real per-source
+        ownership instead (see IetfLocalSource, Dataset.created_by).
         """
         from services.agentic_rag_session_service import AgenticRagSessionService
 
@@ -1811,9 +1857,10 @@ def main() -> None:
         query = (request.args.get("query") or "").strip()
         if not query:
             return jsonify({"error": "query is required"}), 400
+        account_id = g.account.id
 
         def work(on_event):
-            return decision_thread(draft, query, on_event=on_event)
+            return decision_thread(draft, query, on_event=on_event, viewer_account_id=account_id)
 
         return _sse_stream(app, work)
 

@@ -2652,6 +2652,7 @@ function wireSourceCardsIn(root) {
   root.querySelectorAll('[data-read-rfc]').forEach((btn) => btn.addEventListener('click', () => { go('document'); loadDocument(btn.dataset.readRfc); }));
   root.querySelectorAll('[data-local-index]').forEach((btn) => btn.addEventListener('click', () => runLocalIndex(btn)));
   root.querySelectorAll('[data-local-embed]').forEach((btn) => btn.addEventListener('click', () => runLocalEmbed(btn)));
+  root.querySelectorAll('[data-local-share]').forEach((btn) => btn.addEventListener('click', () => runLocalShare(btn)));
   root.querySelectorAll('.ps-more').forEach((el) => {
     el.addEventListener('toggle', () => {
       const idx = Number(el.dataset.idx);
@@ -2698,9 +2699,17 @@ function sourceStatusPill(c) {
   if (idxStat.built) return '<span class="po-pill">BM25 indexed</span>';
   return '<span class="po-pill po-warn">Not indexed</span>';
 }
+// "you" beats an email for the common case (skimming your own list), and
+// avoids exposing another account's address in a UI two strangers might
+// both be looking at -- "another account" is enough to explain why a
+// source is there without a share/unshare control next to it.
+function ownerBadge(c) {
+  const who = c.is_owner ? 'you' : 'another account';
+  return `Pulled by ${who} &middot; ${c.shared ? 'Shared' : 'Private'}`;
+}
 function renderSourceGroup(c, idx) {
   const label = c.rfc_number ? `RFC ${escapeHtml(String(c.rfc_number))}` : escapeHtml(c.draft_name || 'Untitled source');
-  const subtitle = `${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''} &middot; ${c.is_local ? 'Local library' : 'Dify dataset'}`;
+  const subtitle = `${escapeHtml(c.draft_name || '')}${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''} &middot; ${c.is_local ? 'Local library' : 'Dify dataset'} &middot; ${ownerBadge(c)}`;
   let bodyHtml;
   if (c.is_local) {
     const ls = c.local_status || {};
@@ -2756,6 +2765,11 @@ function renderSourceGroup(c, idx) {
           <small>${denseCaption}</small>
         </div>
       </div>
+      ${c.is_owner ? `
+      <div class="po-actions" style="margin-top:14px;">
+        <button type="button" class="po-secondary" data-local-share="${escapeHtml(c.draft_name)}" data-shared="${c.shared ? '1' : '0'}">${c.shared ? 'Unshare' : 'Share with everyone'}</button>
+        <small class="po-tiny">${c.shared ? 'Every Prism account can see and search this.' : 'Only you can see and search this until you share it.'}</small>
+      </div>` : ''}
       ${c.wg ? `
       <details class="ps-more" data-idx="${idx}">
         <summary>Additional working-group materials</summary>
@@ -2779,7 +2793,9 @@ function renderSourceGroup(c, idx) {
         <div>Email${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}<small>${mailValue}</small></div>
         <div>Drafts &amp; RFC<small>${draftValue}</small></div>
       </div>
-      <p class="po-tiny">Registered Dify dataset -- keep its dataset status separate from local download and index status above.</p>
+      <p class="po-tiny">Registered Dify dataset -- keep its dataset status separate from local download and index status above.${
+        c.is_owner && !c.shared ? ' This dataset is private to you; share it with everyone by changing its permission in Studio (dataset settings &rarr; Permissions &rarr; All team members).' : ''
+      }</p>
       <div class="po-actions" style="margin-top:14px;">
         ${c.wg ? `<button type="button" class="po-secondary" data-sync-mail="1" data-wg="${escapeHtml(c.wg)}" data-draft="${escapeHtml(c.draft_name)}">Sync mail</button>` : ''}
         ${c.rfc_number ? `<button type="button" class="po-secondary" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}
@@ -2795,6 +2811,25 @@ function renderSourceGroup(c, idx) {
       </summary>
       <div class="ps-body">${bodyHtml}</div>
     </details>`;
+}
+function runLocalShare(btn) {
+  const draftName = btn.dataset.localShare;
+  const nextShared = btn.dataset.shared !== '1';
+  btn.disabled = true;
+  btn.textContent = nextShared ? 'Sharing…' : 'Unsharing…';
+  fetch(`${PRISM_PREFIX}/api/corpora/local-share`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ draft_name: draftName, shared: nextShared }),
+  }).then(async (r) => {
+    if (!r.ok) {
+      const result = await r.json().catch(() => ({}));
+      setSourceQueueText(`${draftName}: ${result.error || 'could not change sharing.'}`);
+    } else {
+      setSourceQueueText(`${draftName}: ${nextShared ? 'now shared with everyone.' : 'now private to you.'}`);
+    }
+    refreshSingleSource(draftName);
+  }).catch(() => { setSourceQueueText(`${draftName}: could not change sharing.`); refreshSingleSource(draftName); });
 }
 function runLocalIndex(btn) {
   const draftName = btn.dataset.localIndex;

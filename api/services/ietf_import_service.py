@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Literal, TypedDict
 
 import httpx
+import sqlalchemy as sa
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, ConfigDict, Field
 from yarl import URL
@@ -345,13 +346,13 @@ class IetfImportService:
 
     # A brand-new draft added from the Sources tab has no Dify dataset (so
     # _discover_evolution_corpora can't find it by content signature) --
-    # this is the minimal local record of "the user chose to track this one",
-    # just the draft name itself. Everything else about it (WG, RFC number,
-    # mail sync status, latest revision) is resolved live the same way the
-    # real, dataset-backed corpora already are -- keeping this registry as
-    # thin as possible avoids a second, divergent source of truth for facts
-    # that are already fetched fresh elsewhere.
-    _LOCAL_SOURCES_PATH = Path("/app/api/storage/ietf-downloads/local_sources.json")
+    # IetfLocalSource is the minimal local record of "an account chose to
+    # track this one", plus who pulled it and whether they've shared it.
+    # Everything else about it (WG, RFC number, mail sync status, latest
+    # revision) is resolved live the same way the real, dataset-backed
+    # corpora already are -- keeping this registry as thin as possible
+    # avoids a second, divergent source of truth for facts that are already
+    # fetched fresh elsewhere.
 
     # Only used by get_local_resource_status below (download_wg_resource_to_local
     # keeps its own inline literal for this same directory, matching this
@@ -360,23 +361,68 @@ class IetfImportService:
     _RESOURCES_DIR = Path("/app/api/storage/ietf-downloads/resources")
 
     @staticmethod
-    def list_local_source_names() -> list[str]:
-        if not IetfImportService._LOCAL_SOURCES_PATH.is_file():
-            return []
-        try:
-            data = json.loads(IetfImportService._LOCAL_SOURCES_PATH.read_text())
-            return [str(name) for name in data] if isinstance(data, list) else []
-        except (json.JSONDecodeError, OSError):
-            return []
+    def list_local_source_names(viewer_account_id: str | None = None) -> list[str]:
+        """Draft names visible to `viewer_account_id`: their own pulls
+        (shared or not) plus anything anyone else has shared. Omitting
+        viewer_account_id (an internal/no-viewer-context caller) sees only
+        already-shared sources -- fails closed rather than risk leaking a
+        private pull to a caller with no identity to check against.
+        """
+        from models.ietf_local_source import IetfLocalSource
+
+        query = db.session.query(IetfLocalSource.draft_name)
+        if viewer_account_id:
+            query = query.filter(
+                sa.or_(
+                    IetfLocalSource.owner_account_id == viewer_account_id,
+                    IetfLocalSource.shared.is_(True),
+                )
+            )
+        else:
+            query = query.filter(IetfLocalSource.shared.is_(True))
+        return [row[0] for row in query.all()]
 
     @staticmethod
-    def register_local_source(draft_name: str) -> None:
-        names = IetfImportService.list_local_source_names()
-        if draft_name in names:
+    def get_local_source_owner_info(draft_name: str) -> dict | None:
+        """{"owner_account_id", "shared"} for one tracked draft, or None if
+        it isn't tracked at all -- used by the Sources page to render an
+        owner badge and decide whether to show a share/unshare control."""
+        from models.ietf_local_source import IetfLocalSource
+
+        row = db.session.query(IetfLocalSource).filter_by(draft_name=draft_name).first()
+        if not row:
+            return None
+        return {"owner_account_id": row.owner_account_id, "shared": row.shared}
+
+    @staticmethod
+    def register_local_source(draft_name: str, owner_account_id: str) -> None:
+        """Idempotent, same as the old flat-list version's dedup -- but the
+        first account to ever pull a given draft owns it from then on;
+        a later pull of the same draft_name by a different account is a
+        no-op here (ownership isn't reassignable by just pulling again)."""
+        from models.ietf_local_source import IetfLocalSource
+
+        existing = db.session.query(IetfLocalSource).filter_by(draft_name=draft_name).first()
+        if existing:
             return
-        names.append(draft_name)
-        IetfImportService._LOCAL_SOURCES_PATH.parent.mkdir(parents=True, exist_ok=True)
-        IetfImportService._LOCAL_SOURCES_PATH.write_text(json.dumps(names, indent=2))
+        db.session.add(IetfLocalSource(draft_name=draft_name, owner_account_id=owner_account_id, shared=False))
+        db.session.commit()
+
+    @staticmethod
+    def set_local_source_shared(draft_name: str, account_id: str, shared: bool) -> dict:
+        """Only the owning account may flip this. Returns an {"error": ...}
+        dict (this service's usual convention for a caller-facing failure)
+        rather than raising, so the route can jsonify it directly."""
+        from models.ietf_local_source import IetfLocalSource
+
+        row = db.session.query(IetfLocalSource).filter_by(draft_name=draft_name).first()
+        if not row:
+            return {"error": f"{draft_name!r} is not a tracked local source."}
+        if row.owner_account_id != account_id:
+            return {"error": "Only the account that pulled this source can share or unshare it."}
+        row.shared = shared
+        db.session.commit()
+        return {"draft_name": draft_name, "shared": shared}
 
     @staticmethod
     def get_local_download_status(draft_name: str, wg: str | None, rfc_number: str | None) -> dict:
@@ -427,7 +473,9 @@ class IetfImportService:
         }
 
     @staticmethod
-    def download_all_draft_revisions_to_local(draft_name: str, on_event=None) -> dict:
+    def download_all_draft_revisions_to_local(
+        draft_name: str, on_event=None, owner_account_id: str | None = None
+    ) -> dict:
         """Sync every existing revision of one draft's plain text to local
         storage, plus its published RFC (in whatever format the sidecar
         actually reports for it) if it has one -- the bulk counterpart to
@@ -463,7 +511,8 @@ class IetfImportService:
         except Exception as exc:
             return {"error": f"Could not retrieve revision info for '{draft_name}': {exc}"}
 
-        IetfImportService.register_local_source(draft_name)
+        if owner_account_id:
+            IetfImportService.register_local_source(draft_name, owner_account_id)
 
         local_dir = Path("/app/api/storage/ietf-downloads")
         local_dir.mkdir(parents=True, exist_ok=True)
@@ -524,7 +573,7 @@ class IetfImportService:
         return {"draft_name": draft_name, "revisions": results, "rfc_number": rfc_number, "rfc": rfc_result}
 
     @staticmethod
-    def sync_local_source(draft_name: str, on_event=None) -> dict:
+    def sync_local_source(draft_name: str, on_event=None, owner_account_id: str | None = None) -> dict:
         """The single "Sync" action for a locally-tracked source: everything
         raw it could have -- draft revisions, its RFC once published, and
         its WG's mail (both raw and threaded) -- pulled current in one call.
@@ -541,7 +590,9 @@ class IetfImportService:
             if on_event:
                 on_event({"stage": "syncing", "message": message})
 
-        draft_result = IetfImportService.download_all_draft_revisions_to_local(draft_name, on_event=on_event)
+        draft_result = IetfImportService.download_all_draft_revisions_to_local(
+            draft_name, on_event=on_event, owner_account_id=owner_account_id
+        )
         wg = IetfImportService.resolve_wg_for_draft(draft_name)
 
         mail_result = None

@@ -35,6 +35,7 @@ from .enums import (
 )
 from .execution_extra_content import ExecutionExtraContent, HumanInputContent
 from .human_input import HumanInputForm
+from .ietf_local_source import IetfLocalSource
 from .model import (
     AccountTrialAppRecord,
     ApiRequest,
@@ -163,6 +164,7 @@ __all__ = [
     "HumanInputContent",
     "HumanInputForm",
     "IconType",
+    "IetfLocalSource",
     "InstalledApp",
     "InvitationCode",
     "LoadBalancingModelConfig",

@@ -4,25 +4,14 @@ from scripts.agentic_rag.serve_ui import _is_data_admin_route
 
 
 class TestIsDataAdminRoute:
-    @pytest.mark.parametrize(
-        "path",
-        [
-            "/api/corpora/mail-sync",
-            "/api/corpora/draft-download",
-            "/api/corpora/draft-download-all",
-            "/api/corpora/local-sync",
-            "/api/corpora/local-index",
-            "/api/corpora/topic-pull",
-            "/api/sources/dnsop/agenda/download",
-            "/api/sources/ledbat/minutes/download",
-            "/api/observability",
-        ],
-    )
-    def test_admin_only_actions_require_admin(self, path):
-        # Mostly mutating data-sync actions, plus /api/observability -- a
-        # read-only route still gated the same way since it's org-wide
-        # across every account, not one account's own data.
-        assert _is_data_admin_route(path) is True
+    def test_observability_is_the_only_admin_only_route(self):
+        # Every other former admin-only action (mail-sync, draft-download,
+        # local-sync, local-index, topic-pull, sources/.../download) is now
+        # gated by real per-source ownership instead (IetfLocalSource.
+        # owner_account_id / Dataset.created_by) -- /api/observability is
+        # org-wide across every account, not one account's own data, so it's
+        # the one route still restricted here.
+        assert _is_data_admin_route("/api/observability") is True
 
     @pytest.mark.parametrize(
         "path",
@@ -33,8 +22,17 @@ class TestIsDataAdminRoute:
             "/api/corpora/mailing-lists",
             "/api/corpora/wg-documents",
             "/api/corpora/topic-discover",
+            "/api/corpora/mail-sync",
+            "/api/corpora/draft-download",
+            "/api/corpora/draft-download-all",
+            "/api/corpora/local-sync",
+            "/api/corpora/local-index",
+            "/api/corpora/local-embedding-index",
+            "/api/corpora/local-share",
+            "/api/corpora/topic-pull",
             "/api/sources/types",
             "/api/sources/dnsop/agenda",
+            "/api/sources/dnsop/agenda/download",
             "/api/ask",
             "/api/deep-dive",
             "/api/panorama",
@@ -44,13 +42,10 @@ class TestIsDataAdminRoute:
             "/login",
         ],
     )
-    def test_read_only_and_research_routes_stay_open(self, path):
+    def test_everything_else_stays_open(self, path):
         # A visitor's own personal Dify tenant (from self-service sign-up)
-        # must never gate these -- Research/Sessions/Feedback and read-only
-        # browsing are open to any logged-in account by design.
+        # must never gate these -- any logged-in account may pull/register
+        # its own sources now, own what it pulls, and choose to share it;
+        # Research/Sessions/Feedback and read-only browsing were already
+        # open to any logged-in account by design.
         assert _is_data_admin_route(path) is False
-
-    def test_download_suffix_alone_is_not_enough(self):
-        # Guards against a too-loose match -- only paths actually under
-        # /api/sources/ should be caught by the "/download" suffix rule.
-        assert _is_data_admin_route("/api/other/download") is False
