@@ -273,14 +273,19 @@
     font-size: 12px; color: var(--po-ink); transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s; z-index: 1;
   }
   .po-actnode small { display: block; color: var(--po-muted); font-size: 10px; margin-bottom: 3px; }
+  /* Block-level (a <small>, not an inline <span>) so it wraps onto its own
+     line below the title instead of running on right after it. This is
+     the node's latest real finding (see actVisitText) -- "4 matches
+     found", not a reached/not-reached flag, which the highlight below
+     already conveys on its own. */
+  .po-actnode .po-acttag { color: var(--po-cyan); margin-top: 6px; margin-bottom: 0; }
   .po-actnode.dormant { opacity: 0.35; }
   .po-actnode.visited { border-color: color-mix(in srgb, var(--po-cyan) 55%, var(--po-line)); }
   .po-actnode.current { border-color: var(--po-cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-cyan) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-cyan) 14%, transparent); }
   .po-actnode.inspect { outline: 2px solid var(--po-accent); outline-offset: 2px; }
-  /* Reached-but-nothing-found-yet gets its own border color instead of a
-     text label -- the node's own highlight already says "reached". */
   .po-actnode.empty-only { border-color: color-mix(in srgb, var(--po-warn) 55%, var(--po-line)); }
   .po-actnode.empty-only.current { border-color: var(--po-warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-warn) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-warn) 14%, transparent); }
+  .po-actnode.empty-only .po-acttag { color: var(--po-warn); }
   .po-actnode.just-updated { animation: po-act-pulse 0.9s ease-out; }
   @keyframes po-act-pulse {
     0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--po-cyan) 45%, transparent); }
@@ -1726,6 +1731,18 @@ function actSchedule() {
     } else { actStop(); renderAct(false); }
   }, Number(document.getElementById('poActSpeed').value));
 }
+// One real, evolving line per event -- "4 matches found", "no matches",
+// "pulled as a local source" -- reused for both a node's own tag (its
+// latest revealed event) and the detail panel's full visit history.
+function actVisitText(ev) {
+  if (ev.matchCount) return `${ev.matchCount} match${ev.matchCount === 1 ? '' : 'es'} found`;
+  if (ev.repLast.outcome === 'fetched') return 'Full text retrieved';
+  if (ev.anyMatch) return 'Found something';
+  if (ev.emptyCount) return `${ev.count > 1 ? ev.count + ' calls, ' : ''}no matches`;
+  if (ev.repLast.outcome === 'verify') return 'Verification checkpoint';
+  if (ev.repLast.outcome === 'write') return 'Pulled as a local source';
+  return 'Outcome not recorded';
+}
 function actRenderMap(animate) {
   const mapEl = document.getElementById('poActMap');
   const width = mapEl.clientWidth || 600;
@@ -1750,11 +1767,15 @@ function actRenderMap(animate) {
     if (i === currentNodeIdx) cls.push('current');
     if (i === actSelectedNode && i !== currentNodeIdx) cls.push('inspect');
     if (visited && anyEmpty && !anyMatch) cls.push('empty-only');
-    // Reached/current/productive are already conveyed by the node's own
-    // highlight state (and the edge that draws into it) -- a text label
-    // repeating that would just be saying the same thing twice.
+    // Reached/not-reached is already conveyed by the node's own highlight
+    // state (and whether an edge has drawn into it yet) -- repeating that
+    // as text would say nothing new. What IS worth a line here is the
+    // latest real finding at this node, same wording actVisitText gives
+    // the detail panel -- an actual result, not a reached/not-reached flag.
+    const tag = visited ? actVisitText(actEvents[seenSoFar[seenSoFar.length - 1]]) : '';
     return `<button type="button" class="${cls.join(' ')}" data-actnode="${i}" style="left:${pos[i][0]}px;top:${pos[i][1]}px">`
-      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong></button>`;
+      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong>`
+      + (tag ? `<small class="po-acttag">${escapeHtml(tag)}</small>` : '') + `</button>`;
   }).join('');
   const svg = document.getElementById('poActEdges');
   svg.replaceChildren();
@@ -1813,16 +1834,10 @@ function actRenderDetail() {
   document.getElementById('poActDescription').textContent = visible.length
     ? `${node.kind} · ${totalCalls} call${totalCalls === 1 ? '' : 's'} so far, ${matchEvents} found something.`
     : 'Not reached yet in this replay.';
-  document.getElementById('poActVisits').innerHTML = visible.map((ev) => {
-    const text = ev.matchCount ? `${ev.matchCount} match${ev.matchCount === 1 ? '' : 'es'} found`
-      : ev.repLast.outcome === 'fetched' ? 'Full text retrieved'
-      : ev.anyMatch ? 'Found something'
-      : ev.emptyCount ? `${ev.count > 1 ? ev.count + ' calls, ' : ''}no matches`
-      : (ev.repLast.outcome === 'verify' ? 'Verification checkpoint'
-        : ev.repLast.outcome === 'write' ? 'Pulled as a local source' : 'Outcome not recorded');
-    return `<div class="po-actvisit${ev.anyMatch ? '' : ' empty'}"><span class="po-acttool">${escapeHtml(ev.title)}</span>`
-      + `<span class="po-actoutcome">${escapeHtml(text)}</span></div>`;
-  }).join('');
+  document.getElementById('poActVisits').innerHTML = visible.map((ev) =>
+    `<div class="po-actvisit${ev.anyMatch ? '' : ' empty'}"><span class="po-acttool">${escapeHtml(ev.title)}</span>`
+      + `<span class="po-actoutcome">${escapeHtml(actVisitText(ev))}</span></div>`
+  ).join('');
 }
 // Each distinct real search-query argument the model used, as its own
 // "line of inquiry" -- status only ever says whether something was
