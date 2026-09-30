@@ -251,6 +251,74 @@
   .po-planstep.errored { color: var(--po-warn); }
   .po-planmarker { width: 14px; flex-shrink: 0; }
   .po-planreason { color: var(--po-muted); font-size: 11px; margin-top: 2px; }
+
+  /* Research activity -- replay/route visualization. Node/edge positions
+     are computed in JS (see the map() function); these rules only cover
+     static chrome and per-state appearance. */
+  .po-acttoolbar { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin: 4px 0 18px; }
+  .po-actswitch { display: flex; gap: 5px; background: var(--po-soft); padding: 5px; border-radius: 10px; }
+  .po-actswitch button { border: 0; background: transparent; padding: 8px 13px; border-radius: 6px; font-size: 12px; color: var(--po-muted); cursor: pointer; }
+  .po-actswitch button[aria-pressed="true"] { background: var(--po-paper); color: var(--po-accent); }
+  .po-actcontrols { display: flex; align-items: center; gap: 8px; }
+  .po-actcontrols button, .po-actcontrols select { border: 1px solid var(--po-line); background: var(--po-paper); color: var(--po-ink); padding: 8px 13px; border-radius: 7px; font-size: 12px; cursor: pointer; }
+  #poActPlay { min-width: 100px; }
+  .po-actlayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+  .po-actcanvas { position: relative; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 14px; padding: 18px; min-width: 0; }
+  .po-actcanvashead { display: flex; justify-content: space-between; gap: 16px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--po-muted); }
+  .po-actbadge { color: var(--po-accent); text-transform: none; letter-spacing: normal; }
+  .po-actmap { position: relative; min-height: 400px; margin-top: 18px; }
+  .po-actedges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  .po-actnode {
+    position: absolute; width: 155px; min-height: 64px; text-align: left; padding: 10px 12px;
+    background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; cursor: pointer;
+    font-size: 12px; color: var(--po-ink); transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s; z-index: 1;
+  }
+  .po-actnode small { display: block; color: var(--po-muted); font-size: 10px; margin-bottom: 3px; }
+  .po-actnode.future { opacity: 0.4; }
+  .po-actnode.done { border-color: var(--po-cyan); }
+  .po-actnode.current { border-color: var(--po-cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-cyan) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-cyan) 14%, transparent); }
+  .po-actnode.inspect { outline: 2px solid var(--po-accent); outline-offset: 2px; }
+  .po-actnode.errored { border-color: var(--po-warn); }
+  .po-actnode.errored small { color: var(--po-warn); }
+  .po-actdetail { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 20px; align-self: start; }
+  .po-actdetail h3 { font-size: 15px; font-weight: 500; margin: 6px 0 4px; }
+  .po-actdetail p { color: var(--po-muted); font-size: 12px; }
+  .po-actdetail dl { margin: 18px 0; }
+  .po-actdetail dt { color: var(--po-muted); font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 14px; }
+  .po-actdetail dd { margin: 4px 0 0; font-size: 13px; }
+  .po-acttool { font: 11px var(--po-mono); color: var(--po-cyan); }
+  .po-actprogress { display: flex; align-items: center; gap: 12px; margin: 16px 0; font-size: 11px; color: var(--po-muted); }
+  .po-actprogress input { width: 100%; accent-color: var(--po-cyan); }
+  .po-actlegend { display: flex; gap: 18px; color: var(--po-muted); font-size: 11px; flex-wrap: wrap; }
+  .po-actlegend b { color: var(--po-cyan); }
+  .po-actfeed { margin-top: 16px; border-top: 1px solid var(--po-line); padding-top: 14px; display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap; }
+  .po-actfeed strong { color: var(--po-cyan); white-space: nowrap; }
+  .po-actfeed span { color: var(--po-muted); font-size: 12px; }
+  .po-acttravel { display: grid; grid-template-columns: 120px 1fr; gap: 18px; padding: 14px 0; }
+  .po-actera { color: var(--po-accent); font-size: 16px; }
+  .po-acttravel section { border-left: 2px solid var(--po-line); padding-left: 16px; }
+  .po-actstep {
+    display: block; width: 100%; background: var(--po-paper); color: var(--po-ink); text-align: left;
+    border: 1px solid var(--po-line); border-radius: 8px; padding: 10px 14px; margin: 7px 0; cursor: pointer; font-size: 12px;
+  }
+  .po-actstep small { display: block; color: var(--po-muted); font-size: 10px; }
+  .po-actstep.current { border-color: var(--po-cyan); }
+  .po-actstep.future { opacity: 0.4; }
+  .po-actstep.errored { border-color: var(--po-warn); }
+  .po-actlanes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; padding-top: 14px; }
+  .po-actlanehead { color: var(--po-accent); font-size: 12px; margin-bottom: 16px; }
+  @media (max-width: 1100px) {
+    .po-actlayout { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 760px) {
+    .po-actlanes { grid-template-columns: 1fr; }
+    .po-acttravel { grid-template-columns: 90px 1fr; }
+    .po-actnode { width: 130px; }
+    .po-acttoolbar { gap: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .po-actnode { transition: none; }
+  }
   .po-loading { color: var(--po-muted); font-size: 13px; }
 
   /* Decision brief -- eyebrow + narrative sections, real data from the
@@ -762,8 +830,65 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <div id="poThreadBody"></div>
       </div>
       <div data-panel="activity" hidden>
-        <p class="corpora-hint">Research activity for the most recent question appears here once you ask one.</p>
-        <div id="poActivityLog"></div>
+        <p class="corpora-hint" id="poActEmpty">Research activity for the most recent question appears here once you ask one.</p>
+        <div id="poActBody" hidden>
+          <div class="po-acttoolbar">
+            <div class="po-actswitch" role="group" aria-label="Activity visualization">
+              <button type="button" data-actview="route" aria-pressed="true">01 &middot; Route map</button>
+              <button type="button" data-actview="travel" aria-pressed="false">02 &middot; Archive travel</button>
+              <button type="button" data-actview="lanes" aria-pressed="false">03 &middot; Tool lanes</button>
+            </div>
+            <div class="po-actcontrols">
+              <button type="button" id="poActReset" title="Restart replay" aria-label="Restart replay">&#8630;</button>
+              <button type="button" id="poActPlay" class="po-primary">Play replay</button>
+              <button type="button" id="poActNext">Step &rarr;</button>
+              <select id="poActSpeed" aria-label="Replay speed">
+                <option value="2200">1&times; speed</option>
+                <option value="1100">2&times; speed</option>
+              </select>
+            </div>
+          </div>
+          <div class="po-actlayout">
+            <section class="po-actcanvas">
+              <div class="po-actcanvashead">
+                <span id="poActViewTitle">RESEARCH ROUTES</span>
+                <span class="po-actbadge" id="poActState"></span>
+              </div>
+              <div id="poActMap" class="po-actmap">
+                <svg id="poActEdges" class="po-actedges" aria-hidden="true"></svg>
+                <div id="poActNodes"></div>
+              </div>
+              <div id="poActAlternate" class="po-actalternate" hidden></div>
+              <div class="po-actprogress">
+                <span id="poActPosition">01</span>
+                <input type="range" min="0" max="0" value="0" id="poActScrub" aria-label="Replay event">
+                <span id="poActTotal">1</span>
+              </div>
+              <div class="po-actlegend">
+                <span><b>&#9679;</b> Current action</span>
+                <span>&#10003; Completed action</span>
+                <span>Dashed route &middot; forced by a safety net</span>
+              </div>
+              <div class="po-actfeed" role="status">
+                <strong id="poActVerb"></strong>
+                <span id="poActCaption"></span>
+              </div>
+            </section>
+            <aside class="po-actdetail">
+              <div class="po-eyebrow">Selected action</div>
+              <h3 id="poActTitle"></h3>
+              <span class="po-acttool" id="poActTool"></span>
+              <p id="poActDescription"></p>
+              <dl>
+                <dt>Scope</dt><dd id="poActScope"></dd>
+                <dt>Called via</dt><dd id="poActCalledVia"></dd>
+                <dt>Observed outcome</dt><dd id="poActResult"></dd>
+              </dl>
+              <p class="po-tiny">Routes and groupings come from this run's real tool calls -- they summarize the research journey, not hidden reasoning or proof of correctness.</p>
+            </aside>
+          </div>
+          <p class="po-tiny" style="margin-top:10px;">Timing and layout are illustrative, not measured telemetry. Archive travel groups steps by the document each call focused on; Tool lanes group by tool category. Neither implies concurrency.</p>
+        </div>
       </div>
     </section>
 
@@ -1041,8 +1166,9 @@ document.getElementById('poNewBtn').addEventListener('click', () => {
   go('investigation');
   currentSessionId = null;
   lastInvestigation = null;
+  activeAskToken++;
   document.getElementById('poConversation').innerHTML = '';
-  document.getElementById('poActivityLog').innerHTML = '';
+  setActivityData([], true, false);
   document.getElementById('poInvestPills').innerHTML = '';
   document.getElementById('poUsageBar').textContent = '';
   document.getElementById('poInvestTitle').textContent = 'Ask a question about an RFC or draft';
@@ -1272,6 +1398,7 @@ function openSession(id) {
   fetch(`${PRISM_PREFIX}/api/sessions/${id}`).then((r) => r.json()).then((data) => {
     if (data.error) throw new Error(data.error);
     currentSessionId = data.id;
+    activeAskToken++;
     if (data.model_provider && data.model_id) {
       poModelEl.value = `${data.model_provider}|||${data.model_id}`;
     }
@@ -1285,6 +1412,9 @@ function openSession(id) {
       lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
       document.getElementById('poInvestTitle').textContent = lastTurn.query;
       document.getElementById('poInvestPills').innerHTML = deriveStatusPills(lastTurn.answer);
+      setActivityData(lastTurn.trace || [], false, true);
+    } else {
+      setActivityData([], true, false);
     }
     go('investigation');
     view('findings');
@@ -1411,6 +1541,255 @@ function renderPlan(steps) {
   `).join('')}</div>`;
 }
 
+// -- Research activity: route-map replay, structurally ported from the
+// prism-research-journey design mockup (branch/merge bezier paths,
+// current/done/future node states, Archive travel + Tool lanes alternate
+// groupings, play/step/scrub replay controls) -- driven by this run's
+// real trace instead of the mockup's hand-authored illustrative steps.
+// A trace entry's real `iteration` (how many tool calls the model
+// requested together in one turn) is what creates the branch/merge
+// points: entries sharing an iteration are siblings, and every entry in
+// the next iteration merges in from every entry in this one -- no
+// relationship is invented here that the agent didn't actually do.
+const ACT_TOOL_KIND = {
+  list_available_ietf_corpora: 'spec', fetch_ietf_draft_text: 'spec', fetch_ietf_rfc_text: 'spec',
+  get_rfc_relations: 'spec', find_related_rfc_family: 'spec', search_rfc_corpus_bm25: 'spec',
+  find_similar_rfcs_by_meaning: 'spec', add_local_source: 'spec',
+  search_ietf_mailarchive_dataset: 'mail', search_local_source: 'mail', search_wg_minutes: 'mail',
+  search_ietf_evolution_dataset: 'review', diff_ietf_draft_revisions: 'review', cite_iddiff_url: 'review',
+  get_iesg_ballot_comments: 'review', verify_answer: 'review',
+};
+const ACT_LANES = [
+  ['spec', 'Specifications & relationships'], ['mail', 'Mail & minutes'], ['review', 'Comparison & verification'],
+];
+function actTruncate(s, n) { return !s ? '' : (s.length > n ? s.slice(0, n).trim() + '…' : s); }
+// Common arg keys across this agent's tools, in priority order -- whichever
+// is present first names what a call was actually about.
+const ACT_FOCUS_KEYS = ['rfc_number', 'draft_name', 'wg', 'identifier', 'dataset_id'];
+function actFocus(entry) {
+  const args = entry.args || {};
+  for (const key of ACT_FOCUS_KEYS) {
+    const val = args[key];
+    if (val) return key === 'rfc_number' ? `RFC ${String(val).replace(/^rfc/i, '')}` : String(val);
+  }
+  if (args.query) return `"${actTruncate(String(args.query), 30)}"`;
+  return 'General research';
+}
+// Normalizes either shape this can be fed: a live in-progress step (the
+// SSE tool_call event, enriched with tool/args/iteration alongside the
+// fields renderPlan already uses) or a persisted trace entry (what ask()
+// actually saves, and what a reopened session's own turn carries).
+function normalizeActivityEntry(raw, isLive) {
+  return {
+    tool: raw.tool || '',
+    title: toolLabel(raw.tool || ''),
+    reason: isLive ? (raw.reason || null) : null,
+    forced: !!raw.forced,
+    errored: isLive ? raw.status === 'errored' : !!raw.errored,
+    iteration: raw.iteration != null ? raw.iteration : 0,
+    args: raw.args || {},
+    observationPreview: raw.observation_preview || null,
+  };
+}
+
+let activityEntries = [];
+let activityComplete = false;
+let actIndex = 0, actSelected = 0, actView = 'route', actPlaying = false, actTimer = null, actAnimations = [];
+const actReducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+function actGenerations() {
+  const order = [];
+  activityEntries.forEach((e) => { if (!order.includes(e.iteration)) order.push(e.iteration); });
+  return activityEntries.map((e) => order.indexOf(e.iteration));
+}
+function actParents() {
+  const gens = actGenerations();
+  return activityEntries.map((e, i) => {
+    const gen = gens[i];
+    return gen === 0 ? [] : gens.reduce((acc, g, j) => { if (g === gen - 1) acc.push(j); return acc; }, []);
+  });
+}
+
+function actStop() {
+  actPlaying = false;
+  clearTimeout(actTimer);
+  document.getElementById('poActPlay').textContent = 'Play replay';
+  actAnimations.forEach((a) => a.cancel());
+  actAnimations = [];
+}
+function actSchedule() {
+  clearTimeout(actTimer);
+  if (!actPlaying) return;
+  actTimer = setTimeout(() => {
+    if (actIndex < activityEntries.length - 1) {
+      actIndex++; actSelected = actIndex; renderAct(true); actSchedule();
+    } else { actStop(); renderAct(false); }
+  }, Number(document.getElementById('poActSpeed').value));
+}
+function actButtonHtml(i, cls) {
+  const e = activityEntries[i];
+  const status = i > actIndex ? 'future' : (i === actIndex ? 'current' : (e.errored ? 'errored' : 'done'));
+  const marker = i < actIndex ? '&#10003; ' : (i === actIndex ? '&#9679; ' : '');
+  return `<button type="button" class="${cls} ${status}" data-actstep="${i}">`
+    + `<small>${marker}${String(i + 1).padStart(2, '0')} &middot; iter ${e.iteration + 1}</small>`
+    + `${escapeHtml(e.title)}</button>`;
+}
+function actMap(animate) {
+  const mapEl = document.getElementById('poActMap');
+  const width = mapEl.clientWidth || 600;
+  const narrow = width < 600;
+  const cols = narrow ? 2 : 3;
+  const nodeWidth = narrow ? 130 : 155;
+  const gap = narrow ? 115 : 125;
+  const rows = Math.ceil(activityEntries.length / cols);
+  mapEl.style.height = (rows * gap + 12) + 'px';
+  const nodesEl = document.getElementById('poActNodes');
+  nodesEl.innerHTML = activityEntries.map((e, i) => actButtonHtml(i, 'po-actnode')).join('');
+  const pos = activityEntries.map((e, i) => {
+    const row = Math.floor(i / cols), slot = i % cols, col = row % 2 ? cols - 1 - slot : slot;
+    return [col * (width / cols) + (width / cols - nodeWidth) / 2, row * gap + 10];
+  });
+  nodesEl.querySelectorAll('button').forEach((b, i) => {
+    b.style.left = pos[i][0] + 'px';
+    b.style.top = pos[i][1] + 'px';
+    b.classList.toggle('inspect', i === actSelected && i !== actIndex);
+  });
+  const svg = document.getElementById('poActEdges');
+  svg.replaceChildren();
+  svg.setAttribute('viewBox', `0 0 ${width} ${rows * gap + 12}`);
+  actParents().forEach((ps, to) => ps.forEach((from) => {
+    const x1 = pos[from][0] + nodeWidth / 2, y1 = pos[from][1] + 64;
+    const x2 = pos[to][0] + nodeWidth / 2, y2 = pos[to][1];
+    const forced = activityEntries[to].forced;
+    const p = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    p.setAttribute('d', `M${x1},${y1} C${x1},${y1 + 28} ${x2},${y2 - 28} ${x2},${y2}`);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', to <= actIndex ? (forced ? 'var(--po-warn)' : 'var(--po-cyan)') : 'var(--po-line)');
+    p.setAttribute('stroke-width', to === actIndex ? '2.5' : '1.5');
+    if (forced) p.setAttribute('stroke-dasharray', '5 6');
+    p.style.opacity = to <= actIndex ? '0.85' : '0.35';
+    svg.append(p);
+    if (to === actIndex && animate && !actReducedMotion.matches) {
+      const len = p.getTotalLength();
+      actAnimations.push(p.animate(
+        [{ strokeDasharray: len, strokeDashoffset: len }, { strokeDasharray: len, strokeDashoffset: 0 }],
+        { duration: 800, easing: 'ease-out' }
+      ));
+    }
+  }));
+}
+function actTravel() {
+  const eras = [], byEra = {};
+  activityEntries.forEach((e, i) => {
+    const era = actFocus(e);
+    if (!byEra[era]) { byEra[era] = []; eras.push(era); }
+    byEra[era].push(i);
+  });
+  document.getElementById('poActAlternate').innerHTML = eras.map((era) =>
+    `<div class="po-acttravel"><div class="po-actera">${escapeHtml(era)}</div><section>${
+      byEra[era].map((i) => actButtonHtml(i, 'po-actstep')).join('')
+    }</section></div>`
+  ).join('');
+}
+function actLanes() {
+  document.getElementById('poActAlternate').innerHTML = '<div class="po-actlanes">' + ACT_LANES.map(([kind, name]) =>
+    `<section><div class="po-actlanehead">${escapeHtml(name)}</div>${
+      activityEntries.map((e, i) => (ACT_TOOL_KIND[e.tool] || 'review') === kind ? actButtonHtml(i, 'po-actstep') : '').join('')
+    }</section>`
+  ).join('') + '</div>';
+}
+function renderAct(animate) {
+  if (!activityEntries.length) return;
+  const total = activityEntries.length;
+  document.getElementById('poActState').textContent = (activityComplete ? (actPlaying ? 'Replaying' : 'Paused') : 'Live')
+    + ' · event ' + (actIndex + 1) + ' / ' + total;
+  document.getElementById('poActPosition').textContent = String(actIndex + 1).padStart(2, '0');
+  document.getElementById('poActTotal').textContent = String(total);
+  const scrub = document.getElementById('poActScrub');
+  scrub.max = String(total - 1);
+  scrub.value = String(actIndex);
+  scrub.disabled = !activityComplete;
+  document.getElementById('poActPlay').disabled = !activityComplete;
+  document.getElementById('poActNext').disabled = !activityComplete || actIndex >= total - 1;
+  document.getElementById('poActReset').disabled = !activityComplete;
+  const current = activityEntries[actIndex];
+  document.getElementById('poActVerb').textContent = current.title;
+  document.getElementById('poActCaption').textContent = current.reason
+    || (current.errored ? 'This call failed.' : (current.observationPreview
+      ? actTruncate(current.observationPreview, 140)
+      : (current.forced ? 'Forced by a safety net, not the model’s own choice.' : 'Chosen by the model.')));
+  document.getElementById('poActMap').hidden = actView !== 'route';
+  document.getElementById('poActAlternate').hidden = actView === 'route';
+  document.querySelectorAll('[data-actview]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.actview === actView)));
+  document.getElementById('poActViewTitle').textContent = {
+    route: 'RESEARCH ROUTES', travel: 'SOURCE FOCUS · MOVING BETWEEN DOCUMENTS', lanes: 'TOOL LANES · GROUPED BY CATEGORY',
+  }[actView];
+  if (actView === 'route') actMap(animate); else if (actView === 'travel') actTravel(); else actLanes();
+  const s = activityEntries[actSelected];
+  document.getElementById('poActTitle').textContent = s.title;
+  document.getElementById('poActTool').textContent = s.tool;
+  document.getElementById('poActDescription').textContent = s.reason || 'No live reasoning recorded for this call.';
+  document.getElementById('poActScope').textContent = actFocus(s);
+  document.getElementById('poActCalledVia').textContent = s.forced ? 'Forced safety net' : 'Model decision';
+  document.getElementById('poActResult').textContent = s.errored
+    ? ('Failed' + (s.observationPreview ? ': ' + actTruncate(s.observationPreview, 200) : '.'))
+    : (s.observationPreview ? actTruncate(s.observationPreview, 200) : (activityComplete ? 'Not recorded for this call.' : 'Still running…'));
+}
+// isLive selects the normalization shape (see normalizeActivityEntry);
+// complete=false is the still-streaming state (controls disabled, always
+// following the newest entry) -- complete=true is either a finished run
+// or a reopened session, and resets to event 1 so Play replay actually
+// replays the journey rather than opening on the already-finished state.
+function setActivityData(rawEntries, isLive, complete) {
+  activityEntries = rawEntries.map((r) => normalizeActivityEntry(r, isLive));
+  activityComplete = complete;
+  const hasEntries = activityEntries.length > 0;
+  document.getElementById('poActEmpty').hidden = hasEntries;
+  document.getElementById('poActBody').hidden = !hasEntries;
+  if (!hasEntries) return;
+  actStop();
+  if (complete) { actIndex = 0; actSelected = 0; } else { actIndex = activityEntries.length - 1; actSelected = actIndex; }
+  renderAct(true);
+}
+document.getElementById('poActPlay').addEventListener('click', () => {
+  if (!activityComplete) return;
+  if (actPlaying) { actStop(); renderAct(false); return; }
+  if (actIndex >= activityEntries.length - 1) actIndex = 0;
+  actSelected = actIndex;
+  actPlaying = true;
+  document.getElementById('poActPlay').textContent = 'Pause';
+  actSchedule();
+  renderAct(true);
+});
+document.getElementById('poActNext').addEventListener('click', () => {
+  if (!activityComplete) return;
+  actStop();
+  actIndex = Math.min(activityEntries.length - 1, actIndex + 1);
+  actSelected = actIndex;
+  renderAct(true);
+});
+document.getElementById('poActReset').addEventListener('click', () => {
+  if (!activityComplete) return;
+  actStop();
+  actIndex = actSelected = 0;
+  renderAct(false);
+});
+document.getElementById('poActScrub').addEventListener('input', (e) => {
+  if (!activityComplete) return;
+  actStop();
+  actIndex = actSelected = Number(e.target.value);
+  renderAct(false);
+});
+document.getElementById('poActSpeed').addEventListener('change', actSchedule);
+document.querySelectorAll('[data-actview]').forEach((b) => b.addEventListener('click', () => { actView = b.dataset.actview; renderAct(false); }));
+document.getElementById('poActBody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-actstep]');
+  if (!b) return;
+  actSelected = Number(b.dataset.actstep);
+  renderAct(false);
+});
+new ResizeObserver(() => { if (actView === 'route' && activityEntries.length) actMap(false); }).observe(document.getElementById('poActMap'));
+
 // -- Per-turn feedback/copy/usage, ported from serve_ui_template.html's
 // renderFeedback/renderUsage -- same backend (real Dify MessageFeedback via
 // POST /api/messages/<id>/feedback), restyled to po- classes. ------------
@@ -1475,6 +1854,16 @@ document.getElementById('poConversation').addEventListener('click', (e) => {
 
 // -- The real research flow, ported from runAgentFlow, restyled ----------
 let activeAskStop = null;
+// The Research-activity panel (and poInvestPills/updateSessionUsageBar)
+// are page-level singletons, not per-investigation state -- without this,
+// a still-streaming background run's SSE events keep overwriting them
+// even after the user has navigated to a completely different, already-
+// finished session (confirmed live: its route map kept redrawing itself
+// over a past session's activity panel). openSession()/"+ New
+// investigation" bump this so a stale run's later events become no-ops
+// for shared UI; the actual server-side run isn't cancelled by this (see
+// the pre-existing gap on "+ New investigation" not cancelling either).
+let activeAskToken = 0;
 
 // poComposerBar (the entry form, above the conversation) and poFollowupForm
 // (below it) both just write into poQuery and call runAsk() -- identical
@@ -1493,6 +1882,7 @@ function runAsk() {
   const query = queryEl.value.trim();
   if (!query) return;
   if (activeAskStop) { activeAskStop(); return; }
+  const askToken = ++activeAskToken;
 
   const convEl = document.getElementById('poConversation');
   const btnEl = document.getElementById('poAskBtn');
@@ -1554,6 +1944,12 @@ function runAsk() {
 
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    // Stale once the user has navigated to a different investigation
+    // (openSession/"+ New investigation" bump activeAskToken) -- the
+    // conversation turn this closure renders into may be long gone, and
+    // poInvestPills/poUsageBar/the Research-activity panel now belong to
+    // whatever's actually on screen, not this backgrounded run.
+    if (askToken !== activeAskToken) return;
     if (msg.type === 'progress') {
       if (msg.stage === 'started' && msg.request_id) {
         requestId = msg.request_id;
@@ -1561,9 +1957,12 @@ function runAsk() {
         pendingReason = msg.message;
       } else if (msg.stage === 'tool_call') {
         if (steps.length) steps[steps.length - 1].status = 'done';
-        steps.push({ title: toolLabel(msg.tool), reason: pendingReason, status: 'active', forced: msg.forced });
+        steps.push({
+          title: toolLabel(msg.tool), reason: pendingReason, status: 'active', forced: msg.forced,
+          tool: msg.tool, args: msg.args, iteration: msg.iteration,
+        });
         pendingReason = null;
-        document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+        setActivityData(steps, true, false);
       }
       render(steps.length ? '' : '<div class="po-loading">Starting…</div>');
     } else if (msg.type === 'result') {
@@ -1579,7 +1978,11 @@ function runAsk() {
       );
       updateSessionUsageBar();
       document.getElementById('poInvestPills').innerHTML = deriveStatusPills(msg.data.answer);
-      document.getElementById('poActivityLog').innerHTML = renderPlan(steps);
+      // Swap from the live approximation above to the authoritative
+      // persisted trace -- same shape a reopened session's turn carries
+      // (observation_preview/errored included, no ephemeral reason), and
+      // resets the replay to event 1 so Play replay actually replays it.
+      setActivityData(msg.data.trace || [], false, true);
       lastInvestigation = { query, draft: draftVal, trace: msg.data.trace || [] };
       if (msg.data.session_id) {
         currentSessionId = msg.data.session_id;
@@ -1588,6 +1991,10 @@ function runAsk() {
       stop();
     } else if (msg.type === 'error') {
       if (steps.length) steps[steps.length - 1].status = 'errored';
+      // No persisted trace exists on a hard error -- finalize with
+      // whatever live steps did happen so the journey up to the failure
+      // is still replayable, instead of leaving the panel stuck "Live".
+      setActivityData(steps, true, true);
       render(`<div class="po-error">${escapeHtml(msg.message)}</div>${retryButtonHtml}`);
       wireRetryButton();
       stop();
@@ -1596,6 +2003,7 @@ function runAsk() {
   source.onerror = () => {
     if (finished) return;
     if (steps.length) steps[steps.length - 1].status = 'errored';
+    if (askToken === activeAskToken) setActivityData(steps, true, true);
     render(`<div class="po-error">Connection lost.</div>${retryButtonHtml}`);
     wireRetryButton();
     stop();

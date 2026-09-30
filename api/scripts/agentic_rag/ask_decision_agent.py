@@ -2549,7 +2549,14 @@ def ask(
         every subsequent query in the same request, not just this one.
         """
         if on_event:
-            on_event({"stage": "tool_call", "tool": tool_name, "forced": forced})
+            # args/iteration are additive here (the live Research-activity
+            # visualization derives its route map's branch/merge points from
+            # iteration, and each node's "Scope" from args) -- observation/
+            # errored aren't known yet at this point (dispatch hasn't run),
+            # so a live step is only ever a partial preview of the same
+            # shape `trace` below actually persists; the UI re-syncs to the
+            # full trace once ask() returns.
+            on_event({"stage": "tool_call", "tool": tool_name, "forced": forced, "args": args, "iteration": iteration})
         errored = False
         try:
             observation = _dispatch_tool_call(tool_name, args, iteration)
