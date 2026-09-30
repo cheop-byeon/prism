@@ -273,12 +273,14 @@
     font-size: 12px; color: var(--po-ink); transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s; z-index: 1;
   }
   .po-actnode small { display: block; color: var(--po-muted); font-size: 10px; margin-bottom: 3px; }
-  .po-actnode .po-acttag { color: var(--po-cyan); margin-top: 6px; }
   .po-actnode.dormant { opacity: 0.35; }
   .po-actnode.visited { border-color: color-mix(in srgb, var(--po-cyan) 55%, var(--po-line)); }
   .po-actnode.current { border-color: var(--po-cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-cyan) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-cyan) 14%, transparent); }
   .po-actnode.inspect { outline: 2px solid var(--po-accent); outline-offset: 2px; }
-  .po-actnode.empty-only .po-acttag { color: var(--po-warn); }
+  /* Reached-but-nothing-found-yet gets its own border color instead of a
+     text label -- the node's own highlight already says "reached". */
+  .po-actnode.empty-only { border-color: color-mix(in srgb, var(--po-warn) 55%, var(--po-line)); }
+  .po-actnode.empty-only.current { border-color: var(--po-warn); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-warn) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-warn) 14%, transparent); }
   .po-actnode.just-updated { animation: po-act-pulse 0.9s ease-out; }
   @keyframes po-act-pulse {
     0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--po-cyan) 45%, transparent); }
@@ -1748,10 +1750,11 @@ function actRenderMap(animate) {
     if (i === currentNodeIdx) cls.push('current');
     if (i === actSelectedNode && i !== currentNodeIdx) cls.push('inspect');
     if (visited && anyEmpty && !anyMatch) cls.push('empty-only');
-    const tag = !visited ? 'Not yet reached' : (anyMatch ? 'Evidence found' : 'No matches yet');
+    // Reached/current/productive are already conveyed by the node's own
+    // highlight state (and the edge that draws into it) -- a text label
+    // repeating that would just be saying the same thing twice.
     return `<button type="button" class="${cls.join(' ')}" data-actnode="${i}" style="left:${pos[i][0]}px;top:${pos[i][1]}px">`
-      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong>`
-      + `<span class="po-acttag">${tag}</span></button>`;
+      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong></button>`;
   }).join('');
   const svg = document.getElementById('poActEdges');
   svg.replaceChildren();
