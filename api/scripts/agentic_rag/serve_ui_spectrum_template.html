@@ -261,7 +261,11 @@
   .po-actcontrols button, .po-actcontrols select { border: 1px solid var(--po-line); background: var(--po-paper); color: var(--po-ink); padding: 8px 13px; border-radius: 7px; font-size: 12px; cursor: pointer; }
   .po-actcontrols button:disabled, .po-actcontrols select:disabled { opacity: 0.45; cursor: default; }
   #poActPlay { min-width: 100px; }
-  .po-actlayout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 18px; align-items: start; }
+  /* Stacked, not side-by-side -- the map gets the full available width
+     (more room for a wide investigation's node grid), and Selected
+     source runs full-width underneath instead of being squeezed into a
+     fixed 280px column next to it. */
+  .po-actlayout { display: flex; flex-direction: column; gap: 18px; }
   .po-actcanvas { position: relative; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 14px; padding: 18px; min-width: 0; }
   .po-actcanvashead { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--po-muted); }
   .po-actbadge { color: var(--po-accent); font-size: 12px; }
@@ -324,9 +328,6 @@
   .po-actlogrow:first-child { border-top: 0; }
   .po-actlogrow .po-acttool { font: 11px var(--po-mono); color: var(--po-cyan); white-space: nowrap; }
   .po-actlogrow .po-actoutcome { color: var(--po-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  @media (max-width: 1100px) {
-    .po-actlayout { grid-template-columns: 1fr; }
-  }
   @media (max-width: 760px) {
     .po-acttoolbar { gap: 10px; }
   }
@@ -1906,17 +1907,16 @@ function actRenderDetail() {
   const node = actNodes[actSelectedNode];
   if (!node) return;
   document.getElementById('poActTitle').textContent = node.focus;
-  const visibleEvents = node.eventIndices.filter((ei) => ei <= actIndex).map((ei) => actEvents[ei]);
-  const totalCalls = visibleEvents.reduce((t, ev) => t + ev.count, 0);
-  const matchEvents = visibleEvents.filter((ev) => ev.anyMatch).length;
-  document.getElementById('poActDescription').textContent = visibleEvents.length
-    ? `${node.kind} · ${totalCalls} call${totalCalls === 1 ? '' : 's'} so far, ${matchEvents} found something.`
+  const entries = actNodeEntries(node);
+  const matchCalls = entries.filter((e) => e.outcome === 'match' || e.outcome === 'fetched').length;
+  document.getElementById('poActDescription').textContent = entries.length
+    ? `${node.kind} · ${matchCalls} of ${entries.length} call${entries.length === 1 ? '' : 's'} found something.`
     : 'Not reached yet in this replay.';
   // Real text per visit, not a recycled category label: each row is one
   // actual tool call, with its own observation preview (actEntryExcerpt)
   // -- the same real field the box's query rows and the full tool log
   // already draw from, just untruncated-enough here to actually read.
-  document.getElementById('poActVisits').innerHTML = actNodeEntries(node).map((e) => {
+  document.getElementById('poActVisits').innerHTML = entries.map((e) => {
     const queryTag = e.args && e.args.query
       ? `<span class="po-actquerytag">&ldquo;${escapeHtml(actTruncate(String(e.args.query), 40))}&rdquo;</span>` : '';
     return `<div class="po-actvisit${e.outcome === 'empty' ? ' empty' : ''}">`
