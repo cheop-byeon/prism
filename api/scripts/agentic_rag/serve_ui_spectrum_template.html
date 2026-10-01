@@ -1165,6 +1165,7 @@ document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('clic
 function view(name) {
   document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
   document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === name)));
+  if (name === 'timeline') evApplyDefaultScale();
 }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
 
@@ -2526,13 +2527,20 @@ function renderDetailPanel() {
 // touched, and when they were really published (via /api/corpora/rfc-years,
 // rfc-editor.org's own index), is already real, known data -- nothing to
 // ask the user for.
-document.querySelectorAll('[data-evscale]').forEach((b) => b.addEventListener('click', () => {
-  document.querySelectorAll('[data-evscale]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
-  const scale = b.dataset.evscale;
+function evSelectScale(scale) {
+  document.querySelectorAll('[data-evscale]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.evscale === scale)));
   document.getElementById('poEvWithin').hidden = scale !== 'within';
   document.getElementById('poEvAcross').hidden = scale !== 'across';
   if (scale === 'across') buildEvolutionAcross();
-}));
+}
+document.querySelectorAll('[data-evscale]').forEach((b) => b.addEventListener('click', () => evSelectScale(b.dataset.evscale)));
+// Picks the default sub-tab each time Decision history is opened: a
+// "panorama"-style investigation that actually touched two or more
+// published RFCs opens straight on Across specifications (nothing to
+// manually set up), everything else opens on Within a document as before.
+function evApplyDefaultScale() {
+  evSelectScale(evUniqueRfcDigits().length >= 2 ? 'across' : 'within');
+}
 let evRfcData = [];
 // Scans this investigation's own get_rfc_relations/find_related_rfc_family
 // calls for one that actually names the other RFC in the pair -- a real
@@ -2549,12 +2557,15 @@ function evFindRelation(rfcA, rfcB) {
   }
   return null;
 }
-function buildEvolutionAcross() {
+function evUniqueRfcDigits() {
   const digitsList = actNodes
     .filter((n) => n.kind === 'RFC')
     .map((n) => (n.focus.match(/(\d+)/) || [])[1])
     .filter(Boolean);
-  const uniqueDigits = [...new Set(digitsList)];
+  return [...new Set(digitsList)];
+}
+function buildEvolutionAcross() {
+  const uniqueDigits = evUniqueRfcDigits();
   if (uniqueDigits.length < 2) {
     document.getElementById('poEvEmpty').hidden = false;
     document.getElementById('poEvBody').hidden = true;
