@@ -313,11 +313,10 @@
   .po-actside { display: flex; flex-direction: column; gap: 14px; }
   .po-actoverview { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 18px; }
   .po-actoverview p.po-tiny { margin-top: 4px; }
-  .po-actqrow { border-top: 1px solid var(--po-line); padding: 10px 0; font-size: 12px; }
-  .po-actqrow:first-child { border-top: 0; }
-  .po-actqrow .po-actqtext { display: block; margin-bottom: 4px; }
-  .po-actqstatus { font-size: 11px; color: var(--po-warn); }
-  .po-actqstatus.found { color: var(--po-cyan); }
+  .po-actstat { border-top: 1px solid var(--po-line); padding: 12px 0; }
+  .po-actstat:first-child { border-top: 0; }
+  .po-actstat .po-actstatval { display: block; font-size: 20px; font-weight: 500; color: var(--po-ink); }
+  .po-actstat .po-actstatlabel { display: block; color: var(--po-muted); font-size: 11px; margin-top: 2px; }
   .po-actdetail { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 18px; }
   /* Narrower, fixed-ish column for "what/how much" (title, aggregate
      line); the wider column is where the actual per-visit excerpt text
@@ -969,8 +968,8 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
             </div>
             <aside class="po-actside">
               <div class="po-actoverview">
-                <div class="po-eyebrow">Lines of inquiry</div>
-                <p class="po-tiny">Each distinct search this investigation actually ran, and whether it came back with anything -- retrieved is not the same as proven.</p>
+                <div class="po-eyebrow">At a glance</div>
+                <p class="po-tiny">A running summary of this investigation's own activity so far, not any one document's.</p>
                 <div id="poActOverview"></div>
               </div>
             </aside>
@@ -1952,29 +1951,25 @@ function actRenderDetail() {
       + `<span class="po-actoutcome">${escapeHtml(actEntryExcerpt(e, 200))}</span></div>`;
   }).join('');
 }
-// A general overview of the whole investigation's search activity, not
-// any one node's -- every distinct real query the agent ran anywhere,
-// across every document, and whether it ever found anything. Lives
-// beside the map (not inside any one box, not inside Selected source)
-// since it answers a different question than either: not "what did this
-// document turn up" but "what has this investigation actually tried".
+// A glance-level summary of the whole investigation's activity so far
+// (gated on actIndex, same as the map/detail -- it rewinds and replays
+// with the scrubber), not any one node's -- real counts, not a list to
+// read, since that's what a quick glance next to the map calls for.
 function actRenderOverview() {
-  const byQuery = {}, order = [];
-  activityEntries.forEach((e, i) => {
-    const key = e.args && e.args.query ? String(e.args.query).trim() : '';
-    if (!key) return;
-    if (!byQuery[key]) { byQuery[key] = { query: key, revealed: false, anyMatch: false }; order.push(key); }
-    if (actRawToEvent[i] <= actIndex) {
-      byQuery[key].revealed = true;
-      if (e.outcome === 'match') byQuery[key].anyMatch = true;
-    }
-  });
-  const rows = order.filter((k) => byQuery[k].revealed).map((k) => {
-    const q = byQuery[k];
-    return `<div class="po-actqrow"><span class="po-actqtext">&ldquo;${escapeHtml(actTruncate(q.query, 60))}&rdquo;</span>`
-      + `<span class="po-actqstatus${q.anyMatch ? ' found' : ''}">${q.anyMatch ? 'Evidence found' : 'No matches yet'}</span></div>`;
-  });
-  document.getElementById('poActOverview').innerHTML = rows.join('') || '<p class="po-tiny">No distinct search queries yet.</p>';
+  const revealed = activityEntries.filter((e, i) => actRawToEvent[i] <= actIndex);
+  const totalCalls = revealed.length;
+  const matchCalls = revealed.filter((e) => e.outcome === 'match' || e.outcome === 'fetched').length;
+  const emptyCalls = revealed.filter((e) => e.outcome === 'empty').length;
+  const visitedNodes = actNodes.filter((n) => n.eventIndices.some((ei) => ei <= actIndex)).length;
+  const stats = [
+    [`${visitedNodes} of ${actNodes.length}`, 'Documents visited'],
+    [String(totalCalls), `Tool call${totalCalls === 1 ? '' : 's'} so far`],
+    [`${matchCalls} of ${totalCalls}`, 'Calls found something'],
+    [String(emptyCalls), `Call${emptyCalls === 1 ? '' : 's'} came back empty`],
+  ];
+  document.getElementById('poActOverview').innerHTML = stats.map(([val, label]) =>
+    `<div class="po-actstat"><span class="po-actstatval">${escapeHtml(val)}</span><span class="po-actstatlabel">${escapeHtml(label)}</span></div>`
+  ).join('');
 }
 // Always the complete list, regardless of replay position -- "keep the
 // full tool log available underneath" rather than gating it on actIndex.
