@@ -318,7 +318,11 @@
   .po-actvisit { border-top: 1px solid var(--po-line); padding: 8px 0; font-size: 12px; }
   .po-actvisit:first-child { border-top: 0; }
   .po-actvisit .po-acttool { display: block; font: 11px var(--po-mono); color: var(--po-cyan); margin-bottom: 2px; }
-  .po-actvisit .po-actoutcome { color: var(--po-ink); }
+  .po-actvisit .po-actquerytag { display: block; color: var(--po-muted); font-size: 11px; margin-bottom: 4px; }
+  /* The real observation preview, not a category label -- pre-line so the
+     source text's own line breaks still read as paragraph breaks instead
+     of running together, while repeated whitespace still collapses. */
+  .po-actvisit .po-actoutcome { display: block; color: var(--po-ink); white-space: pre-line; }
   .po-actvisit.empty .po-actoutcome { color: var(--po-warn); }
   .po-actlog { margin-top: 18px; border: 1px solid var(--po-line); border-radius: 12px; background: var(--po-paper); padding: 4px 16px; }
   .po-actlog summary { cursor: pointer; padding: 10px 0; color: var(--po-muted); font-size: 12px; }
@@ -1746,6 +1750,19 @@ function actBuildEdges(events, nodeIndexByFocus) {
   });
   return edges;
 }
+// The real text behind one tool call -- its actual observation preview
+// (an excerpt of what the tool returned, not a category label), with the
+// same fallbacks actEventCaption always had for calls that carry no
+// preview (write/verify/still-running). Shared so a single real string
+// backs both the event feed's one-liner and the detail panel's full
+// per-visit list, truncated differently for each (maxLen).
+function actEntryExcerpt(e, maxLen) {
+  if (e.reason) return actTruncate(e.reason, maxLen);
+  if (e.outcome === 'write') return 'Pulled as a new local source.';
+  if (e.outcome === 'verify') return 'Checked the draft answer against evidence gathered so far.';
+  if (e.observationPreview) return actTruncate(e.observationPreview, maxLen);
+  return activityComplete ? 'No outcome recorded for this call.' : 'Still running…';
+}
 function actEventCaption(ev) {
   if (ev.count > 1) {
     const parts = [];
@@ -1754,12 +1771,7 @@ function actEventCaption(ev) {
     if (ev.emptyCount) parts.push(`${ev.emptyCount} empty`);
     return `${ev.count} calls on ${ev.focus} · ${parts.join(', ') || 'no matches'}`;
   }
-  const e = ev.repLast;
-  if (e.reason) return actTruncate(e.reason, 140);
-  if (e.outcome === 'write') return 'Pulled as a new local source.';
-  if (e.outcome === 'verify') return 'Checked the draft answer against evidence gathered so far.';
-  if (e.observationPreview) return actTruncate(e.observationPreview, 140);
-  return activityComplete ? 'No outcome recorded for this call.' : 'Still running…';
+  return actEntryExcerpt(ev.repLast, 140);
 }
 
 let activityEntries = [];
@@ -1800,6 +1812,21 @@ function actVisitText(ev) {
   if (ev.repLast.outcome === 'write') return 'Pulled as a local source';
   return 'Outcome not recorded';
 }
+// Every raw entry actually belonging to this node (by the same focus
+// logic that grouped it onto the map) and already revealed at this point
+// in the replay, in call order -- the single source both the box's query
+// rows and the detail panel's per-visit list read from, so neither can
+// drift from what the other shows.
+function actNodeEntries(node) {
+  const rows = [];
+  activityEntries.forEach((e, i) => {
+    const evIdx = actRawToEvent[i];
+    if (evIdx == null || evIdx > actIndex) return;
+    if (actFocus(e) !== node.focus) return;
+    rows.push(e);
+  });
+  return rows;
+}
 // Every distinct real search query this node's own calls actually used,
 // in first-appearance order, each with whether it ever found anything --
 // this is "lines of inquiry" scoped to the one document it ran against,
@@ -1810,10 +1837,7 @@ function actVisitText(ev) {
 function actNodeQueryRows(node) {
   const byQuery = {};
   const order = [];
-  activityEntries.forEach((e, i) => {
-    const evIdx = actRawToEvent[i];
-    if (evIdx == null || evIdx > actIndex) return;
-    if (actFocus(e) !== node.focus) return;
+  actNodeEntries(node).forEach((e) => {
     const key = e.args && e.args.query ? String(e.args.query).trim() : '';
     if (!key) return;
     if (!byQuery[key]) { byQuery[key] = { query: key, anyMatch: false }; order.push(key); }
@@ -1919,16 +1943,23 @@ function actRenderDetail() {
   const node = actNodes[actSelectedNode];
   if (!node) return;
   document.getElementById('poActTitle').textContent = node.focus;
-  const visible = node.eventIndices.filter((ei) => ei <= actIndex).map((ei) => actEvents[ei]);
-  const totalCalls = visible.reduce((t, ev) => t + ev.count, 0);
-  const matchEvents = visible.filter((ev) => ev.anyMatch).length;
-  document.getElementById('poActDescription').textContent = visible.length
+  const visibleEvents = node.eventIndices.filter((ei) => ei <= actIndex).map((ei) => actEvents[ei]);
+  const totalCalls = visibleEvents.reduce((t, ev) => t + ev.count, 0);
+  const matchEvents = visibleEvents.filter((ev) => ev.anyMatch).length;
+  document.getElementById('poActDescription').textContent = visibleEvents.length
     ? `${node.kind} · ${totalCalls} call${totalCalls === 1 ? '' : 's'} so far, ${matchEvents} found something.`
     : 'Not reached yet in this replay.';
-  document.getElementById('poActVisits').innerHTML = visible.map((ev) =>
-    `<div class="po-actvisit${ev.anyMatch ? '' : ' empty'}"><span class="po-acttool">${escapeHtml(ev.title)}</span>`
-      + `<span class="po-actoutcome">${escapeHtml(actVisitText(ev))}</span></div>`
-  ).join('');
+  // Real text per visit, not a recycled category label: each row is one
+  // actual tool call, with its own observation preview (actEntryExcerpt)
+  // -- the same real field the box's query rows and the full tool log
+  // already draw from, just untruncated-enough here to actually read.
+  document.getElementById('poActVisits').innerHTML = actNodeEntries(node).map((e) => {
+    const queryTag = e.args && e.args.query
+      ? `<span class="po-actquerytag">&ldquo;${escapeHtml(actTruncate(String(e.args.query), 40))}&rdquo;</span>` : '';
+    return `<div class="po-actvisit${e.outcome === 'empty' ? ' empty' : ''}">`
+      + `<span class="po-acttool">${escapeHtml(toolLabel(e.tool))}</span>${queryTag}`
+      + `<span class="po-actoutcome">${escapeHtml(actEntryExcerpt(e, 200))}</span></div>`;
+  }).join('');
 }
 // Always the complete list, regardless of replay position -- "keep the
 // full tool log available underneath" rather than gating it on actIndex.
