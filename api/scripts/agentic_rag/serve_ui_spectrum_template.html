@@ -285,12 +285,6 @@
      found", not a reached/not-reached flag, which the highlight below
      already conveys on its own. */
   .po-actnode .po-acttag { color: var(--po-cyan); margin-top: 6px; margin-bottom: 0; }
-  /* Each distinct real search query this node was actually asked, right
-     inside its own box -- this IS "lines of inquiry", scoped to the
-     document it ran against, not a separate list elsewhere on the page. */
-  .po-actnode .po-actquery { color: var(--po-cyan); margin-top: 6px; margin-bottom: 0; font-size: 10.5px; }
-  .po-actnode .po-actquery.empty { color: var(--po-warn); }
-  .po-actnode .po-actquerymore { color: var(--po-muted); margin-top: 2px; margin-bottom: 0; font-size: 10px; }
   .po-actnode.dormant { opacity: 0.35; }
   .po-actnode.visited { border-color: color-mix(in srgb, var(--po-cyan) 55%, var(--po-line)); }
   .po-actnode.current { border-color: var(--po-cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-cyan) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-cyan) 14%, transparent); }
@@ -1827,24 +1821,6 @@ function actNodeEntries(node) {
   });
   return rows;
 }
-// Every distinct real search query this node's own calls actually used,
-// in first-appearance order, each with whether it ever found anything --
-// this is "lines of inquiry" scoped to the one document it ran against,
-// rendered right inside that document's own box (actRenderMap) instead of
-// a separate list elsewhere that the reader had to cross-reference back
-// to a node by hand. Search-kind nodes skip this: their box title already
-// *is* the query, so a row repeating it would say nothing new.
-function actNodeQueryRows(node) {
-  const byQuery = {};
-  const order = [];
-  actNodeEntries(node).forEach((e) => {
-    const key = e.args && e.args.query ? String(e.args.query).trim() : '';
-    if (!key) return;
-    if (!byQuery[key]) { byQuery[key] = { query: key, anyMatch: false }; order.push(key); }
-    if (e.outcome === 'match') byQuery[key].anyMatch = true;
-  });
-  return order.map((k) => byQuery[k]);
-}
 function actRenderMap(animate) {
   const mapEl = document.getElementById('poActMap');
   const nodesEl = document.getElementById('poActNodes');
@@ -1852,7 +1828,6 @@ function actRenderMap(animate) {
   const narrow = width < 600;
   const cols = narrow ? 2 : 3;
   const nodeWidth = narrow ? 135 : 170;
-  const maxQueryLines = 3;
   nodesEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
   const currentFocus = actEvents[actIndex].focus;
   const currentNodeIdx = actNodeIndexByFocus[currentFocus];
@@ -1866,27 +1841,15 @@ function actRenderMap(animate) {
     if (i === currentNodeIdx) cls.push('current');
     if (i === actSelectedNode && i !== currentNodeIdx) cls.push('inspect');
     if (visited && anyEmpty && !anyMatch) cls.push('empty-only');
-    // Reached/not-reached is already conveyed by the node's own highlight
-    // state (and whether an edge has drawn into it yet) -- repeating that
-    // as text would say nothing new. Prefer the real per-query findings;
-    // only fall back to the one-line summary (actVisitText) when this
-    // node has no query-tied calls to list (a plain fetch, a local-source
-    // write, a verify pass).
-    const queryRows = visited && n.kind !== 'Search' ? actNodeQueryRows(n) : [];
-    let bodyHtml = '';
-    if (queryRows.length) {
-      bodyHtml = queryRows.slice(0, maxQueryLines).map((q) =>
-        `<small class="po-actquery${q.anyMatch ? '' : ' empty'}">&ldquo;${escapeHtml(actTruncate(q.query, 28))}&rdquo; &middot; ${q.anyMatch ? 'found' : 'no match'}</small>`
-      ).join('');
-      if (queryRows.length > maxQueryLines) {
-        const more = queryRows.length - maxQueryLines;
-        bodyHtml += `<small class="po-actquerymore">+${more} more quer${more === 1 ? 'y' : 'ies'}</small>`;
-      }
-    } else if (visited) {
-      bodyHtml = `<small class="po-acttag">${escapeHtml(actVisitText(actEvents[seenSoFar[seenSoFar.length - 1]]))}</small>`;
-    }
+    // The box stays a quick-glance summary -- one real line (actVisitText,
+    // e.g. "4 matches found"), not a reached/not-reached flag, which the
+    // highlight state above already conveys. The actual per-query detail
+    // and real excerpt text live one click away, in Selected source
+    // (actRenderDetail / actNodeEntries) -- not duplicated here.
+    const tag = visited ? actVisitText(actEvents[seenSoFar[seenSoFar.length - 1]]) : '';
     return `<button type="button" class="${cls.join(' ')}" data-actnode="${i}" style="grid-column:${col + 1};grid-row:${row + 1};width:${nodeWidth}px;justify-self:center;">`
-      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong>${bodyHtml}</button>`;
+      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong>`
+      + (tag ? `<small class="po-acttag">${escapeHtml(tag)}</small>` : '') + `</button>`;
   }).join('');
   const svg = document.getElementById('poActEdges');
   svg.replaceChildren();
