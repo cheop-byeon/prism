@@ -1056,6 +1056,67 @@ class IetfImportService:
             "latest_rev": latest_rev,
         }
 
+    # rfc-editor.org's own index -- confirmed live it carries a real
+    # <date><year>...</year></date> and <title> per <rfc-entry>, the
+    # authoritative source for "when was this actually published" (unlike
+    # Datatracker's per-document API, which has no clean publication-date
+    # field). ~13MB, but publication dates never change once an RFC ships,
+    # so this is fetched and parsed once, then cached to disk indefinitely
+    # -- same spirit as RfcCorpusIndexService's own corpus cache, kept
+    # separate since this is a much smaller, different-shaped extract
+    # (year+title per RFC, not full text/abstract).
+    _RFC_YEARS_CACHE = Path("/app/api/storage/rfc-corpus-index/rfc_years_titles.json")
+    _RFC_INDEX_URL = "https://www.rfc-editor.org/rfc-index.xml"
+    _RFC_INDEX_NS = {"idx": "https://www.rfc-editor.org/rfc-index"}
+
+    @staticmethod
+    def _build_rfc_years_titles_cache() -> dict[str, dict]:
+        import xml.etree.ElementTree as ET
+
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.get(IetfImportService._RFC_INDEX_URL)
+            resp.raise_for_status()
+        root = ET.fromstring(resp.content)
+        ns = IetfImportService._RFC_INDEX_NS
+        out: dict[str, dict] = {}
+        for entry in root.findall(".//idx:rfc-entry", ns):
+            doc_id = entry.findtext("idx:doc-id", default="", namespaces=ns).strip().upper()
+            if not doc_id:
+                continue
+            title = (entry.findtext("idx:title", default="", namespaces=ns) or "").strip()
+            year_text = entry.findtext("idx:date/idx:year", default="", namespaces=ns) or ""
+            year = int(year_text) if year_text.strip().isdigit() else None
+            out[doc_id] = {"year": year, "title": title}
+        IetfImportService._RFC_YEARS_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        IetfImportService._RFC_YEARS_CACHE.write_text(json.dumps(out))
+        return out
+
+    @staticmethod
+    def get_rfc_years_and_titles(rfc_numbers: list[str]) -> dict[str, dict]:
+        """{rfc_number: {"year": int|None, "title": str}} for the given RFC
+        numbers (bare digits or "RFCnnnn", either works) -- real publication
+        year and title from rfc-editor.org's own index, used to lay the
+        Decision history "Across specifications" map out chronologically
+        without guessing or hand-authoring a date. Unknown/unpublished
+        numbers are simply omitted from the result.
+        """
+        if IetfImportService._RFC_YEARS_CACHE.is_file():
+            try:
+                cache = json.loads(IetfImportService._RFC_YEARS_CACHE.read_text())
+            except (json.JSONDecodeError, OSError):
+                cache = IetfImportService._build_rfc_years_titles_cache()
+        else:
+            cache = IetfImportService._build_rfc_years_titles_cache()
+        result = {}
+        for raw in rfc_numbers:
+            digits = re.sub(r"[^0-9]", "", str(raw))
+            if not digits:
+                continue
+            key = f"RFC{digits}"
+            if key in cache:
+                result[digits] = cache[key]
+        return result
+
     @staticmethod
     def get_rfc_relations(rfc_number: str) -> dict:
         """Return obsoletes/obsoleted_by/updates/updated_by for an RFC via

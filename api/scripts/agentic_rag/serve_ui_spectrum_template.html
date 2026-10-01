@@ -683,6 +683,41 @@
     .pt-work { grid-template-columns: 1fr; }
     .pt-grid { min-width: 480px; }
   }
+
+  /* Decision history / Across specifications -- a chronological map of the
+     real RFCs this investigation's own Research activity touched (see
+     actNodes/actEdges), dated from the real RFC index, not hand-authored
+     like "Within a document"'s draft/keyword form above it. */
+  .po-evswitch { display: flex; gap: 5px; padding: 5px; background: var(--po-soft); border-radius: 9px; margin: 0 0 20px; width: fit-content; flex-wrap: wrap; }
+  .po-evswitch button { background: transparent; padding: 9px 15px; border-radius: 6px; font-size: 12px; color: var(--po-muted); cursor: pointer; }
+  .po-evswitch button[aria-pressed="true"] { background: var(--po-paper); color: var(--po-accent); }
+  .po-evbar { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; font-size: 12px; color: var(--po-muted); }
+  .po-evgrid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  .po-evmap { padding: 20px; border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-soft); }
+  .po-evcaption { font-size: 11px; color: var(--po-muted); margin-bottom: 16px; }
+  .po-evstage { display: grid; grid-template-columns: 58px 1fr; gap: 16px; position: relative; padding-bottom: 20px; }
+  .po-evyear { font-size: 12px; color: var(--po-muted); padding-top: 10px; }
+  .po-evtrack { border-left: 2px solid var(--po-line); padding-left: 18px; }
+  .po-evnode { display: block; width: 100%; text-align: left; border: 1px solid var(--po-line); background: var(--po-paper); border-radius: 9px; padding: 13px; cursor: pointer; color: var(--po-ink); }
+  .po-evnode strong { display: block; font-size: 14px; font-weight: 500; }
+  .po-evnode small { display: block; color: var(--po-muted); margin-top: 4px; font-size: 11px; }
+  .po-evnode.inspect { outline: 2px solid var(--po-accent); outline-offset: 2px; }
+  .po-evedge { display: block; text-align: left; margin: 10px 0; padding: 9px 11px; background: var(--po-soft); color: var(--po-accent); border-radius: 7px; width: 100%; font-size: 12px; cursor: pointer; }
+  .po-evedge[aria-pressed="true"] { background: var(--po-tint); outline: 2px solid var(--po-accent); }
+  .po-evinspect { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 14px; padding: 20px; align-self: start; }
+  .po-evinspect h2 { font-size: 18px; margin: 8px 0; }
+  .po-evinspect h3 { font-size: 11px; color: var(--po-accent); margin: 16px 0 5px; text-transform: uppercase; letter-spacing: 0.07em; }
+  .po-evinspect p { font-size: 13px; color: var(--po-muted); }
+  .po-evinspect button.po-primary { width: 100%; margin-top: 12px; }
+  @media (max-width: 1100px) {
+    .po-evgrid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 600px) {
+    .po-evstage { grid-template-columns: 40px 1fr; gap: 8px; }
+    .po-evmap { padding: 12px; }
+    .po-evtrack { padding-left: 12px; }
+  }
+
   .ps-loadmore { display: block; width: 100%; margin: 14px 0; text-align: center; }
   @media (max-width: 600px) {
     .ps-pipeline { grid-template-columns: 1fr; }
@@ -830,14 +865,34 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         </form>
       </div>
       <div data-panel="timeline" hidden>
-        <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
-        <form class="pt-form" id="poThreadForm">
-          <label>Document<select id="poThreadDraft"><option value="">(let the agent discover)</option></select></label>
-          <label>Keyword or exact phrase<input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'></label>
-          <button id="poThreadBtn" class="pt-action" type="submit">Track phrase</button>
-        </form>
-        <div id="poThreadStatus" class="pt-status" role="status"></div>
-        <div id="poThreadBody"></div>
+        <div class="po-evswitch" role="group" aria-label="Decision history scale">
+          <button type="button" data-evscale="within" aria-pressed="true">Within a document</button>
+          <button type="button" data-evscale="across" aria-pressed="false">Across specifications</button>
+        </div>
+        <div id="poEvWithin">
+          <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
+          <form class="pt-form" id="poThreadForm">
+            <label>Document<select id="poThreadDraft"><option value="">(let the agent discover)</option></select></label>
+            <label>Keyword or exact phrase<input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'></label>
+            <button id="poThreadBtn" class="pt-action" type="submit">Track phrase</button>
+          </form>
+          <div id="poThreadStatus" class="pt-status" role="status"></div>
+          <div id="poThreadBody"></div>
+        </div>
+        <div id="poEvAcross" hidden>
+          <p class="corpora-hint" id="poEvEmpty">Filled in automatically once Research activity has touched two or more published RFCs in this investigation.</p>
+          <div id="poEvBody" hidden>
+            <div class="po-evbar"><span id="poEvSpan"></span></div>
+            <div class="po-evgrid">
+              <div class="po-evmap">
+                <div class="po-evcaption">Chronological reading map, built from this investigation's own Research activity -- select a document or a transition.</div>
+                <div id="poEvStages"></div>
+              </div>
+              <aside class="po-evinspect" aria-live="polite" id="poEvInspector"></aside>
+            </div>
+            <p class="po-tiny" style="margin-top:10px;">Only documents this investigation actually visited are shown, dated from the real RFC index -- not every specification in the family. A shared investigation doesn't mean one formally replaces the other; check get_rfc_relations/find_related_rfc_family in the tool log for that.</p>
+          </div>
+        </div>
       </div>
       <div data-panel="activity" hidden>
         <p class="corpora-hint" id="poActEmpty">Research activity for the most recent question appears here once you ask one.</p>
@@ -1920,11 +1975,19 @@ function setActivityData(rawEntries, isLive, complete) {
   const hasEntries = activityEntries.length > 0;
   document.getElementById('poActEmpty').hidden = hasEntries;
   document.getElementById('poActBody').hidden = !hasEntries;
-  if (!hasEntries) return;
+  // Keep Decision history's Across-specifications map in sync too, same
+  // as Research activity above, if it's the panel currently on screen --
+  // both are driven by this same actNodes/activityEntries state.
+  const evAcrossVisible = !document.getElementById('poEvAcross').hidden;
+  if (!hasEntries) {
+    if (evAcrossVisible) buildEvolutionAcross();
+    return;
+  }
   actStop();
   actIndex = complete ? 0 : actEvents.length - 1;
   actSelectedNode = actNodeIndexByFocus[actEvents[actIndex].focus];
   renderAct(true);
+  if (evAcrossVisible) buildEvolutionAcross();
 }
 document.getElementById('poActPlay').addEventListener('click', () => {
   if (!activityComplete) return;
@@ -2455,6 +2518,120 @@ function renderDetailPanel() {
     }
   }
 }
+
+// -- Decision history / Across specifications: a chronological map built
+// entirely from THIS investigation's own Research activity (actNodes,
+// defined above) -- unlike "Within a document", there's no manual
+// draft/keyword form here, because which RFCs this investigation actually
+// touched, and when they were really published (via /api/corpora/rfc-years,
+// rfc-editor.org's own index), is already real, known data -- nothing to
+// ask the user for.
+document.querySelectorAll('[data-evscale]').forEach((b) => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-evscale]').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+  const scale = b.dataset.evscale;
+  document.getElementById('poEvWithin').hidden = scale !== 'within';
+  document.getElementById('poEvAcross').hidden = scale !== 'across';
+  if (scale === 'across') buildEvolutionAcross();
+}));
+let evRfcData = [];
+// Scans this investigation's own get_rfc_relations/find_related_rfc_family
+// calls for one that actually names the other RFC in the pair -- a real
+// structural link the agent itself already found mid-investigation, never
+// invented here. Returns null (not a guess) when no such call exists.
+function evFindRelation(rfcA, rfcB) {
+  for (const e of activityEntries) {
+    if (e.tool !== 'get_rfc_relations' && e.tool !== 'find_related_rfc_family') continue;
+    const subject = e.args && e.args.rfc_number ? String(e.args.rfc_number).replace(/[^0-9]/g, '') : '';
+    const other = subject === rfcA ? rfcB : (subject === rfcB ? rfcA : null);
+    if (!other || !e.observationPreview) continue;
+    const hit = e.observationPreview.split('\n').find((l) => l.includes(other));
+    if (hit) return hit.trim();
+  }
+  return null;
+}
+function buildEvolutionAcross() {
+  const digitsList = actNodes
+    .filter((n) => n.kind === 'RFC')
+    .map((n) => (n.focus.match(/(\d+)/) || [])[1])
+    .filter(Boolean);
+  const uniqueDigits = [...new Set(digitsList)];
+  if (uniqueDigits.length < 2) {
+    document.getElementById('poEvEmpty').hidden = false;
+    document.getElementById('poEvBody').hidden = true;
+    return;
+  }
+  fetch(`${PRISM_PREFIX}/api/corpora/rfc-years?rfc_numbers=${uniqueDigits.join(',')}`).then((r) => r.json()).then((data) => {
+    const years = data.years || {};
+    evRfcData = uniqueDigits
+      .filter((d) => years[d] && years[d].year)
+      .map((d) => ({ digits: d, year: years[d].year, title: years[d].title }))
+      .sort((a, b) => a.year - b.year);
+    if (evRfcData.length < 2) {
+      document.getElementById('poEvEmpty').hidden = false;
+      document.getElementById('poEvBody').hidden = true;
+      return;
+    }
+    document.getElementById('poEvEmpty').hidden = true;
+    document.getElementById('poEvBody').hidden = false;
+    const firstYear = evRfcData[0].year, lastYear = evRfcData[evRfcData.length - 1].year;
+    document.getElementById('poEvSpan').textContent = `${evRfcData.length} RFCs referenced in this investigation · `
+      + (firstYear === lastYear ? String(firstYear) : `${firstYear} – ${lastYear}`);
+    document.getElementById('poEvStages').innerHTML = evRfcData.map((item, idx) => {
+      const nodeHtml = `<button type="button" class="po-evnode" data-evnode="${idx}">`
+        + `<strong>RFC ${escapeHtml(item.digits)}</strong><small>${escapeHtml(item.title || 'Title unavailable')}</small></button>`;
+      let edgeHtml = '';
+      if (idx < evRfcData.length - 1) {
+        const gap = evRfcData[idx + 1].year - item.year;
+        const gapText = gap === 0 ? 'Same year' : `${gap} year${gap === 1 ? '' : 's'} later`;
+        edgeHtml = `<button type="button" class="po-evedge" data-evedge="${idx}">↓ ${escapeHtml(gapText)}</button>`;
+      }
+      return `<div class="po-evstage"><div class="po-evyear">${item.year}</div><div class="po-evtrack">${nodeHtml}${edgeHtml}</div></div>`;
+    }).join('');
+    evSelectNode(0);
+  }).catch(() => {
+    document.getElementById('poEvEmpty').hidden = false;
+    document.getElementById('poEvEmpty').textContent = 'Could not load RFC publication data.';
+    document.getElementById('poEvBody').hidden = true;
+  });
+}
+function evSelectNode(idx) {
+  document.querySelectorAll('.po-evnode').forEach((b, i) => b.classList.toggle('inspect', i === idx));
+  document.querySelectorAll('.po-evedge').forEach((b) => b.setAttribute('aria-pressed', 'false'));
+  const item = evRfcData[idx];
+  // Only offer to jump into Within-mode tracking when this investigation
+  // visited a real local draft AND that draft is actually one of the
+  // dropdown's known options -- never a guess that would silently fail.
+  const draftNode = actNodes.find((n) => n.kind === 'Draft' && poThreadDraftEl.querySelector(`option[value="${CSS.escape(n.focus)}"]`));
+  document.getElementById('poEvInspector').innerHTML = `<div class="po-eyebrow">Selected document · RFC ${escapeHtml(item.digits)}</div>`
+    + `<h2>${escapeHtml(item.title || 'RFC ' + item.digits)}</h2>`
+    + `<p>Published ${item.year}.</p>`
+    + (draftNode ? `<button type="button" class="po-primary" id="poEvTraceBtn">Preview within-document tracking →</button>` : '')
+    + `<p style="margin-top:14px;"><a target="_blank" rel="noopener" href="https://www.rfc-editor.org/rfc/rfc${escapeHtml(item.digits)}">Open RFC ${escapeHtml(item.digits)} on rfc-editor.org ↗</a></p>`;
+  if (draftNode) {
+    document.getElementById('poEvTraceBtn').addEventListener('click', () => {
+      document.querySelector('[data-evscale="within"]').click();
+      poThreadDraftEl.value = draftNode.focus;
+    });
+  }
+}
+function evSelectEdge(idx) {
+  document.querySelectorAll('.po-evnode').forEach((b) => b.classList.remove('inspect'));
+  document.querySelectorAll('.po-evedge').forEach((b, i) => b.setAttribute('aria-pressed', String(i === idx)));
+  const from = evRfcData[idx], to = evRfcData[idx + 1];
+  const gap = to.year - from.year;
+  const relation = evFindRelation(from.digits, to.digits);
+  document.getElementById('poEvInspector').innerHTML = `<div class="po-eyebrow">Selected transition</div>`
+    + `<h2>RFC ${escapeHtml(from.digits)} → RFC ${escapeHtml(to.digits)}</h2>`
+    + `<p>${gap === 0 ? 'Published the same year' : `${gap} year${gap === 1 ? '' : 's'} apart`} (${from.year} → ${to.year}).</p>`
+    + `<h3>Relationship found in this investigation</h3>`
+    + `<p>${relation ? escapeHtml(relation) : 'No explicit obsoletes/updates/citation link was found by this investigation’s own tool calls -- check Research activity’s tool log, or run get_rfc_relations/find_related_rfc_family yourself to look for one.'}</p>`;
+}
+document.getElementById('poEvStages').addEventListener('click', (e) => {
+  const nodeBtn = e.target.closest('[data-evnode]');
+  if (nodeBtn) { evSelectNode(Number(nodeBtn.dataset.evnode)); return; }
+  const edgeBtn = e.target.closest('[data-evedge]');
+  if (edgeBtn) evSelectEdge(Number(edgeBtn.dataset.evedge));
+});
 
 document.getElementById('poThreadForm').addEventListener('submit', (e) => {
   e.preventDefault();

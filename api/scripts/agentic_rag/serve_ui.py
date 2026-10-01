@@ -1013,6 +1013,26 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    @app.route(f"{_URL_PREFIX}/api/corpora/rfc-years", methods=["GET"])
+    def api_corpora_rfc_years():
+        """Real publication year + title for a batch of RFC numbers, from
+        rfc-editor.org's own index -- backs Decision history's "Across
+        specifications" chronological map, so it doesn't guess or hand-
+        author a date for a document the frontend already knows about from
+        this investigation's own Research activity.
+        """
+        from services.ietf_import_service import IetfImportService
+
+        raw = (request.args.get("rfc_numbers") or "").strip()
+        if not raw:
+            return jsonify({"error": "rfc_numbers is required"}), 400
+        rfc_numbers = [n.strip() for n in raw.split(",") if n.strip()]
+        try:
+            return jsonify({"years": IetfImportService.get_rfc_years_and_titles(rfc_numbers)})
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
     @app.route(f"{_URL_PREFIX}/api/corpora/mail-sync", methods=["POST"])
     def api_corpora_mail_sync():
         """Trigger the sidecar's incremental IMAP sync for one mailing list --
