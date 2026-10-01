@@ -261,11 +261,12 @@
   .po-actcontrols button, .po-actcontrols select { border: 1px solid var(--po-line); background: var(--po-paper); color: var(--po-ink); padding: 8px 13px; border-radius: 7px; font-size: 12px; cursor: pointer; }
   .po-actcontrols button:disabled, .po-actcontrols select:disabled { opacity: 0.45; cursor: default; }
   #poActPlay { min-width: 100px; }
-  /* Stacked, not side-by-side -- the map gets the full available width
-     (more room for a wide investigation's node grid), and Selected
-     source runs full-width underneath instead of being squeezed into a
-     fixed 280px column next to it. */
-  .po-actlayout { display: flex; flex-direction: column; gap: 18px; }
+  /* Map + Selected source stack on the left (po-actmain); a narrower
+     always-visible overview of the whole investigation's search activity
+     -- not any one node's detail -- runs down the right, same shape as
+     the design mockup's map+aside split. */
+  .po-actlayout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+  .po-actmain { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
   .po-actcanvas { position: relative; background: var(--po-soft); border: 1px solid var(--po-line); border-radius: 14px; padding: 18px; min-width: 0; }
   .po-actcanvashead { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--po-muted); }
   .po-actbadge { color: var(--po-accent); font-size: 12px; }
@@ -310,9 +311,21 @@
   .po-actfeed strong { color: var(--po-cyan); white-space: nowrap; }
   .po-actfeed span { color: var(--po-muted); font-size: 12px; }
   .po-actside { display: flex; flex-direction: column; gap: 14px; }
+  .po-actoverview { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 18px; }
+  .po-actoverview p.po-tiny { margin-top: 4px; }
+  .po-actqrow { border-top: 1px solid var(--po-line); padding: 10px 0; font-size: 12px; }
+  .po-actqrow:first-child { border-top: 0; }
+  .po-actqrow .po-actqtext { display: block; margin-bottom: 4px; }
+  .po-actqstatus { font-size: 11px; color: var(--po-warn); }
+  .po-actqstatus.found { color: var(--po-cyan); }
   .po-actdetail { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 18px; }
-  .po-actdetail h3 { font-size: 15px; font-weight: 500; margin: 6px 0 4px; }
-  .po-actdetail p { color: var(--po-muted); font-size: 12px; }
+  /* Narrower, fixed-ish column for "what/how much" (title, aggregate
+     line); the wider column is where the actual per-visit excerpt text
+     (the real content) gets the room it needs -- deliberately not an
+     even split. */
+  .po-actdetail-grid { display: grid; grid-template-columns: minmax(170px, 230px) minmax(0, 1fr); gap: 22px; }
+  .po-actdetailhead h3 { font-size: 15px; font-weight: 500; margin: 6px 0 4px; }
+  .po-actdetailhead p { color: var(--po-muted); font-size: 12px; }
   .po-actvisit { border-top: 1px solid var(--po-line); padding: 8px 0; font-size: 12px; }
   .po-actvisit:first-child { border-top: 0; }
   .po-actvisit .po-acttool { display: block; font: 11px var(--po-mono); color: var(--po-cyan); margin-bottom: 2px; }
@@ -328,8 +341,12 @@
   .po-actlogrow:first-child { border-top: 0; }
   .po-actlogrow .po-acttool { font: 11px var(--po-mono); color: var(--po-cyan); white-space: nowrap; }
   .po-actlogrow .po-actoutcome { color: var(--po-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  @media (max-width: 1100px) {
+    .po-actlayout { grid-template-columns: 1fr; }
+  }
   @media (max-width: 760px) {
     .po-acttoolbar { gap: 10px; }
+    .po-actdetail-grid { grid-template-columns: 1fr; }
   }
   @media (prefers-reduced-motion: reduce) {
     .po-actnode { transition: none; animation: none; }
@@ -915,35 +932,46 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
             <span class="po-actbadge" id="poActState"></span>
           </div>
           <div class="po-actlayout">
-            <section class="po-actcanvas">
-              <div class="po-actcanvashead">
-                <span>EVIDENCE MAP &middot; STABLE SOURCE POSITIONS</span>
-              </div>
-              <div id="poActMap" class="po-actmap">
-                <svg id="poActEdges" class="po-actedges" aria-hidden="true"></svg>
-                <div id="poActNodes"></div>
-              </div>
-              <div class="po-actprogress">
-                <span id="poActPosition">01</span>
-                <input type="range" min="0" max="0" value="0" id="poActScrub" aria-label="Replay event">
-                <span id="poActTotal">1</span>
-              </div>
-              <div class="po-actlegend">
-                <span><b>&#9679;</b> Current</span>
-                <span>Visited</span>
-                <span class="po-actdim">Not yet reached</span>
-              </div>
-              <div class="po-actfeed" role="status">
-                <strong id="poActVerb"></strong>
-                <span id="poActCaption"></span>
-              </div>
-            </section>
-            <aside class="po-actside">
+            <div class="po-actmain">
+              <section class="po-actcanvas">
+                <div class="po-actcanvashead">
+                  <span>EVIDENCE MAP &middot; STABLE SOURCE POSITIONS</span>
+                </div>
+                <div id="poActMap" class="po-actmap">
+                  <svg id="poActEdges" class="po-actedges" aria-hidden="true"></svg>
+                  <div id="poActNodes"></div>
+                </div>
+                <div class="po-actprogress">
+                  <span id="poActPosition">01</span>
+                  <input type="range" min="0" max="0" value="0" id="poActScrub" aria-label="Replay event">
+                  <span id="poActTotal">1</span>
+                </div>
+                <div class="po-actlegend">
+                  <span><b>&#9679;</b> Current</span>
+                  <span>Visited</span>
+                  <span class="po-actdim">Not yet reached</span>
+                </div>
+                <div class="po-actfeed" role="status">
+                  <strong id="poActVerb"></strong>
+                  <span id="poActCaption"></span>
+                </div>
+              </section>
               <div class="po-actdetail">
-                <div class="po-eyebrow">Selected source</div>
-                <h3 id="poActTitle"></h3>
-                <p id="poActDescription"></p>
-                <div id="poActVisits"></div>
+                <div class="po-actdetail-grid">
+                  <div class="po-actdetailhead">
+                    <div class="po-eyebrow">Selected source</div>
+                    <h3 id="poActTitle"></h3>
+                    <p id="poActDescription"></p>
+                  </div>
+                  <div id="poActVisits"></div>
+                </div>
+              </div>
+            </div>
+            <aside class="po-actside">
+              <div class="po-actoverview">
+                <div class="po-eyebrow">Lines of inquiry</div>
+                <p class="po-tiny">Each distinct search this investigation actually ran, and whether it came back with anything -- retrieved is not the same as proven.</p>
+                <div id="poActOverview"></div>
               </div>
             </aside>
           </div>
@@ -1924,6 +1952,30 @@ function actRenderDetail() {
       + `<span class="po-actoutcome">${escapeHtml(actEntryExcerpt(e, 200))}</span></div>`;
   }).join('');
 }
+// A general overview of the whole investigation's search activity, not
+// any one node's -- every distinct real query the agent ran anywhere,
+// across every document, and whether it ever found anything. Lives
+// beside the map (not inside any one box, not inside Selected source)
+// since it answers a different question than either: not "what did this
+// document turn up" but "what has this investigation actually tried".
+function actRenderOverview() {
+  const byQuery = {}, order = [];
+  activityEntries.forEach((e, i) => {
+    const key = e.args && e.args.query ? String(e.args.query).trim() : '';
+    if (!key) return;
+    if (!byQuery[key]) { byQuery[key] = { query: key, revealed: false, anyMatch: false }; order.push(key); }
+    if (actRawToEvent[i] <= actIndex) {
+      byQuery[key].revealed = true;
+      if (e.outcome === 'match') byQuery[key].anyMatch = true;
+    }
+  });
+  const rows = order.filter((k) => byQuery[k].revealed).map((k) => {
+    const q = byQuery[k];
+    return `<div class="po-actqrow"><span class="po-actqtext">&ldquo;${escapeHtml(actTruncate(q.query, 60))}&rdquo;</span>`
+      + `<span class="po-actqstatus${q.anyMatch ? ' found' : ''}">${q.anyMatch ? 'Evidence found' : 'No matches yet'}</span></div>`;
+  });
+  document.getElementById('poActOverview').innerHTML = rows.join('') || '<p class="po-tiny">No distinct search queries yet.</p>';
+}
 // Always the complete list, regardless of replay position -- "keep the
 // full tool log available underneath" rather than gating it on actIndex.
 function actRenderLog() {
@@ -1957,6 +2009,7 @@ function renderAct(animate) {
   document.getElementById('poActCaption').textContent = actEventCaption(ev);
   actRenderMap(animate);
   actRenderDetail();
+  actRenderOverview();
   actRenderLog();
 }
 // isLive selects the normalization shape (see normalizeActivityEntry);
