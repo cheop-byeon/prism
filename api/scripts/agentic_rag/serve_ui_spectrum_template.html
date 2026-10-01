@@ -267,8 +267,14 @@
   .po-actbadge { color: var(--po-accent); font-size: 12px; }
   .po-actmap { position: relative; min-height: 260px; margin-top: 18px; }
   .po-actedges { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+  /* Grid, not manual absolute math: row heights auto-size to whatever
+     content (query rows, tags) a node actually has, instead of a fixed
+     gap that only fit a one-line tag. Edge coordinates for the SVG
+     overlay are then read back from the rendered boxes (actRenderMap),
+     not computed ahead of render. */
+  #poActNodes { display: grid; row-gap: 22px; }
   .po-actnode {
-    position: absolute; width: 170px; min-height: 76px; text-align: left; padding: 11px 13px;
+    width: 100%; box-sizing: border-box; text-align: left; padding: 11px 13px;
     background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; cursor: pointer;
     font-size: 12px; color: var(--po-ink); transition: background 0.3s, border-color 0.3s, box-shadow 0.3s, opacity 0.3s; z-index: 1;
   }
@@ -279,6 +285,12 @@
      found", not a reached/not-reached flag, which the highlight below
      already conveys on its own. */
   .po-actnode .po-acttag { color: var(--po-cyan); margin-top: 6px; margin-bottom: 0; }
+  /* Each distinct real search query this node was actually asked, right
+     inside its own box -- this IS "lines of inquiry", scoped to the
+     document it ran against, not a separate list elsewhere on the page. */
+  .po-actnode .po-actquery { color: var(--po-cyan); margin-top: 6px; margin-bottom: 0; font-size: 10.5px; }
+  .po-actnode .po-actquery.empty { color: var(--po-warn); }
+  .po-actnode .po-actquerymore { color: var(--po-muted); margin-top: 2px; margin-bottom: 0; font-size: 10px; }
   .po-actnode.dormant { opacity: 0.35; }
   .po-actnode.visited { border-color: color-mix(in srgb, var(--po-cyan) 55%, var(--po-line)); }
   .po-actnode.current { border-color: var(--po-cyan); box-shadow: 0 0 0 3px color-mix(in srgb, var(--po-cyan) 18%, transparent), 0 0 24px color-mix(in srgb, var(--po-cyan) 14%, transparent); }
@@ -300,19 +312,14 @@
   .po-actfeed strong { color: var(--po-cyan); white-space: nowrap; }
   .po-actfeed span { color: var(--po-muted); font-size: 12px; }
   .po-actside { display: flex; flex-direction: column; gap: 14px; }
-  .po-actdetail, .po-actquestions { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 18px; }
+  .po-actdetail { border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-paper); padding: 18px; }
   .po-actdetail h3 { font-size: 15px; font-weight: 500; margin: 6px 0 4px; }
-  .po-actdetail p, .po-actquestions p { color: var(--po-muted); font-size: 12px; }
+  .po-actdetail p { color: var(--po-muted); font-size: 12px; }
   .po-actvisit { border-top: 1px solid var(--po-line); padding: 8px 0; font-size: 12px; }
   .po-actvisit:first-child { border-top: 0; }
   .po-actvisit .po-acttool { display: block; font: 11px var(--po-mono); color: var(--po-cyan); margin-bottom: 2px; }
   .po-actvisit .po-actoutcome { color: var(--po-ink); }
   .po-actvisit.empty .po-actoutcome { color: var(--po-warn); }
-  .po-actquestion { border-top: 1px solid var(--po-line); padding: 10px 0; font-size: 12px; }
-  .po-actquestion:first-child { border-top: 0; }
-  .po-actquestion .po-actqtext { display: block; margin-bottom: 4px; }
-  .po-actqstatus { font-size: 11px; color: var(--po-warn); }
-  .po-actqstatus.found { color: var(--po-cyan); }
   .po-actlog { margin-top: 18px; border: 1px solid var(--po-line); border-radius: 12px; background: var(--po-paper); padding: 4px 16px; }
   .po-actlog summary { cursor: pointer; padding: 10px 0; color: var(--po-muted); font-size: 12px; }
   .po-actlogrow { display: flex; gap: 10px; padding: 7px 0; border-top: 1px solid var(--po-line); font-size: 12px; align-items: baseline; }
@@ -323,7 +330,6 @@
     .po-actlayout { grid-template-columns: 1fr; }
   }
   @media (max-width: 760px) {
-    .po-actnode { width: 135px; }
     .po-acttoolbar { gap: 10px; }
   }
   @media (prefers-reduced-motion: reduce) {
@@ -939,11 +945,6 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
                 <h3 id="poActTitle"></h3>
                 <p id="poActDescription"></p>
                 <div id="poActVisits"></div>
-              </div>
-              <div class="po-actquestions">
-                <div class="po-eyebrow">Lines of inquiry</div>
-                <p class="po-tiny">Each distinct search the agent actually ran, and whether it came back with anything -- retrieved is not the same as proven.</p>
-                <div id="poActQuestions"></div>
               </div>
             </aside>
           </div>
@@ -1799,22 +1800,40 @@ function actVisitText(ev) {
   if (ev.repLast.outcome === 'write') return 'Pulled as a local source';
   return 'Outcome not recorded';
 }
+// Every distinct real search query this node's own calls actually used,
+// in first-appearance order, each with whether it ever found anything --
+// this is "lines of inquiry" scoped to the one document it ran against,
+// rendered right inside that document's own box (actRenderMap) instead of
+// a separate list elsewhere that the reader had to cross-reference back
+// to a node by hand. Search-kind nodes skip this: their box title already
+// *is* the query, so a row repeating it would say nothing new.
+function actNodeQueryRows(node) {
+  const byQuery = {};
+  const order = [];
+  activityEntries.forEach((e, i) => {
+    const evIdx = actRawToEvent[i];
+    if (evIdx == null || evIdx > actIndex) return;
+    if (actFocus(e) !== node.focus) return;
+    const key = e.args && e.args.query ? String(e.args.query).trim() : '';
+    if (!key) return;
+    if (!byQuery[key]) { byQuery[key] = { query: key, anyMatch: false }; order.push(key); }
+    if (e.outcome === 'match') byQuery[key].anyMatch = true;
+  });
+  return order.map((k) => byQuery[k]);
+}
 function actRenderMap(animate) {
   const mapEl = document.getElementById('poActMap');
+  const nodesEl = document.getElementById('poActNodes');
   const width = mapEl.clientWidth || 600;
   const narrow = width < 600;
   const cols = narrow ? 2 : 3;
   const nodeWidth = narrow ? 135 : 170;
-  const gap = narrow ? 105 : 110;
-  const rows = Math.ceil(actNodes.length / cols) || 1;
-  mapEl.style.height = (rows * gap + 30) + 'px';
-  const pos = actNodes.map((n, i) => {
-    const row = Math.floor(i / cols), slot = i % cols, col = row % 2 ? cols - 1 - slot : slot;
-    return [col * (width / cols) + (width / cols - nodeWidth) / 2, row * gap + 10];
-  });
+  const maxQueryLines = 3;
+  nodesEl.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
   const currentFocus = actEvents[actIndex].focus;
   const currentNodeIdx = actNodeIndexByFocus[currentFocus];
-  document.getElementById('poActNodes').innerHTML = actNodes.map((n, i) => {
+  nodesEl.innerHTML = actNodes.map((n, i) => {
+    const row = Math.floor(i / cols), slot = i % cols, col = row % 2 ? cols - 1 - slot : slot;
     const seenSoFar = n.eventIndices.filter((ei) => ei <= actIndex);
     const visited = seenSoFar.length > 0;
     const anyMatch = seenSoFar.some((ei) => actEvents[ei].anyMatch);
@@ -1825,21 +1844,37 @@ function actRenderMap(animate) {
     if (visited && anyEmpty && !anyMatch) cls.push('empty-only');
     // Reached/not-reached is already conveyed by the node's own highlight
     // state (and whether an edge has drawn into it yet) -- repeating that
-    // as text would say nothing new. What IS worth a line here is the
-    // latest real finding at this node, same wording actVisitText gives
-    // the detail panel -- an actual result, not a reached/not-reached flag.
-    const tag = visited ? actVisitText(actEvents[seenSoFar[seenSoFar.length - 1]]) : '';
-    return `<button type="button" class="${cls.join(' ')}" data-actnode="${i}" style="left:${pos[i][0]}px;top:${pos[i][1]}px">`
-      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong>`
-      + (tag ? `<small class="po-acttag">${escapeHtml(tag)}</small>` : '') + `</button>`;
+    // as text would say nothing new. Prefer the real per-query findings;
+    // only fall back to the one-line summary (actVisitText) when this
+    // node has no query-tied calls to list (a plain fetch, a local-source
+    // write, a verify pass).
+    const queryRows = visited && n.kind !== 'Search' ? actNodeQueryRows(n) : [];
+    let bodyHtml = '';
+    if (queryRows.length) {
+      bodyHtml = queryRows.slice(0, maxQueryLines).map((q) =>
+        `<small class="po-actquery${q.anyMatch ? '' : ' empty'}">&ldquo;${escapeHtml(actTruncate(q.query, 28))}&rdquo; &middot; ${q.anyMatch ? 'found' : 'no match'}</small>`
+      ).join('');
+      if (queryRows.length > maxQueryLines) {
+        const more = queryRows.length - maxQueryLines;
+        bodyHtml += `<small class="po-actquerymore">+${more} more quer${more === 1 ? 'y' : 'ies'}</small>`;
+      }
+    } else if (visited) {
+      bodyHtml = `<small class="po-acttag">${escapeHtml(actVisitText(actEvents[seenSoFar[seenSoFar.length - 1]]))}</small>`;
+    }
+    return `<button type="button" class="${cls.join(' ')}" data-actnode="${i}" style="grid-column:${col + 1};grid-row:${row + 1};width:${nodeWidth}px;justify-self:center;">`
+      + `<small>${escapeHtml(n.kind)}</small><strong>${escapeHtml(n.focus)}</strong>${bodyHtml}</button>`;
   }).join('');
   const svg = document.getElementById('poActEdges');
   svg.replaceChildren();
-  svg.setAttribute('viewBox', `0 0 ${width} ${rows * gap + 30}`);
+  const mapHeight = Math.max(nodesEl.offsetHeight, 230);
+  svg.setAttribute('viewBox', `0 0 ${width} ${mapHeight}`);
   actEdges.forEach((edge) => {
+    const fromEl = nodesEl.querySelector(`[data-actnode="${edge.from}"]`);
+    const toEl = nodesEl.querySelector(`[data-actnode="${edge.to}"]`);
+    if (!fromEl || !toEl) return;
     const revealed = edge.atEvent <= actIndex;
-    const x1 = pos[edge.from][0] + nodeWidth / 2, y1 = pos[edge.from][1] + 76;
-    const x2 = pos[edge.to][0] + nodeWidth / 2, y2 = pos[edge.to][1];
+    const x1 = fromEl.offsetLeft + fromEl.offsetWidth / 2, y1 = fromEl.offsetTop + fromEl.offsetHeight;
+    const x2 = toEl.offsetLeft + toEl.offsetWidth / 2, y2 = toEl.offsetTop;
     const p = document.createElementNS(ACT_SVG_NS, 'path');
     p.setAttribute('d', `M${x1},${y1} C${x1},${y1 + 30} ${x2},${y2 - 30} ${x2},${y2}`);
     p.setAttribute('fill', 'none');
@@ -1895,27 +1930,6 @@ function actRenderDetail() {
       + `<span class="po-actoutcome">${escapeHtml(actVisitText(ev))}</span></div>`
   ).join('');
 }
-// Each distinct real search-query argument the model used, as its own
-// "line of inquiry" -- status only ever says whether something was
-// retrieved, never that a claim is supported.
-function actRenderQuestions() {
-  const byQuery = {}, order = [];
-  activityEntries.forEach((e, i) => {
-    const key = e.args && e.args.query ? String(e.args.query).trim() : '';
-    if (!key) return;
-    if (!byQuery[key]) { byQuery[key] = { query: key, revealed: false, anyMatch: false }; order.push(key); }
-    if (actRawToEvent[i] <= actIndex) {
-      byQuery[key].revealed = true;
-      if (e.outcome === 'match') byQuery[key].anyMatch = true;
-    }
-  });
-  const rows = order.filter((k) => byQuery[k].revealed).map((k) => {
-    const q = byQuery[k];
-    return `<div class="po-actquestion"><span class="po-actqtext">"${escapeHtml(actTruncate(q.query, 70))}"</span>`
-      + `<span class="po-actqstatus${q.anyMatch ? ' found' : ''}">${q.anyMatch ? 'Evidence found' : 'No matches yet'}</span></div>`;
-  });
-  document.getElementById('poActQuestions').innerHTML = rows.join('') || '<p class="po-tiny">No distinct search queries yet.</p>';
-}
 // Always the complete list, regardless of replay position -- "keep the
 // full tool log available underneath" rather than gating it on actIndex.
 function actRenderLog() {
@@ -1949,7 +1963,6 @@ function renderAct(animate) {
   document.getElementById('poActCaption').textContent = actEventCaption(ev);
   actRenderMap(animate);
   actRenderDetail();
-  actRenderQuestions();
   actRenderLog();
 }
 // isLive selects the normalization shape (see normalizeActivityEntry);
