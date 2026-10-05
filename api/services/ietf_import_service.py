@@ -1142,6 +1142,11 @@ class IetfImportService:
     _RFC_YEARS_CACHE = Path("/app/api/storage/rfc-corpus-index/rfc_years_titles.json")
     _RFC_INDEX_URL = "https://www.rfc-editor.org/rfc-index.xml"
     _RFC_INDEX_NS = {"idx": "https://www.rfc-editor.org/rfc-index"}
+    # Bumped whenever the cached entry shape changes -- a disk cache written
+    # by an older schema is rebuilt rather than silently served without the
+    # new field (see _load_rfc_index_cache). v2 adds "draft": the originating
+    # draft name per RFC, for get_rfc_numbers_for_draft_names below.
+    _RFC_INDEX_SCHEMA_VERSION = 2
 
     @staticmethod
     def _build_rfc_years_titles_cache() -> dict[str, dict]:
@@ -1160,10 +1165,28 @@ class IetfImportService:
             title = (entry.findtext("idx:title", default="", namespaces=ns) or "").strip()
             year_text = entry.findtext("idx:date/idx:year", default="", namespaces=ns) or ""
             year = int(year_text) if year_text.strip().isdigit() else None
-            out[doc_id] = {"year": year, "title": title}
+            # The index records the exact final revision ("draft-ietf-quic-
+            # transport-34") -- strip that trailing "-NN" so it matches the
+            # bare draft name used everywhere else in this app (corpora
+            # catalog, IetfLocalSource.draft_name, etc).
+            draft_text = (entry.findtext("idx:draft", default="", namespaces=ns) or "").strip()
+            draft_name = re.sub(r"-\d+$", "", draft_text) if draft_text else None
+            out[doc_id] = {"year": year, "title": title, "draft": draft_name}
+        payload = {"_schema": IetfImportService._RFC_INDEX_SCHEMA_VERSION, "entries": out}
         IetfImportService._RFC_YEARS_CACHE.parent.mkdir(parents=True, exist_ok=True)
-        IetfImportService._RFC_YEARS_CACHE.write_text(json.dumps(out))
+        IetfImportService._RFC_YEARS_CACHE.write_text(json.dumps(payload))
         return out
+
+    @staticmethod
+    def _load_rfc_index_cache() -> dict[str, dict]:
+        if IetfImportService._RFC_YEARS_CACHE.is_file():
+            try:
+                payload = json.loads(IetfImportService._RFC_YEARS_CACHE.read_text())
+                if isinstance(payload, dict) and payload.get("_schema") == IetfImportService._RFC_INDEX_SCHEMA_VERSION:
+                    return payload["entries"]
+            except (json.JSONDecodeError, OSError, KeyError):
+                pass
+        return IetfImportService._build_rfc_years_titles_cache()
 
     @staticmethod
     def get_rfc_years_and_titles(rfc_numbers: list[str]) -> dict[str, dict]:
@@ -1174,13 +1197,7 @@ class IetfImportService:
         without guessing or hand-authoring a date. Unknown/unpublished
         numbers are simply omitted from the result.
         """
-        if IetfImportService._RFC_YEARS_CACHE.is_file():
-            try:
-                cache = json.loads(IetfImportService._RFC_YEARS_CACHE.read_text())
-            except (json.JSONDecodeError, OSError):
-                cache = IetfImportService._build_rfc_years_titles_cache()
-        else:
-            cache = IetfImportService._build_rfc_years_titles_cache()
+        cache = IetfImportService._load_rfc_index_cache()
         result = {}
         for raw in rfc_numbers:
             digits = re.sub(r"[^0-9]", "", str(raw))
@@ -1189,6 +1206,26 @@ class IetfImportService:
             key = f"RFC{digits}"
             if key in cache:
                 result[digits] = cache[key]
+        return result
+
+    @staticmethod
+    def get_rfc_numbers_for_draft_names(draft_names: list[str]) -> dict[str, str]:
+        """{draft_name: rfc_number} for whichever of the given draft names
+        have actually been published, resolved from the same cached
+        rfc-editor.org index get_rfc_years_and_titles already uses -- not a
+        live per-draft Datatracker lookup. The document picker needs this
+        for potentially dozens of local sources on every page load, and
+        resolving them one at a time live is far too slow for that (see
+        resolve_rfc_number_for_draft's own docstring for the live,
+        single-draft equivalent, used where that cost is fine).
+        """
+        cache = IetfImportService._load_rfc_index_cache()
+        by_draft = {entry["draft"]: doc_id for doc_id, entry in cache.items() if entry.get("draft")}
+        result = {}
+        for draft_name in draft_names:
+            doc_id = by_draft.get(draft_name)
+            if doc_id:
+                result[draft_name] = re.sub(r"[^0-9]", "", doc_id)
         return result
 
     @staticmethod

@@ -2998,7 +2998,9 @@ def ask(
                 print(f"[iter {iteration}] {tool_name} draft={draft_name!r} query={ballot_query!r}", file=sys.stderr)
             citation_start = len(numbered_evidence) + 1
             observation = _get_iesg_ballot_comments(draft_name, ballot_query)
-            if _has_evidence(observation, ("Could not fetch IESG ballot comments", "No IESG ballot discuss/comment text found")):
+            if _has_evidence(
+                observation, ("Could not fetch IESG ballot comments", "No IESG ballot discuss/comment text found")
+            ):
                 observation = f"[{citation_start}] {observation}"
                 numbered_evidence.append({"text": observation, "kind": "iesg_ballot"})
             evidence_log.append(observation)

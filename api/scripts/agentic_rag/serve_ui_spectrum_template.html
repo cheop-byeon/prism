@@ -1392,17 +1392,19 @@ fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
   // Local-only sources (Sources tab) are never a real Dify dataset, so
   // they're never in corporaCatalog above -- without this, a deployment
   // with zero real datasets and hundreds of local sources saw nothing but
-  // the placeholder in this dropdown. No RFC number here: resolving one
-  // live per local source (the only way to get it) is a real Datatracker
-  // round-trip each -- fine for one source on demand, much too slow to
-  // pay for every local source on every page load just to populate a
-  // picker (confirmed: ~45 entries this way takes 1-2 minutes elsewhere
-  // in this app) -- so these filter by name only, not by RFC number.
-  (data.local_sources || []).forEach((draftName) => {
-    draftOptions.push({ draftName, rfcNumber: null, local: true });
+  // the placeholder in this dropdown. rfc_number here comes from the
+  // cached rfc-editor.org index (IetfImportService.get_rfc_numbers_for_
+  // draft_names), not a live per-draft Datatracker lookup -- that's what
+  // makes it cheap enough to do for every local source on every page
+  // load; it's null for a draft that simply hasn't been published yet
+  // (or isn't in the index), not a resolution failure.
+  (data.local_sources || []).forEach((entry) => {
+    draftOptions.push({ draftName: entry.draft_name, rfcNumber: entry.rfc_number || null, local: true });
+    // poThreadDraftEl's own label formatting is untouched here -- Decision
+    // history's "Within a document" picker stays exactly as it was.
     const opt = document.createElement('option');
-    opt.value = draftName;
-    opt.textContent = `${draftName} (local)`;
+    opt.value = entry.draft_name;
+    opt.textContent = `${entry.draft_name} (local)`;
     poThreadDraftEl.appendChild(opt);
   });
   renderDraftOptions(filterDraftOptions(poDraftEl.value));

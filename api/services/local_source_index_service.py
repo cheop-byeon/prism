@@ -416,7 +416,9 @@ class LocalSourceIndexService:
                     )
             else:
                 documents.extend(
-                    LocalSourceIndexService._legacy_documents_for_kinds(draft_name, LocalSourceIndexService._CONTENT_KINDS)
+                    LocalSourceIndexService._legacy_documents_for_kinds(
+                        draft_name, LocalSourceIndexService._CONTENT_KINDS
+                    )
                 )
 
         if scope in ("both", "mail"):
@@ -426,7 +428,9 @@ class LocalSourceIndexService:
                     documents.extend(json.loads(mail_path.read_text()).get("documents", []))
                 except (json.JSONDecodeError, OSError):
                     documents.extend(
-                        LocalSourceIndexService._legacy_documents_for_kinds(draft_name, LocalSourceIndexService._MAIL_KINDS)
+                        LocalSourceIndexService._legacy_documents_for_kinds(
+                            draft_name, LocalSourceIndexService._MAIL_KINDS
+                        )
                     )
             else:
                 documents.extend(

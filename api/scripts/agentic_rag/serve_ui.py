@@ -780,10 +780,20 @@ def main() -> None:
             # source names are listed here too, as their own field, rather
             # than folded into catalog.
             registered_names = {entry["draft_name"] for entry in catalog}
-            local_sources = [
+            local_names = [
                 name
                 for name in IetfImportService.list_local_source_names(g.account.id)
                 if name not in registered_names
+            ]
+            # Resolved from the cached rfc-editor.org index (see
+            # get_rfc_numbers_for_draft_names), not a live per-draft lookup --
+            # this runs on every page load for potentially dozens of local
+            # sources, so it has to stay cheap. A local source with no entry
+            # here just hasn't been published as an RFC (or isn't in the
+            # index yet), not a resolution failure.
+            rfc_by_draft = IetfImportService.get_rfc_numbers_for_draft_names(local_names)
+            local_sources = [
+                {"draft_name": name, "rfc_number": rfc_by_draft.get(name)} for name in local_names
             ]
             return jsonify({"catalog": catalog, "local_sources": local_sources})
         except Exception as exc:
