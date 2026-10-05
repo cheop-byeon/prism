@@ -99,6 +99,18 @@ server {
       include proxy.conf;
     }
 
+    # The bare domain root was falling through to the catch-all `location /`
+    # below, which proxies straight to Dify's own web console -- so a
+    # fresh, logged-out visitor landed on Dify's stock /signin page instead
+    # of the Prism login portal above. login_template.html always renders
+    # the login form unconditionally (confirmed: no client- or server-side
+    # check for an existing valid session), so an already-authenticated
+    # visitor landing here just sees the form again rather than being
+    # bounced straight to /spectrum/ -- a minor redundancy, not a loop.
+    location = / {
+      return 301 /login;
+    }
+
     # /prism itself must never render a page for a real visitor -- these
     # three exact matches intercept the specific paths a person (or an old
     # bookmark/link) could actually land on, ahead of the general /prism/
