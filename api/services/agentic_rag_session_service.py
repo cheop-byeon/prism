@@ -125,6 +125,70 @@ class AgenticRagSessionService:
             return None
 
     @staticmethod
+    def get_session_for_view(session_id: str, *, account: Account) -> Conversation | None:
+        """Like get_session, but also returns a session this account does
+        NOT own if its owner has explicitly marked it shared -- read-only:
+        only used for viewing (get_turns), never by rename/delete/share
+        itself, which all stay on get_session's strict ownership check.
+        """
+        owned = AgenticRagSessionService.get_session(session_id, account=account)
+        if owned is not None:
+            return owned
+        if not AgenticRagSessionService.get_session_shared(session_id):
+            return None
+        return (
+            db.session.query(Conversation)
+            .filter(
+                Conversation.id == session_id,
+                Conversation.app_id == _PRISM_APP_ID,
+                Conversation.from_source == ConversationFromSource.CONSOLE,
+                Conversation.is_deleted.is_(False),
+            )
+            .first()
+        )
+
+    @staticmethod
+    def get_session_shared(session_id: str) -> bool:
+        from models.ietf_agentic_session_share import IetfAgenticSessionShare
+
+        row = db.session.query(IetfAgenticSessionShare).filter_by(conversation_id=session_id).first()
+        return bool(row and row.shared)
+
+    @staticmethod
+    def _shared_map(conversation_ids: list[str]) -> dict[str, bool]:
+        from models.ietf_agentic_session_share import IetfAgenticSessionShare
+
+        if not conversation_ids:
+            return {}
+        rows = (
+            db.session.query(IetfAgenticSessionShare.conversation_id, IetfAgenticSessionShare.shared)
+            .filter(IetfAgenticSessionShare.conversation_id.in_(conversation_ids))
+            .all()
+        )
+        return {row[0]: row[1] for row in rows}
+
+    @staticmethod
+    def set_session_shared(session_id: str, *, account: Account, shared: bool) -> dict:
+        """Only the owning account may flip this -- same convention as
+        IetfImportService.set_local_source_shared: an {"error": ...} dict
+        for a caller-facing failure rather than raising, so the route can
+        jsonify it directly.
+        """
+        from models.ietf_agentic_session_share import IetfAgenticSessionShare
+
+        conversation = AgenticRagSessionService.get_session(session_id, account=account)
+        if conversation is None:
+            return {"error": "session not found"}
+        row = db.session.query(IetfAgenticSessionShare).filter_by(conversation_id=session_id).first()
+        if row is None:
+            row = IetfAgenticSessionShare(conversation_id=session_id, shared=shared)
+            db.session.add(row)
+        else:
+            row.shared = shared
+        db.session.commit()
+        return {"session_id": session_id, "shared": shared}
+
+    @staticmethod
     def list_sessions(*, account: Account, last_id: str | None = None, limit: int = 30) -> dict:
         """Real cursor pagination via ConversationService.pagination_by_last_id
         (the same method a normal Dify app's conversation list uses) instead
@@ -138,6 +202,7 @@ class AgenticRagSessionService:
             limit=limit,
             invoke_from=_INVOKE_FROM,
         )
+        shared_map = AgenticRagSessionService._shared_map([row.id for row in pagination.data])
         return {
             "sessions": [
                 {
@@ -146,11 +211,55 @@ class AgenticRagSessionService:
                     "updated_at": row.updated_at.isoformat(),
                     "model_provider": row.model_provider,
                     "model_id": row.model_id,
+                    "is_owner": True,
+                    "shared": shared_map.get(row.id, False),
                 }
                 for row in pagination.data
             ],
             "has_more": pagination.has_more,
         }
+
+    @staticmethod
+    def list_shared_sessions(*, account: Account, limit: int = 30) -> list[dict]:
+        """Sessions someone ELSE has shared, visible to any account --
+        the Investigations-rail counterpart to IetfImportService.
+        list_local_source_names's own-pulls-plus-shared merge, kept as a
+        separate list here (rather than merged into list_sessions) since
+        list_sessions' cursor pagination comes straight from Dify's own
+        ConversationService.pagination_by_last_id, which is hard-scoped to
+        one owning account by design -- not worth forking to inject a
+        second account's rows into the same cursor.
+        """
+        from models.ietf_agentic_session_share import IetfAgenticSessionShare
+
+        rows = (
+            db.session.query(Conversation, Account.email)
+            .join(IetfAgenticSessionShare, IetfAgenticSessionShare.conversation_id == Conversation.id)
+            .join(Account, Account.id == Conversation.from_account_id)
+            .filter(
+                IetfAgenticSessionShare.shared.is_(True),
+                Conversation.app_id == _PRISM_APP_ID,
+                Conversation.from_source == ConversationFromSource.CONSOLE,
+                Conversation.is_deleted.is_(False),
+                Conversation.from_account_id != account.id,
+            )
+            .order_by(Conversation.updated_at.desc())
+            .limit(limit)
+            .all()
+        )
+        return [
+            {
+                "id": conversation.id,
+                "title": conversation.name,
+                "updated_at": conversation.updated_at.isoformat(),
+                "model_provider": conversation.model_provider,
+                "model_id": conversation.model_id,
+                "is_owner": False,
+                "shared": True,
+                "owner_email": owner_email,
+            }
+            for conversation, owner_email in rows
+        ]
 
     @staticmethod
     def search_sessions(*, account: Account, query: str, limit: int = 30) -> list[dict]:
@@ -196,6 +305,7 @@ class AgenticRagSessionService:
             .limit(limit)
             .all()
         )
+        shared_map = AgenticRagSessionService._shared_map([row.id for row in rows])
         return [
             {
                 "id": row.id,
@@ -203,21 +313,35 @@ class AgenticRagSessionService:
                 "updated_at": row.updated_at.isoformat(),
                 "model_provider": row.model_provider,
                 "model_id": row.model_id,
+                "is_owner": True,
+                "shared": shared_map.get(row.id, False),
             }
             for row in rows
         ]
 
     @staticmethod
     def delete_session(session_id: str, *, account: Account) -> bool:
+        from models.ietf_agentic_session_share import IetfAgenticSessionShare
+
         try:
             ConversationService.delete(_prism_app(), session_id, account)
-            return True
         except ConversationNotExistsError:
             return False
+        # IetfAgenticSessionShare is this project's own table, not part of
+        # Dify's core delete_conversation_related_data cleanup -- deleted
+        # synchronously here (a single row by its unique conversation_id,
+        # not worth a background task) rather than left behind pointing at
+        # a conversation_id that no longer exists.
+        db.session.query(IetfAgenticSessionShare).filter_by(conversation_id=session_id).delete()
+        db.session.commit()
+        return True
 
     @staticmethod
     def get_turns(session_id: str, *, account: Account) -> list[dict]:
-        conversation = AgenticRagSessionService.get_session(session_id, account=account)
+        # get_session_for_view, not get_session -- viewing (unlike rename/
+        # delete/share) is allowed for a session someone else owns if
+        # they've shared it.
+        conversation = AgenticRagSessionService.get_session_for_view(session_id, account=account)
         if conversation is None:
             return []
         rows = (

@@ -9,6 +9,19 @@ draft's own local files (drafts, its RFC, its WG's threaded mail) and is
 cheap enough -- a handful of small text files, not ~9,930 RFCs -- to
 rebuild from scratch on every "Build index" click rather than needing any
 incremental-rebuild machinery.
+
+Content (draft/RFC text) and mail are indexed as two separate on-disk
+tiers, each independently buildable -- the Sources tab shows them as two
+separate actions/statuses (a source can have its draft/RFC text indexed
+with no mail yet pulled at all, and showing one combined "N passages
+indexed" count silently hid that split: confirmed live, a source reading
+"12 passages indexed" turned out to be 11 drafts + 1 RFC and zero mail,
+which looked like a healthy index until actually checked). search() reads
+both tiers and merges them, so callers that just want "search this
+source" never need to know about the split; build_index/get_index_status
+remain as thin combined wrappers over both tiers for callers that want
+"fully indexed" in one call (the agent's own add_local_source flow, and
+the bulk topic-pull flow) rather than the Sources tab's two buttons.
 """
 
 from __future__ import annotations
@@ -41,12 +54,56 @@ def _tokenize(text: str) -> list[str]:
 
 
 class LocalSourceIndexService:
+    # -- Paths ------------------------------------------------------------
+
     @staticmethod
-    def _index_path(draft_name: str) -> Path:
+    def _legacy_index_path(draft_name: str) -> Path:
+        """The pre-split combined index file -- a source indexed before this
+        content/mail split still has its documents here. Never written by
+        new code, only read as a fallback (see _load_documents_for_search
+        and get_index_status) so a source nobody's rebuilt since the split
+        doesn't silently go dark for search/status.
+        """
         return _INDEX_DIR / f"{draft_name}.json"
 
     @staticmethod
-    def _gather_documents(draft_name: str, wg: str | None, rfc_number: str | None) -> list[dict]:
+    def _content_index_path(draft_name: str) -> Path:
+        return _INDEX_DIR / f"{draft_name}-content.json"
+
+    @staticmethod
+    def _mail_index_path(wg: str) -> Path:
+        """Keyed by WORKING GROUP, not draft name -- unlike draft/RFC text,
+        a WG's mail is the same content regardless of which of its drafts
+        you're looking at it through. Keying this by draft_name (as the
+        content tier correctly is) would mean every draft in a WG stores
+        and indexes an identical copy of that WG's mail -- confirmed live,
+        two MPLS drafts each had their own ~10,490-message copy of the
+        exact same mpls mail. WG-keying means building it once, from any
+        one draft, makes it "already built" for every other draft in that
+        WG too.
+        """
+        return _INDEX_DIR / f"{wg}-mail.json"
+
+    @staticmethod
+    def _content_embeddings_matrix_path(draft_name: str) -> Path:
+        return _INDEX_DIR / f"{draft_name}-content-embeddings.npy"
+
+    @staticmethod
+    def _content_embeddings_ids_path(draft_name: str) -> Path:
+        return _INDEX_DIR / f"{draft_name}-content-embeddings-ids.json"
+
+    @staticmethod
+    def _mail_embeddings_matrix_path(wg: str) -> Path:
+        return _INDEX_DIR / f"{wg}-mail-embeddings.npy"
+
+    @staticmethod
+    def _mail_embeddings_ids_path(wg: str) -> Path:
+        return _INDEX_DIR / f"{wg}-mail-embeddings-ids.json"
+
+    # -- Gathering ----------------------------------------------------------
+
+    @staticmethod
+    def _gather_content_documents(draft_name: str, rfc_number: str | None) -> list[dict]:
         documents: list[dict] = []
 
         revision_re = re.compile(rf"^{re.escape(draft_name)}-(\d+)\.txt$")
@@ -69,7 +126,11 @@ class LocalSourceIndexService:
                             "text": entry.read_text(errors="ignore"),
                         }
                     )
+        return documents
 
+    @staticmethod
+    def _gather_mail_documents(wg: str | None) -> list[dict]:
+        documents: list[dict] = []
         if wg and _PREPROCESSED_DIR.is_dir():
             for entry in sorted(_PREPROCESSED_DIR.glob(f"ietf-mailarchive-{wg}-*-threads.jsonl")):
                 for line in entry.read_text(errors="ignore").splitlines():
@@ -82,24 +143,28 @@ class LocalSourceIndexService:
                         continue
                     text = f"{record.get('subject', '')}\n{record.get('body', '')}"
                     documents.append(
-                        {"kind": "mail_thread", "id": record.get("url") or record.get("id") or entry.stem, "text": text}
+                        {
+                            "kind": "mail_thread",
+                            "id": record.get("url") or record.get("id") or entry.stem,
+                            "text": text,
+                        }
                     )
-
         return documents
 
+    # -- Sparse (BM25) index build -------------------------------------------
+
     @staticmethod
-    def build_index(draft_name: str, wg: str | None, rfc_number: str | None, on_event=None) -> dict:
+    def build_content_index(draft_name: str, rfc_number: str | None, on_event=None) -> dict:
         if on_event:
-            on_event({"stage": "indexing", "message": "Gathering local content…"})
-        documents = LocalSourceIndexService._gather_documents(draft_name, wg, rfc_number)
+            on_event({"stage": "indexing", "message": "Gathering draft/RFC text…"})
+        documents = LocalSourceIndexService._gather_content_documents(draft_name, rfc_number)
         if not documents:
-            return {"error": "Nothing downloaded locally yet for this draft -- sync first."}
+            return {"error": "No draft/RFC text downloaded locally yet for this draft -- sync it first."}
 
         _INDEX_DIR.mkdir(parents=True, exist_ok=True)
-        LocalSourceIndexService._index_path(draft_name).write_text(
-            json.dumps({"draft_name": draft_name, "wg": wg, "documents": documents})
+        LocalSourceIndexService._content_index_path(draft_name).write_text(
+            json.dumps({"draft_name": draft_name, "documents": documents})
         )
-
         counts: dict[str, int] = {}
         for doc in documents:
             counts[doc["kind"]] = counts.get(doc["kind"], 0) + 1
@@ -108,37 +173,50 @@ class LocalSourceIndexService:
         return {"total_documents": len(documents), "by_kind": counts}
 
     @staticmethod
-    def _embeddings_matrix_path(draft_name: str) -> Path:
-        return _INDEX_DIR / f"{draft_name}-embeddings.npy"
-
-    @staticmethod
-    def _embeddings_ids_path(draft_name: str) -> Path:
-        return _INDEX_DIR / f"{draft_name}-embeddings-ids.json"
-
-    @staticmethod
-    def build_embedding_index(
-        draft_name: str, wg: str | None, rfc_number: str | None, on_event=None, batch_size: int = 20
-    ) -> dict:
-        """Same document set as build_index (the BM25 tier above), embedded
-        via the same local rfc-dralign-q8 model RfcCorpusIndexService uses
-        for its own whole-corpus embedding tier -- see that module's
-        docstring for why this calls the embedding model directly rather
-        than going through Dify's own Dataset/vector-store pipeline.
-
-        Meant to be run from a Celery task (see
-        tasks/local_source_embedding_index_task.py), not called directly
-        from a request handler -- a source's worth of mail/draft/RFC text
-        is small compared to the whole corpus, but still slow enough
-        (measured ~160ms/doc for RfcCorpusIndexService's short
-        title+abstract texts; these are full documents) that it must
-        survive the requesting page closing, unlike build_index's BM25
-        tier which is cheap enough to run inline in the request/SSE.
-        """
+    def build_mail_index(wg: str | None, on_event=None) -> dict:
+        if not wg:
+            return {"error": "No working group resolved for this source."}
         if on_event:
-            on_event({"stage": "indexing", "current": 0, "total": 0, "message": "Gathering local content…"})
-        documents = LocalSourceIndexService._gather_documents(draft_name, wg, rfc_number)
+            on_event({"stage": "indexing", "message": "Gathering WG mail…"})
+        documents = LocalSourceIndexService._gather_mail_documents(wg)
         if not documents:
+            return {"error": "No WG mail downloaded locally yet for this WG -- sync it first."}
+
+        _INDEX_DIR.mkdir(parents=True, exist_ok=True)
+        LocalSourceIndexService._mail_index_path(wg).write_text(json.dumps({"wg": wg, "documents": documents}))
+        counts: dict[str, int] = {}
+        for doc in documents:
+            counts[doc["kind"]] = counts.get(doc["kind"], 0) + 1
+        if on_event:
+            on_event({"stage": "indexing", "message": f"Indexed {len(documents)} messages"})
+        return {"total_documents": len(documents), "by_kind": counts}
+
+    @staticmethod
+    def build_index(draft_name: str, wg: str | None, rfc_number: str | None, on_event=None) -> dict:
+        """Combined build over both tiers -- see this module's docstring for
+        which callers want this vs. the two tiers separately.
+        """
+        content_result = LocalSourceIndexService.build_content_index(draft_name, rfc_number, on_event=on_event)
+        mail_result = (
+            LocalSourceIndexService.build_mail_index(wg, on_event=on_event)
+            if wg
+            else {"total_documents": 0, "by_kind": {}}
+        )
+        content_total = content_result.get("total_documents", 0)
+        mail_total = mail_result.get("total_documents", 0)
+        if content_total == 0 and mail_total == 0:
             return {"error": "Nothing downloaded locally yet for this draft -- sync first."}
+        by_kind = {**content_result.get("by_kind", {}), **mail_result.get("by_kind", {})}
+        return {"total_documents": content_total + mail_total, "by_kind": by_kind}
+
+    # -- Dense (embeddings) index build ---------------------------------------
+
+    @staticmethod
+    def _build_embedding_index(
+        documents: list[dict], matrix_path: Path, ids_path: Path, on_event=None, batch_size: int = 20
+    ) -> dict:
+        if not documents:
+            return {"error": "Nothing to embed yet -- sync and build the sparse index first."}
 
         ids = [doc["id"] for doc in documents]
         texts = [doc["text"] for doc in documents]
@@ -163,13 +241,44 @@ class LocalSourceIndexService:
 
         matrix = np.array(vectors, dtype=np.float32)
         _INDEX_DIR.mkdir(parents=True, exist_ok=True)
-        np.save(LocalSourceIndexService._embeddings_matrix_path(draft_name), matrix)
-        LocalSourceIndexService._embeddings_ids_path(draft_name).write_text(json.dumps(ids))
+        np.save(matrix_path, matrix)
+        ids_path.write_text(json.dumps(ids))
         return {"total_documents": len(ids), "dims": matrix.shape[1] if matrix.size else 0}
 
     @staticmethod
-    def get_index_status(draft_name: str) -> dict:
-        path = LocalSourceIndexService._index_path(draft_name)
+    def build_content_embedding_index(
+        draft_name: str, rfc_number: str | None, on_event=None, batch_size: int = 20
+    ) -> dict:
+        """Meant to be run from a Celery task (see
+        tasks/local_source_embedding_index_task.py), not called directly
+        from a request handler -- see that module's docstring for why.
+        """
+        documents = LocalSourceIndexService._gather_content_documents(draft_name, rfc_number)
+        return LocalSourceIndexService._build_embedding_index(
+            documents,
+            LocalSourceIndexService._content_embeddings_matrix_path(draft_name),
+            LocalSourceIndexService._content_embeddings_ids_path(draft_name),
+            on_event=on_event,
+            batch_size=batch_size,
+        )
+
+    @staticmethod
+    def build_mail_embedding_index(wg: str | None, on_event=None, batch_size: int = 20) -> dict:
+        if not wg:
+            return {"error": "No working group resolved for this source."}
+        documents = LocalSourceIndexService._gather_mail_documents(wg)
+        return LocalSourceIndexService._build_embedding_index(
+            documents,
+            LocalSourceIndexService._mail_embeddings_matrix_path(wg),
+            LocalSourceIndexService._mail_embeddings_ids_path(wg),
+            on_event=on_event,
+            batch_size=batch_size,
+        )
+
+    # -- Status ------------------------------------------------------------
+
+    @staticmethod
+    def _index_status_from_path(path: Path) -> dict:
         if not path.is_file():
             return {"built": False}
         try:
@@ -191,14 +300,154 @@ class LocalSourceIndexService:
             "built_at": path.stat().st_mtime,
         }
 
+    _CONTENT_KINDS = ("draft", "rfc")
+    _MAIL_KINDS = ("mail_thread",)
+
     @staticmethod
-    def search(draft_name: str, query: str, top_k: int = 5) -> dict:
-        path = LocalSourceIndexService._index_path(draft_name)
+    def _legacy_documents_for_kinds(draft_name: str, kinds: tuple[str, ...]) -> list[dict]:
+        """A source indexed before the content/mail split (and, for mail,
+        before the later WG-keying) has one combined legacy file per draft,
+        mixing both kinds together -- this pulls out just the requested
+        kinds from it. Shared by the status and search fallbacks below so
+        both agree on what a legacy file actually contains.
+        """
+        path = LocalSourceIndexService._legacy_index_path(draft_name)
         if not path.is_file():
-            return {"error": "No local index built yet for this draft -- build it first."}
-        documents = json.loads(path.read_text()).get("documents", [])
+            return []
+        try:
+            payload = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            return []
+        return [doc for doc in payload.get("documents", []) if doc.get("kind") in kinds]
+
+    @staticmethod
+    def _legacy_index_status_for_kinds(draft_name: str, kinds: tuple[str, ...]) -> dict:
+        path = LocalSourceIndexService._legacy_index_path(draft_name)
+        if not path.is_file():
+            return {"built": False}
+        documents = LocalSourceIndexService._legacy_documents_for_kinds(draft_name, kinds)
         if not documents:
-            return {"error": "Local index is empty."}
+            return {"built": False}
+        counts: dict[str, int] = {}
+        for doc in documents:
+            counts[doc.get("kind", "?")] = counts.get(doc.get("kind", "?"), 0) + 1
+        return {
+            "built": True,
+            "total_documents": len(documents),
+            "by_kind": counts,
+            "built_at": path.stat().st_mtime,
+        }
+
+    @staticmethod
+    def get_content_index_status(draft_name: str) -> dict:
+        status = LocalSourceIndexService._index_status_from_path(
+            LocalSourceIndexService._content_index_path(draft_name)
+        )
+        if status.get("built"):
+            return status
+        return LocalSourceIndexService._legacy_index_status_for_kinds(
+            draft_name, LocalSourceIndexService._CONTENT_KINDS
+        )
+
+    @staticmethod
+    def get_mail_index_status(wg: str | None, draft_name: str | None = None) -> dict:
+        """WG-keyed (see _mail_index_path) -- draft_name is accepted only
+        for the legacy pre-split/pre-WG-keying fallback, which was written
+        per-draft before either change and has no WG-level file to fall
+        back to instead.
+        """
+        if wg:
+            status = LocalSourceIndexService._index_status_from_path(LocalSourceIndexService._mail_index_path(wg))
+            if status.get("built"):
+                return status
+        if draft_name:
+            return LocalSourceIndexService._legacy_index_status_for_kinds(
+                draft_name, LocalSourceIndexService._MAIL_KINDS
+            )
+        return {"built": False}
+
+    @staticmethod
+    def get_index_status(draft_name: str, wg: str | None = None) -> dict:
+        """Combined status over both tiers -- see this module's docstring
+        for which callers want this vs. the two tiers separately.
+        """
+        content = LocalSourceIndexService.get_content_index_status(draft_name)
+        mail = LocalSourceIndexService.get_mail_index_status(wg, draft_name)
+        if not content.get("built") and not mail.get("built"):
+            return {"built": False}
+        total = content.get("total_documents", 0) + mail.get("total_documents", 0)
+        by_kind = {**content.get("by_kind", {}), **mail.get("by_kind", {})}
+        built_at = max((t for t in (content.get("built_at"), mail.get("built_at")) if t is not None), default=None)
+        return {"built": True, "total_documents": total, "by_kind": by_kind, "built_at": built_at}
+
+    # -- Search --------------------------------------------------------------
+
+    @staticmethod
+    def _load_documents_for_search(draft_name: str, wg: str | None, scope: str = "both") -> list[dict]:
+        """Each tier falls back to the legacy file independently -- a
+        source can easily have one tier rebuilt under the new split/WG-
+        keyed files and the other still only in the old combined legacy
+        file (e.g. content rebuilt, mail not yet), and an all-or-nothing
+        fallback would silently drop whichever tier wasn't rebuilt instead
+        of still finding it in the legacy file.
+
+        scope: "both" (default, legacy single-tool behavior), "content"
+        (draft/RFC text only), or "mail" (that WG's mail only) -- lets
+        ask_decision_agent.py's two local-source search tools each query
+        just their own tier, instead of every call always ranking against
+        a corpus that mixes spec text and mailing-list discussion
+        together (confirmed live: this was genuinely confusing -- a
+        drafts/RFC-text query could surface mail hits and vice versa,
+        with nothing about the call itself saying which tier actually
+        answered it).
+        """
+        documents: list[dict] = []
+
+        if scope in ("both", "content"):
+            content_path = LocalSourceIndexService._content_index_path(draft_name)
+            if content_path.is_file():
+                try:
+                    documents.extend(json.loads(content_path.read_text()).get("documents", []))
+                except (json.JSONDecodeError, OSError):
+                    documents.extend(
+                        LocalSourceIndexService._legacy_documents_for_kinds(
+                            draft_name, LocalSourceIndexService._CONTENT_KINDS
+                        )
+                    )
+            else:
+                documents.extend(
+                    LocalSourceIndexService._legacy_documents_for_kinds(draft_name, LocalSourceIndexService._CONTENT_KINDS)
+                )
+
+        if scope in ("both", "mail"):
+            mail_path = LocalSourceIndexService._mail_index_path(wg) if wg else None
+            if mail_path and mail_path.is_file():
+                try:
+                    documents.extend(json.loads(mail_path.read_text()).get("documents", []))
+                except (json.JSONDecodeError, OSError):
+                    documents.extend(
+                        LocalSourceIndexService._legacy_documents_for_kinds(draft_name, LocalSourceIndexService._MAIL_KINDS)
+                    )
+            else:
+                documents.extend(
+                    LocalSourceIndexService._legacy_documents_for_kinds(draft_name, LocalSourceIndexService._MAIL_KINDS)
+                )
+
+        return documents
+
+    @staticmethod
+    def search(draft_name: str, query: str, top_k: int = 5, wg: str | None = None, scope: str = "both") -> dict:
+        if wg is None:
+            from services.ietf_import_service import IetfImportService
+
+            wg = IetfImportService.resolve_wg_for_draft(draft_name)
+        documents = LocalSourceIndexService._load_documents_for_search(draft_name, wg, scope=scope)
+        if not documents:
+            no_index_msg = {
+                "content": "No local drafts/RFC index built yet for this draft -- build it first.",
+                "mail": "No local mail index built yet for this draft's WG -- build it first.",
+            }.get(scope, "No local index built yet for this draft -- build it first.")
+            return {"error": no_index_msg}
 
         tokenized = [_tokenize(doc["text"]) for doc in documents]
         bm25 = BM25Okapi(tokenized)

@@ -6,7 +6,7 @@ from celery import shared_task
 
 from core.db.session_factory import session_factory
 from models import ConversationVariable
-from models.model import Message, MessageAnnotation, MessageFeedback
+from models.model import Message, MessageAgentThought, MessageAnnotation, MessageFeedback
 from models.tools import ToolConversationVariables, ToolFile
 from models.web import PinnedConversation
 
@@ -46,6 +46,18 @@ def delete_conversation_related_data(conversation_id: str):
             session.query(ConversationVariable).where(ConversationVariable.conversation_id == conversation_id).delete(
                 synchronize_session=False
             )
+
+            # Has no FK/ondelete relationship to Message at the DB level
+            # (confirmed: MessageAgentThought.message_id is a bare column,
+            # no ForeignKey -- see models/model.py), so it was never
+            # cleaned up here despite every agent-mode conversation
+            # producing one row per tool call. Must run before the Message
+            # delete below -- the subquery needs those rows to still exist
+            # to know which thoughts belong to this conversation at all.
+            message_ids_subquery = session.query(Message.id).where(Message.conversation_id == conversation_id)
+            session.query(MessageAgentThought).where(
+                MessageAgentThought.message_id.in_(message_ids_subquery)
+            ).delete(synchronize_session=False)
 
             session.query(Message).where(Message.conversation_id == conversation_id).delete(synchronize_session=False)
 

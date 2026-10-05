@@ -425,6 +425,54 @@ class IetfImportService:
         return {"draft_name": draft_name, "shared": shared}
 
     @staticmethod
+    def get_mail_message_counts(wg: str) -> dict:
+        """Real email/thread counts from the already-threaded mail archive on
+        disk, for display next to the drafts/RFC revision count (e.g.
+        "1,234 emails · 89 threads") -- the raw ✓/threaded ✓ indicators say
+        whether syncing happened at all, not how much is actually there.
+
+        Counted from the *-threads.jsonl files, not the raw .mbox -- a
+        single long thread is split across several JSONL lines ("part
+        1/6, messages 1-3 of 13"), each repeating the same thread_id and
+        the thread's total message_count, so threads are counted by
+        unique thread_id and emails by each unique thread's own
+        message_count, not by counting lines (which would double-count
+        both for any thread with more than one part).
+        """
+        local_dir = Path("/app/api/storage/ietf-downloads/preprocessed")
+        if not local_dir.is_dir():
+            return {"total_emails": 0, "total_threads": 0}
+
+        message_counts_by_thread: dict[str, int] = {}
+        for path in local_dir.glob(f"ietf-mailarchive-{wg}-*-threads.jsonl"):
+            try:
+                with path.open("r", encoding="utf-8") as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        thread_id = record.get("thread_id")
+                        if not thread_id:
+                            continue
+                        try:
+                            count = int(record.get("message_count") or 0)
+                        except (TypeError, ValueError):
+                            count = 0
+                        if count > message_counts_by_thread.get(thread_id, 0):
+                            message_counts_by_thread[thread_id] = count
+            except OSError:
+                continue
+
+        return {
+            "total_emails": sum(message_counts_by_thread.values()),
+            "total_threads": len(message_counts_by_thread),
+        }
+
+    @staticmethod
     def get_local_download_status(draft_name: str, wg: str | None, rfc_number: str | None) -> dict:
         """What's actually already on disk for one local source, as opposed
         to what Datatracker/the sidecar report is available -- a local
@@ -460,8 +508,23 @@ class IetfImportService:
         # separate timestamp needs persisting anywhere. None (not "never")
         # when nothing's been synced yet, so the frontend can tell those
         # two states apart instead of showing a bogus "0 seconds ago".
-        all_files = revision_files + rfc_files + mail_files + thread_files
-        last_synced_at = max((f.stat().st_mtime for f in all_files), default=None)
+        # Reported per content kind (content vs mail) rather than one
+        # combined timestamp -- the Sources tab's content and mail sync
+        # actions run independently, and a combined timestamp would show a
+        # recent "Synced" even when only one of the two actually ran.
+        content_files = revision_files + rfc_files
+        mail_all_files = mail_files + thread_files
+        content_synced_at = max((f.stat().st_mtime for f in content_files), default=None)
+        mail_synced_at = max((f.stat().st_mtime for f in mail_all_files), default=None)
+        last_synced_at = max((t for t in (content_synced_at, mail_synced_at) if t is not None), default=None)
+
+        # Only worth counting once threading has actually run -- counting
+        # straight from raw .mbox files would double as a "has mail been
+        # pulled" check too, but threads.jsonl is already the one real
+        # source of truth every other mail-reading path (search_local_source,
+        # the BM25/embedding indexes) uses, so the displayed count always
+        # matches what's actually searchable, not just what's on disk.
+        mail_counts = IetfImportService.get_mail_message_counts(wg) if wg and thread_files else None
 
         return {
             "revisions_downloaded": len(revisions),
@@ -469,7 +532,11 @@ class IetfImportService:
             "rfc_downloaded": bool(rfc_files),
             "mail_downloaded": bool(mail_files),
             "mail_thread_downloaded": bool(thread_files),
+            "mail_total_emails": mail_counts["total_emails"] if mail_counts else None,
+            "mail_total_threads": mail_counts["total_threads"] if mail_counts else None,
             "last_synced_at": last_synced_at,
+            "content_synced_at": content_synced_at,
+            "mail_synced_at": mail_synced_at,
         }
 
     @staticmethod
@@ -573,43 +640,50 @@ class IetfImportService:
         return {"draft_name": draft_name, "revisions": results, "rfc_number": rfc_number, "rfc": rfc_result}
 
     @staticmethod
-    def sync_local_source(draft_name: str, on_event=None, owner_account_id: str | None = None) -> dict:
-        """The single "Sync" action for a locally-tracked source: everything
-        raw it could have -- draft revisions, its RFC once published, and
-        its WG's mail (both raw and threaded) -- pulled current in one call.
-        Idempotent/incremental on the draft+RFC side (see
-        download_all_draft_revisions_to_local); the mail side re-runs the
-        full mbox+threading pass each time (already fast in practice -- a
-        few seconds to under a minute even for a large, decades-old list --
-        so a from-scratch incremental-fetch/merge mechanism isn't worth the
-        complexity it would add on top of that).
+    def sync_local_source_mail(wg: str, on_event=None) -> dict:
+        """Just the WG-mail half of sync_local_source -- its own entry point
+        so the Sources tab can refresh a source's draft/RFC text and its
+        WG's mail independently (two separately-clickable actions) instead
+        of only ever together. Re-runs the full mbox+threading pass each
+        time (already fast in practice -- a few seconds to under a minute
+        even for a large, decades-old list -- so a from-scratch
+        incremental-fetch/merge mechanism isn't worth the complexity it
+        would add on top of that).
         """
         from datetime import UTC, datetime
 
-        def _emit(message: str) -> None:
-            if on_event:
-                on_event({"stage": "syncing", "message": message})
+        if on_event:
+            on_event({"stage": "syncing", "message": f"Syncing mail for {wg}…"})
+        current_year = datetime.now(tz=UTC).year
+        try:
+            thread_result, _status = IetfImportService.download_and_preprocess_years(
+                mailing_list=wg,
+                sent_after="1985-01-01T00:00:00",
+                sent_before=f"{current_year}-12-31T23:59:59",
+                group_threads=True,
+            )
+            return {"ok": True, **thread_result}
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)}
 
+    @staticmethod
+    def sync_local_source(draft_name: str, on_event=None, owner_account_id: str | None = None) -> dict:
+        """The combined "Sync" action for a locally-tracked source: everything
+        raw it could have -- draft revisions, its RFC once published, and
+        its WG's mail (both raw and threaded) -- pulled current in one call.
+        Idempotent/incremental on the draft+RFC side (see
+        download_all_draft_revisions_to_local). Used by callers that want a
+        source fully current in one call (the agent's own add_local_source,
+        and the bulk topic-pull flow) rather than the Sources tab's
+        separately-clickable content/mail sync actions, which call
+        download_all_draft_revisions_to_local and sync_local_source_mail
+        directly instead of this.
+        """
         draft_result = IetfImportService.download_all_draft_revisions_to_local(
             draft_name, on_event=on_event, owner_account_id=owner_account_id
         )
         wg = IetfImportService.resolve_wg_for_draft(draft_name)
-
-        mail_result = None
-        if wg:
-            _emit(f"Syncing mail for {wg}…")
-            current_year = datetime.now(tz=UTC).year
-            try:
-                thread_result, _status = IetfImportService.download_and_preprocess_years(
-                    mailing_list=wg,
-                    sent_after="1985-01-01T00:00:00",
-                    sent_before=f"{current_year}-12-31T23:59:59",
-                    group_threads=True,
-                )
-                mail_result = {"ok": True, **thread_result}
-            except Exception as exc:
-                mail_result = {"ok": False, "error": str(exc)}
-
+        mail_result = IetfImportService.sync_local_source_mail(wg, on_event=on_event) if wg else None
         return {**draft_result, "wg": wg, "mail": mail_result}
 
     # Meeting-numbered material's own name embeds which meeting it's from

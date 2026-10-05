@@ -194,6 +194,7 @@ import sys
 import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from pathlib import Path
 
@@ -341,10 +342,12 @@ _RESEARCH_ADDENDUM = (
     "If the user is asking you to gather, pull, crawl, or build up local material on a topic (not "
     "just explain it), use add_local_source on the RFCs you found that genuinely look central to the "
     "question -- not every RFC discovery/search tool returns, since each add_local_source call is a "
-    "real, moderately expensive fetch, not a free lookup. After pulling one, search_local_source can "
-    "query it immediately in this same conversation, so you can actually read what you just pulled "
-    "before finishing your answer, not just report that you pulled it. "
-    "search_local_source's mail coverage is scoped per WORKING GROUP, not per draft: once you pull one "
+    "real, moderately expensive fetch, not a free lookup. After pulling one, search_local_drafts_rfc "
+    "and search_local_mailarchive can query it immediately in this same conversation, so you can "
+    "actually read what you just pulled before finishing your answer, not just report that you pulled "
+    "it -- and since rationale lives in the mail, not the spec text, search_local_mailarchive is the "
+    "one that actually answers a WHY question. "
+    "search_local_mailarchive's coverage is scoped per WORKING GROUP, not per draft: once you pull one "
     "draft, searching it also searches its WG's entire mail archive, not just that one draft's own "
     "thread. So if the central RFCs you found span more than one WG (each add_local_source/"
     "list_available_ietf_corpora result names the WG), pull and search at least one representative "
@@ -513,11 +516,30 @@ def _list_available_corpora(viewer_account_id: str | None = None) -> tuple[str, 
     if not by_draft:
         lines.append("No evolution corpora found in this Dify instance.")
     else:
-        for draft_name in sorted(by_draft):
+        # wg/rfc_number resolution is two uncached live Datatracker round
+        # trips per draft (see _resolve_wg_for_draft/_resolve_rfc_number_for_draft's
+        # own docstrings) -- run concurrently across all registered drafts
+        # instead of serially, same reasoning/pattern as serve_ui.py's
+        # _enrich(): confirmed live that this serial loop alone, across the
+        # full set of registered dataset corpora accumulated over a long
+        # session, was enough by itself to make every /api/corpora and
+        # /api/corpora/freshness call (this is called at the top of both,
+        # unconditionally, before freshness's own pagination even applies)
+        # take several minutes.
+        sorted_names = sorted(by_draft)
+
+        def _resolve_one(draft_name: str) -> tuple[str, str | None, str | None]:
+            return draft_name, _resolve_wg_for_draft(draft_name), _resolve_rfc_number_for_draft(draft_name)
+
+        resolved: dict[str, tuple[str | None, str | None]] = {}
+        with ThreadPoolExecutor(max_workers=min(24, max(1, len(sorted_names)))) as pool:
+            for draft_name, wg, rfc_number in pool.map(_resolve_one, sorted_names):
+                resolved[draft_name] = (wg, rfc_number)
+
+        for draft_name in sorted_names:
             entries = sorted(by_draft[draft_name], key=operator.itemgetter("created_at"), reverse=True)
             newest = entries[0]
-            wg = _resolve_wg_for_draft(draft_name)
-            rfc_number = _resolve_rfc_number_for_draft(draft_name)
+            wg, rfc_number = resolved[draft_name]
             mailarchive_dataset_id = _MAILARCHIVE_REGISTRY.get(wg) if wg else None
             catalog.append(
                 {
@@ -546,16 +568,17 @@ def _list_available_corpora(viewer_account_id: str | None = None) -> tuple[str, 
     # real Dify dataset -- see services.ietf_import_service.register_local_source
     # -- so they don't belong in `catalog` (which drives real dataset_id
     # hints/resolution elsewhere in ask()). Mentioned here purely as extra
-    # context so the model knows search_local_source is worth trying for
-    # them, since there's no other discovery path that would tell it these
-    # exist at all.
+    # context so the model knows search_local_drafts_rfc/search_local_mailarchive
+    # are worth trying for them, since there's no other discovery path that
+    # would tell it these exist at all.
     registered_names = set(by_draft.keys())
     local_lines = _list_indexed_local_sources(exclude=registered_names, viewer_account_id=viewer_account_id)
     if local_lines:
         lines.append("")
         lines.append(
             "Local-only sources (added via the Sources tab, indexed locally via BM25 -- "
-            "search with search_local_source, NOT search_ietf_evolution_dataset/"
+            "search with search_local_drafts_rfc (spec text) and/or search_local_mailarchive "
+            "(rationale/discussion), NOT search_ietf_evolution_dataset/"
             "search_ietf_mailarchive_dataset, since these have no real Dify dataset):"
         )
         lines.extend(local_lines)
@@ -564,10 +587,11 @@ def _list_available_corpora(viewer_account_id: str | None = None) -> tuple[str, 
 
 
 def _list_indexed_local_sources(exclude: set[str], viewer_account_id: str | None = None) -> list[str]:
-    """One line per locally-tracked source that actually has a built
-    search_local_source index -- an unindexed local source (downloaded but
-    "Build index" never clicked) has nothing for the tool to search, so
-    it's left out rather than advertising a call that would just fail.
+    """One line per locally-tracked source that actually has a built local
+    index -- an unindexed local source (downloaded but "Build index" never
+    clicked) has nothing for search_local_drafts_rfc/search_local_mailarchive
+    to search, so it's left out rather than advertising a call that would
+    just fail.
 
     viewer_account_id restricts this to sources visible to that account
     (their own pulls plus anything shared) -- see
@@ -576,11 +600,27 @@ def _list_indexed_local_sources(exclude: set[str], viewer_account_id: str | None
     from services.ietf_import_service import IetfImportService
     from services.local_source_index_service import LocalSourceIndexService
 
+    draft_names = [d for d in IetfImportService.list_local_source_names(viewer_account_id) if d not in exclude]
+
+    # Same reasoning as the registered-corpora loop above: resolve_wg_for_draft
+    # is two uncached live Datatracker round trips per draft -- with the
+    # ~300 local sources this deployment has accumulated, running that
+    # serially here (on every single /api/corpora[/freshness] call) was the
+    # other half of the multi-minute hang. get_index_status itself is pure
+    # local filesystem/Redis, cheap, left sequential.
+    def _resolve_wg(draft_name: str) -> tuple[str, str | None]:
+        return draft_name, IetfImportService.resolve_wg_for_draft(draft_name)
+
+    wg_by_draft: dict[str, str | None] = {}
+    if draft_names:
+        with ThreadPoolExecutor(max_workers=min(24, len(draft_names))) as pool:
+            for draft_name, wg in pool.map(_resolve_wg, draft_names):
+                wg_by_draft[draft_name] = wg
+
     lines = []
-    for draft_name in IetfImportService.list_local_source_names(viewer_account_id):
-        if draft_name in exclude:
-            continue
-        status = LocalSourceIndexService.get_index_status(draft_name)
+    for draft_name in draft_names:
+        wg = wg_by_draft[draft_name]
+        status = LocalSourceIndexService.get_index_status(draft_name, wg)
         if not status.get("built"):
             continue
         by_kind = status.get("by_kind", {})
@@ -1503,14 +1543,30 @@ def _find_similar_rfcs_by_meaning(query: str, top_k: int) -> str:
     return "\n".join(lines)
 
 
-def _search_local_source(draft_name: str, query: str, top_k: int) -> str:
+def _search_local_source(
+    draft_name: str,
+    query: str,
+    top_k: int,
+    start: int = 1,
+    wg_cache: dict[str, str | None] | None = None,
+    scope: str = "both",
+) -> tuple[str, list[dict]]:
     """Format LocalSourceIndexService.search() for the model -- BM25 over
-    one locally-tracked source's own downloaded content (draft/RFC text
-    plus threaded mail; see services/local_source_index_service.py). This
-    is the ONLY way this agent can search a Sources-tab-added draft that
-    isn't a real Dify dataset -- search_ietf_evolution_dataset and
-    search_ietf_mailarchive_dataset only work for drafts with an actual
-    dataset_id, which a local source never has.
+    one locally-tracked source's own downloaded content (draft/RFC text,
+    its WG's threaded mail, or both; see services/local_source_index_service.py
+    and its own `scope` param). This is the ONLY way this agent can search
+    a Sources-tab-added draft that isn't a real Dify dataset --
+    search_ietf_evolution_dataset and search_ietf_mailarchive_dataset only
+    work for drafts with an actual dataset_id, which a local source never
+    has.
+
+    scope ("content", "mail", or "both") is set by the caller based on
+    which of the two tools -- search_local_drafts_rfc or
+    search_local_mailarchive -- was actually called; "both" only remains
+    for any other/future caller that genuinely wants one merged ranking,
+    not either live tool any more (splitting them was deliberate: see
+    LOCAL_DRAFT_SEARCH_TOOL_NAME/LOCAL_MAIL_SEARCH_TOOL_NAME's own
+    comment).
 
     Accepts an RFC number too, resolved the same way add_local_source does
     -- confirmed live that a model which had just pulled a source by RFC
@@ -1518,6 +1574,24 @@ def _search_local_source(draft_name: str, query: str, top_k: int) -> str:
     rather than its draft name (both refer to the same thing to a human,
     and there's no reason the model should have to track which form this
     one tool happens to require).
+
+    Returns (formatted_text, structured_hits) -- the second element mirrors
+    numbered_evidence's {"text", "kind"} shape (see the evolution/
+    mailarchive branch in ask()) and uses the same global `start` numbering
+    convention via _format_hits, so a caller can extend its own
+    numbered_evidence list. Confirmed live: every one of 16 real Panorama
+    runs through this tool found real mail_thread hits (e.g. a 1996 Tony
+    Bates message, a 2004 Yakov Rekhter thread) that never reached the
+    session's persisted evidence/claim_labels because this function used to
+    just return a plain string nobody collected -- the UI's journey/
+    evidence map looked email-free even though the search itself worked.
+
+    wg_cache: optional {draft_name: wg} memo so repeat calls for the same
+    draft within one ask() run don't each pay resolve_wg_for_draft's own
+    two live Datatracker round trips (confirmed live: this tool alone gets
+    called 8-32 times per question, usually for the same 1-3 drafts) --
+    that function stays deliberately uncached itself (see its own
+    docstring), this is just this one hot caller memoizing its own calls.
     """
     from services.ietf_import_service import IetfImportService
     from services.local_source_index_service import LocalSourceIndexService
@@ -1528,15 +1602,42 @@ def _search_local_source(draft_name: str, query: str, top_k: int) -> str:
         if resolved:
             draft_name = resolved
 
-    data = LocalSourceIndexService.search(draft_name, query, top_k=top_k)
+    if wg_cache is not None and draft_name in wg_cache:
+        wg = wg_cache[draft_name]
+    else:
+        wg = IetfImportService.resolve_wg_for_draft(draft_name)
+        if wg_cache is not None:
+            wg_cache[draft_name] = wg
+
+    data = LocalSourceIndexService.search(draft_name, query, top_k=top_k, wg=wg, scope=scope)
     if data.get("error"):
-        return f"Local search failed for {draft_name!r}: {data['error']}"
+        return f"Local search failed for {draft_name!r}: {data['error']}", []
     if not data["results"]:
-        return f"No local matches for {query!r} in {draft_name!r}."
-    lines = [f"Top local BM25 matches for {query!r} in {draft_name!r}:"]
-    for r in data["results"]:
-        lines.append(f"  [{r['kind']}] {r['id']} (score {r['score']}): {r['snippet']}")
-    return "\n".join(lines)
+        no_match_scope = {"content": " drafts/RFC text", "mail": "'s WG mail archive"}.get(scope, "")
+        return f"No local matches for {query!r} in {draft_name!r}{no_match_scope}.", []
+    # Tag each hit with its real kind regardless of scope -- harmless and
+    # still useful when scope="both" (any other/future caller), and a
+    # cheap double-check for the normal case too (both live tools now
+    # request a single scope, so every hit's kind should already match
+    # it). The header names which tool/corpus actually ran, not just the
+    # draft -- confirmed live this used to read as drafts/RFC-only search
+    # in the Research-activity trace even on questions whose real answer
+    # came entirely from mail, because nothing in the visible text said
+    # otherwise.
+    _KIND_LABELS = {"draft": "draft", "rfc": "RFC", "mail_thread": "email"}
+    hit_texts = [
+        f"[{_KIND_LABELS.get(r['kind'], r['kind'])}] {r['id']} (score {r['score']}): {r['snippet']}"
+        for r in data["results"]
+    ]
+    scope_label = {"content": "drafts/RFC text", "mail": "WG mail archive (rationale/discussion)"}.get(
+        scope, "drafts/RFC + mail together"
+    )
+    observation = (
+        f"Top local BM25 matches for {query!r} in {draft_name!r} (searched {scope_label}):\n"
+        + _format_hits(hit_texts, start=start)
+    )
+    numbered = [{"text": h, "kind": r["kind"]} for h, r in zip(hit_texts, data["results"], strict=True)]
+    return observation, numbered
 
 
 _RFC_IDENTIFIER_RE = re.compile(r"^(?:rfc)?\s*(\d+)$", re.IGNORECASE)
@@ -1548,7 +1649,8 @@ def _add_local_source(identifier: str, owner_account_id: str | None = None) -> s
     local source, download every revision + its RFC + its WG's mail (raw
     and threaded, see IetfImportService.sync_local_source), then build a
     BM25 index over all of it (LocalSourceIndexService.build_index) so
-    search_local_source can use it immediately in the same conversation.
+    search_local_drafts_rfc/search_local_mailarchive can use it immediately
+    in the same conversation.
     This is genuinely not free (real network fetches, real disk writes,
     real time -- seconds to roughly a minute depending on the WG's mail
     volume), which is why every call is announced as a progress step, not
@@ -1614,7 +1716,9 @@ def _add_local_source(identifier: str, owner_account_id: str | None = None) -> s
     else:
         by_kind = ", ".join(f"{n} {k}" for k, n in index_result.get("by_kind", {}).items())
         summary.append(f"indexed {index_result.get('total_documents', 0)} documents ({by_kind})")
-        summary.append(f"-- now searchable via search_local_source(draft_name={draft_name!r}, ...)")
+        summary.append(
+            f"-- now searchable via search_local_drafts_rfc/search_local_mailarchive(draft_name={draft_name!r}, ...)"
+        )
 
     return "; ".join(summary)
 
@@ -1846,7 +1950,17 @@ RFC_FAMILY_TOOL_NAME = "find_related_rfc_family"
 IESG_BALLOT_TOOL_NAME = "get_iesg_ballot_comments"
 RFC_BM25_SEARCH_TOOL_NAME = "search_rfc_corpus_bm25"
 RFC_SEMANTIC_SEARCH_TOOL_NAME = "find_similar_rfcs_by_meaning"
-LOCAL_SOURCE_SEARCH_TOOL_NAME = "search_local_source"
+# Split from one combined search_local_source into two, mirroring the real
+# search_ietf_evolution_dataset/search_ietf_mailarchive_dataset pair -- a
+# single tool that always ranked draft/RFC text and mail together made it
+# look, in the Research-activity trace, like local sources were mostly a
+# drafts/RFC lookup with email as an afterthought, even on questions where
+# mail hits were doing all the real work. This project's whole point is
+# surfacing rationale, which lives in the mail, not the spec text -- that
+# needs to be a distinct, visible step for a local-only source exactly
+# like it already is for a real dataset, not folded into one generic call.
+LOCAL_DRAFT_SEARCH_TOOL_NAME = "search_local_drafts_rfc"
+LOCAL_MAIL_SEARCH_TOOL_NAME = "search_local_mailarchive"
 ADD_LOCAL_SOURCE_TOOL_NAME = "add_local_source"
 
 # Short, human-facing labels for live progress/UI display -- kept separate
@@ -1868,7 +1982,8 @@ _TOOL_DISPLAY_NAMES = {
     RFC_BM25_SEARCH_TOOL_NAME: "Search all RFCs (BM25 keyword)",
     RFC_SEMANTIC_SEARCH_TOOL_NAME: "Find similar RFCs (semantic)",
     IESG_BALLOT_TOOL_NAME: "Check IESG ballot",
-    LOCAL_SOURCE_SEARCH_TOOL_NAME: "Search local source (BM25)",
+    LOCAL_DRAFT_SEARCH_TOOL_NAME: "Search local drafts/RFC (BM25)",
+    LOCAL_MAIL_SEARCH_TOOL_NAME: "Search local mail archive (BM25)",
     ADD_LOCAL_SOURCE_TOOL_NAME: "Pull a new RFC/draft locally",
 }
 
@@ -2089,16 +2204,18 @@ def _build_tools() -> list:
             ["query"],
         ),
         _tool(
-            LOCAL_SOURCE_SEARCH_TOOL_NAME,
+            LOCAL_DRAFT_SEARCH_TOOL_NAME,
             (
-                "Keyword-search (BM25) the local-only content of one draft added via the Sources tab's "
-                "\"Add a new draft as a source\" flow -- draft/RFC text plus its WG's mail, already "
-                "threaded (parent/child, no BM25 or embedding model involved in the threading itself). "
-                "This is the ONLY tool that can search such a draft's mail or text: it has no real Dify "
-                "dataset, so search_ietf_evolution_dataset and search_ietf_mailarchive_dataset don't work "
-                "for it. list_available_ietf_corpora's observation lists which local sources currently "
-                "have a built index (and how many documents of each kind) -- only those can be searched; "
-                "one that's been added/synced but never indexed via \"Build index\" has nothing to search "
+                "Keyword-search (BM25) the SPEC TEXT ONLY -- draft revisions plus its published RFC, if "
+                "any -- of one draft added via the Sources tab's \"Add a new draft as a source\" flow. "
+                "Tells you WHAT the spec says/requires, never WHY: a local-only draft's own text is no "
+                "more evidence of rationale than a real dataset's evolution-diff text is. For the "
+                "reasoning behind a decision, use search_local_mailarchive instead -- this is the local "
+                "equivalent of search_ietf_evolution_dataset, and that same WHAT-vs-WHY split applies. "
+                "This is the ONLY tool that can search such a draft's text: it has no real Dify dataset, "
+                "so search_ietf_evolution_dataset doesn't work for it. list_available_ietf_corpora's "
+                "observation lists which local sources currently have a built content index -- one "
+                "that's been added/synced but never indexed via \"Build index\" has nothing to search "
                 "yet, and this tool will say so rather than silently returning nothing."
             ),
             {
@@ -2115,12 +2232,45 @@ def _build_tools() -> list:
             ["draft_name", "query"],
         ),
         _tool(
+            LOCAL_MAIL_SEARCH_TOOL_NAME,
+            (
+                "Keyword-search (BM25) the MAIL ARCHIVE ONLY -- that draft's WG's mailing-list "
+                "discussion, already threaded (parent/child, no BM25 or embedding model involved in the "
+                "threading itself) -- for a draft added via the Sources tab. This is where the actual "
+                "rationale lives: the local equivalent of search_ietf_mailarchive_dataset, and it should "
+                "get the same priority you'd give that tool -- call this whenever the question is about "
+                "WHY, not just after search_local_drafts_rfc comes up thin. This is the ONLY tool that "
+                "can search such a draft's mail: it has no real Dify dataset, so "
+                "search_ietf_mailarchive_dataset doesn't work for it. Coverage is scoped per WORKING "
+                "GROUP, not per draft -- once one draft in a WG has mail pulled and indexed, every other "
+                "draft in that same WG is immediately searchable here too, no separate pull needed. "
+                "list_available_ietf_corpora's observation lists which local sources currently have a "
+                "built mail index -- one that's been added/synced but never indexed via \"Build index\" "
+                "has nothing to search yet, and this tool will say so rather than silently returning "
+                "nothing."
+            ),
+            {
+                "draft_name": {
+                    "type": "string",
+                    "description": (
+                        "the local source's draft name (e.g. 'draft-ietf-quic-transport') or its RFC "
+                        "number (e.g. '4035') -- either resolves to the same source (its WG's mail is "
+                        "what actually gets searched)"
+                    ),
+                },
+                "query": {"type": "string", "description": "a topic phrase or keyword"},
+                "top_k": {"type": "integer", "description": "how many results to return (default 5)"},
+            },
+            ["draft_name", "query"],
+        ),
+        _tool(
             ADD_LOCAL_SOURCE_TOOL_NAME,
             (
                 "Actually pull a new RFC or draft in as a searchable local source -- registers it, "
                 "downloads every revision plus its RFC plus its WG's mail (raw and threaded), and "
-                "builds a local BM25 index over all of it in one call, so search_local_source can use "
-                "it immediately afterward in this same conversation. This is the ONLY tool in this "
+                "builds a local BM25 index over all of it in one call, so search_local_drafts_rfc and "
+                "search_local_mailarchive can both use it immediately afterward in this same "
+                "conversation. This is the ONLY tool in this "
                 "agent that writes anything or costs real time (real network fetches and disk writes, "
                 "typically seconds up to roughly a minute depending on the WG's mail volume) -- every "
                 "other tool is a read-only lookup. Use it when the user asks you to gather, pull, crawl, "
@@ -2394,7 +2544,8 @@ def ask(
     iesg_ballot_tool_name = IESG_BALLOT_TOOL_NAME
     rfc_bm25_search_tool_name = RFC_BM25_SEARCH_TOOL_NAME
     rfc_semantic_search_tool_name = RFC_SEMANTIC_SEARCH_TOOL_NAME
-    local_source_search_tool_name = LOCAL_SOURCE_SEARCH_TOOL_NAME
+    local_draft_search_tool_name = LOCAL_DRAFT_SEARCH_TOOL_NAME
+    local_mail_search_tool_name = LOCAL_MAIL_SEARCH_TOOL_NAME
     add_local_source_tool_name = ADD_LOCAL_SOURCE_TOOL_NAME
     tools = _build_tools()
 
@@ -2458,12 +2609,34 @@ def ask(
     # which holds one entry per TOOL CALL (each internally containing
     # possibly several hits) for verify_answer's own content-based fact-
     # checking, which never needed numeric alignment with the answer's own
-    # citations. Only mailarchive/evolution search hits are ever numbered at
-    # all (see the shared dispatch branch below) -- every other tool
-    # (fetch_draft_text, search_wg_minutes, get_iesg_ballot_comments, ...)
-    # returns unnumbered text the model can quote but never bracket-cite, so
-    # there is nothing to track here for those.
+    # citations. Every read-only fetch/search tool below gets a numbered
+    # slot here when it finds something real (gated by _has_evidence so an
+    # empty/error result never claims one) -- confirmed live (the HPACK
+    # question, citing fetch_ietf_rfc_text's RFC 7541 text) that the model
+    # writes [N] bracket citations against whatever it just read regardless
+    # of which tool produced it, not only mailarchive/evolution/local-source
+    # hits; this used to leave those citations pointing at nothing for the
+    # UI's click-to-see-evidence feature to show.
     numbered_evidence: list[dict] = []
+
+    def _has_evidence(observation: str, negative_markers: tuple[str, ...]) -> bool:
+        """True if `observation` is a genuine finding, not an empty/error
+        result -- checked against each tool's own known "nothing here"
+        phrasing (one substring per tool, collected directly from that
+        tool's own formatting function) so a negative result never
+        consumes a citation slot a model could point to as if it were
+        real support for a claim.
+        """
+        return not any(marker in observation for marker in negative_markers)
+
+    # resolve_wg_for_draft is a live, uncached (by design) Datatracker
+    # lookup -- two round trips. search_local_drafts_rfc/search_local_mailarchive
+    # are called many times per run, usually for the same handful of draft names (confirmed
+    # live: 8-32 calls per question), so resolving fresh every time would
+    # add that network cost to every single call. This cache is scoped to
+    # just this one ask() run, not a change to resolve_wg_for_draft's own
+    # no-caching contract (other callers of that function are unaffected).
+    wg_resolution_cache: dict[str, str | None] = {}
 
     def _mentions_revision_pair(text: str, from_rev: str, to_rev: str) -> bool:
         def mentions(rev: str) -> bool:
@@ -2514,12 +2687,84 @@ def ask(
                 return f"{content}\n\n---\nLive diff: {url}\n({header})"
         return content
 
+    _URL_RE = re.compile(r"https?://\S+")
+
+    def _url_is_reachable(url: str) -> bool:
+        """A real existence check, not a guess -- confirmed live that a
+        fabricated citation URL can look exactly as plausible as a real
+        one (right host, right path shape) while being completely dead,
+        which no amount of string-matching against retrieved evidence can
+        catch by itself (a corrupted domain still "matches" if the
+        corruption happened before the match check ever ran). HEAD first
+        since this only ever runs on one single surfaced URL per answer,
+        not per evidence item; some servers reject HEAD with 405/501, so a
+        plain GET is the fallback, not the default.
+        """
+        import httpx
+
+        try:
+            with httpx.Client(timeout=10.0, follow_redirects=True) as client:
+                resp = client.head(url)
+                if resp.status_code in (405, 501):
+                    resp = client.get(url)
+                return resp.status_code == 200
+        except httpx.HTTPError:
+            return False
+
+    def _strip_unverified_live_diff(content: str) -> str:
+        """_finalize_answer above only ever ADDS a real evolution-citation
+        footer -- it was never responsible for removing a "Live diff"-style
+        one the model wrote itself, and the model sometimes does, with a
+        URL it invented rather than one any tool actually gave it.
+        Confirmed live on the ULA/RFC4193 question: a genuinely-retrieved
+        mail Message-ID (a real search_local_mailarchive hit) got wrapped
+        in a fabricated mailarchive.ietf.org web link, complete with a
+        corrupted domain (.fr silently became .com) -- and the result
+        looked exactly as citable as a real one, since nothing checked it.
+
+        Telling the model not to do this (see agent_skill.md) measurably
+        helps but -- per this project's own established pattern for the
+        real evolution-citation footer (_finalize_answer's own docstring:
+        "didn't reliably reproduce it... even when explicitly instructed
+        to") -- prompt compliance for something that matters is never
+        treated as a guarantee here, so this is enforced in code instead:
+        any line mentioning "live diff" alongside a URL that isn't either
+        a real author-tools.ietf.org/iddiff link or a URL that genuinely
+        appears somewhere in this run's own retrieved evidence gets
+        dropped outright, deterministically, before _finalize_answer ever
+        runs -- so a real one it adds afterward is never second-guessed by
+        a fabricated one sitting next to it. Passing the structural check
+        is necessary but not sufficient -- confirmed live (see above) that
+        a fabricated URL can coincidentally be well-formed, so the one URL
+        that survives also gets a real _url_is_reachable check before the
+        line is kept; either check failing drops the line, same outcome.
+        Only ever checked for the single surfaced "live diff" line, not
+        every evidence URL -- that's what makes a live network check
+        affordable here at all.
+        """
+        verified_urls = {url for _, _, _, url in evolution_citations}
+        for item in numbered_evidence:
+            verified_urls.update(u.rstrip(".,);") for u in _URL_RE.findall(item.get("text", "")))
+
+        kept_lines = []
+        for line in content.split("\n"):
+            urls_in_line = _URL_RE.findall(line)
+            if urls_in_line and "live diff" in line.lower():
+                structurally_ok = any(
+                    "author-tools.ietf.org/iddiff" in u or u.rstrip(".,);") in verified_urls
+                    for u in urls_in_line
+                )
+                if not structurally_ok or not any(_url_is_reachable(u.rstrip(".,);")) for u in urls_in_line):
+                    continue  # drop this line -- fabricated, or real-looking but dead
+            kept_lines.append(line)
+        return "\n".join(kept_lines)
+
     def _finish(content: str) -> str:
         """Every return path funnels through here (not just _finalize_answer
         directly) so the usage summary is appended exactly once regardless
         of which of the three exit points was taken.
         """
-        final = _finalize_answer(content)
+        final = _finalize_answer(_strip_unverified_live_diff(content))
         if usage is not None:
             usage.append(_summarize_usage(usage_log))
         if claim_labels is not None:
@@ -2650,7 +2895,11 @@ def ask(
                     f"[iter {iteration}] {tool_name} draft={draft_name!r} rev={revision!r} query={fetch_query!r}",
                     file=sys.stderr,
                 )
+            citation_start = len(numbered_evidence) + 1
             observation = _fetch_draft_text(draft_name, revision, fetch_query)
+            if _has_evidence(observation, ("Could not fetch", "No paragraph containing all of")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "draft"})
             evidence_log.append(observation)
             return observation
 
@@ -2659,7 +2908,11 @@ def ask(
             fetch_query = args.get("query")
             if verbose:
                 print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r} query={fetch_query!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _fetch_rfc_text(rfc_number, fetch_query)
+            if _has_evidence(observation, ("Could not fetch", "No paragraph containing all of")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "rfc"})
             evidence_log.append(observation)
             return observation
 
@@ -2706,7 +2959,11 @@ def ask(
             minutes_query = args.get("query", "")
             if verbose:
                 print(f"[iter {iteration}] {tool_name} wg={wg!r} query={minutes_query!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _search_wg_minutes(wg, minutes_query)
+            if _has_evidence(observation, ("No minutes downloaded locally", "-- no match for")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "minutes"})
             evidence_log.append(observation)
             return observation
 
@@ -2714,7 +2971,11 @@ def ask(
             rfc_number = args.get("rfc_number", "")
             if verbose:
                 print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _get_rfc_relations(rfc_number)
+            if _has_evidence(observation, ("Could not look up relations", "stands alone in that graph")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "rfc"})
             evidence_log.append(observation)
             return observation
 
@@ -2722,7 +2983,11 @@ def ask(
             rfc_number = args.get("rfc_number", "")
             if verbose:
                 print(f"[iter {iteration}] {tool_name} rfc={rfc_number!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _find_related_rfc_family(rfc_number)
+            if _has_evidence(observation, ("Could not look up the RFC family", "No related-RFC family found")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "rfc"})
             evidence_log.append(observation)
             return observation
 
@@ -2731,7 +2996,11 @@ def ask(
             ballot_query = args.get("query")
             if verbose:
                 print(f"[iter {iteration}] {tool_name} draft={draft_name!r} query={ballot_query!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _get_iesg_ballot_comments(draft_name, ballot_query)
+            if _has_evidence(observation, ("Could not fetch IESG ballot comments", "No IESG ballot discuss/comment text found")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "iesg_ballot"})
             evidence_log.append(observation)
             return observation
 
@@ -2741,7 +3010,11 @@ def ask(
             top_k = args.get("top_k") or 10
             if verbose:
                 print(f"[iter {iteration}] {tool_name} query={search_query!r} scope={scope!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _search_rfc_corpus_bm25(search_query, scope, top_k)
+            if _has_evidence(observation, ("BM25 search failed", "No RFCs matched")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "rfc"})
             evidence_log.append(observation)
             return observation
 
@@ -2750,20 +3023,29 @@ def ask(
             top_k = args.get("top_k") or 10
             if verbose:
                 print(f"[iter {iteration}] {tool_name} query={search_query!r}", file=sys.stderr)
+            citation_start = len(numbered_evidence) + 1
             observation = _find_similar_rfcs_by_meaning(search_query, top_k)
+            if _has_evidence(observation, ("Semantic search failed", "No RFCs found for")):
+                observation = f"[{citation_start}] {observation}"
+                numbered_evidence.append({"text": observation, "kind": "rfc"})
             evidence_log.append(observation)
             return observation
 
-        if tool_name == local_source_search_tool_name:
+        if tool_name in (local_draft_search_tool_name, local_mail_search_tool_name):
             local_draft_name = args.get("draft_name", "")
             search_query = args.get("query", "")
             top_k = args.get("top_k") or 5
+            scope = "content" if tool_name == local_draft_search_tool_name else "mail"
             if verbose:
                 print(
                     f"[iter {iteration}] {tool_name} draft={local_draft_name!r} query={search_query!r}",
                     file=sys.stderr,
                 )
-            observation = _search_local_source(local_draft_name, search_query, top_k)
+            citation_start = len(numbered_evidence) + 1
+            observation, hits = _search_local_source(
+                local_draft_name, search_query, top_k, start=citation_start, wg_cache=wg_resolution_cache, scope=scope
+            )
+            numbered_evidence.extend(hits)
             evidence_log.append(observation)
             return observation
 

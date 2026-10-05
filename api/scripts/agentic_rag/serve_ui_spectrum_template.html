@@ -112,7 +112,8 @@
   .po-saved:hover { background: var(--po-soft); }
   .po-saved.active { background: var(--po-tint); }
   .po-saved small { display: block; color: var(--po-muted); font-size: 10px; margin-top: 2px; }
-  .po-saved-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .po-saved-main { flex: 1; min-width: 0; }
+  .po-saved-title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .po-saved-rename, .po-saved-delete {
     flex-shrink: 0; opacity: 0; background: transparent; border: none; color: var(--po-muted);
     padding: 2px 4px; font-size: 11px;
@@ -120,6 +121,18 @@
   .po-saved:hover .po-saved-rename, .po-saved:hover .po-saved-delete { opacity: 1; }
   .po-saved-rename:hover { color: var(--po-ink); }
   .po-saved-delete:hover { color: var(--po-warn); }
+  /* Unlike rename/delete, a session's own share STATE should read at a
+     glance (not only on hover) -- the button itself only appears on
+     hover (same as rename/delete) but stays visibly accent-colored
+     whenever that session is actually shared, hover or not. */
+  .po-saved-share {
+    flex-shrink: 0; opacity: 0; background: transparent; border: none; color: var(--po-muted);
+    padding: 2px 4px; font-size: 10px; white-space: nowrap;
+  }
+  .po-saved:hover .po-saved-share { opacity: 1; }
+  .po-saved-share.is-shared { opacity: 1; color: var(--po-accent); }
+  .po-saved-share:hover { color: var(--po-ink); }
+  .po-saved-share.is-shared:hover { color: var(--po-warn); }
   .po-rename-input {
     flex: 1; min-width: 0; background: var(--po-paper); border: 1px solid var(--po-accent); color: var(--po-ink);
     font-size: 12px; padding: 2px 4px; border-radius: 5px; font-family: inherit;
@@ -158,14 +171,10 @@
   }
   .po-preview { font-size: 10px; letter-spacing: 0.04em; }
 
-  /* Centered, capped-width column -- was flush against .main-area's left
-     edge (just a max-width with no margin), leaving a large dead zone on
-     wide screens instead of centering like localhost:8765's own
-     --content-max-width/--gutter-x column does. margin:0 auto centers a
-     flex item here since .po-main is a column-direction flex container
-     (width is the cross axis, so an explicit horizontal auto-margin
-     overrides the default stretch instead of fighting it). */
-  .po-page { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 30px; max-width: 1280px; width: 100%; margin: 0 auto; }
+  /* Capped-width column, centered -- but a wider cap than before, so the
+     centering gutter next to the 320px-wide .po-rail stays narrow instead
+     of the large dead zone max-width:1280px produced on wide screens. */
+  .po-page { flex: 1; min-height: 0; overflow-y: auto; box-sizing: border-box; padding: 30px; max-width: 1480px; width: 100%; margin: 0 auto; }
   .po-page[hidden] { display: none; }
   .po-eyebrow { color: var(--po-cyan); font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; }
   .po-title { font: 500 30px/1.2 var(--po-serif); letter-spacing: -0.8px; margin: 10px 0 12px; }
@@ -218,14 +227,14 @@
     background: var(--po-tint); color: var(--po-accent); font-size: 10px; margin-right: 6px;
   }
   .po-pill.po-warn { background: transparent; color: var(--po-warn); padding-left: 0; }
-  .po-viewtabs { display: flex; gap: 22px; border-bottom: 1px solid var(--po-line); margin: 16px 0 20px; flex-wrap: wrap; }
+  .po-viewtabs { display: flex; gap: 22px; border-bottom: 1px solid var(--po-line); margin: 10px 0 14px; flex-wrap: wrap; }
   .po-viewtabs button { background: transparent; border: none; padding: 0 0 10px; font-size: 12px; color: var(--po-muted); border-bottom: 2px solid transparent; }
   .po-viewtabs button[aria-pressed="true"] { border-color: var(--po-accent); color: var(--po-accent); }
 
   /* Composer -- a real Investigations-page composer (the mockup puts this
      on Workspace, which isn't built yet -- see plan; this is a deliberate
      temporary bridge so the core research flow is actually usable now). */
-  .po-composer-bar { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; }
+  .po-composer-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
   .po-composer-bar[hidden] { display: none; }
   .po-composer-bar select, .po-composer-bar input[type=text] {
     background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px;
@@ -256,7 +265,7 @@
      source the run actually touched (not one per tool call); node/edge
      positions computed in JS (see actMap()). These rules cover static
      chrome and per-state appearance only. */
-  .po-acttoolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; margin: 4px 0 18px; }
+  .po-acttoolbar { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; margin: 4px 0 12px; }
   .po-actcontrols { display: flex; align-items: center; gap: 8px; }
   .po-actcontrols button, .po-actcontrols select { border: 1px solid var(--po-line); background: var(--po-paper); color: var(--po-ink); padding: 8px 13px; border-radius: 7px; font-size: 12px; cursor: pointer; }
   .po-actcontrols button:disabled, .po-actcontrols select:disabled { opacity: 0.45; cursor: default; }
@@ -277,7 +286,7 @@
      gap that only fit a one-line tag. Edge coordinates for the SVG
      overlay are then read back from the rendered boxes (actRenderMap),
      not computed ahead of render. */
-  #poActNodes { display: grid; row-gap: 22px; }
+  #poActNodes { display: grid; row-gap: 14px; }
   .po-actnode {
     width: 100%; box-sizing: border-box; text-align: left; padding: 11px 13px;
     background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; cursor: pointer;
@@ -356,9 +365,9 @@
      existing 5-heading agent_skill.md convention (Decision/Rationale/
      Alternatives/Evolution/Uncertainty), rendered with the mockup's own
      po-brief/po-claim visual language rather than a plain answer block. */
-  .po-brief { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 26px; }
-  .po-brief-lede { font: 16px/1.7 var(--po-serif); margin: 8px 0 4px; }
-  .po-claim { border-top: 1px solid var(--po-line); margin-top: 18px; padding-top: 16px; }
+  .po-brief { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 20px; }
+  .po-brief-lede { font: 13px/1.7 var(--po-serif); margin: 8px 0 4px; color: var(--po-muted); }
+  .po-claim { border-top: 1px solid var(--po-line); margin-top: 14px; padding-top: 12px; }
   .po-claim h3 { font-size: 12px; font-weight: 600; color: var(--po-muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 0 0 8px; }
   .po-claim p { font: 14px/1.75 var(--po-serif); margin: 0 0 10px; }
   .po-cite {
@@ -379,8 +388,8 @@
      mockup's aside but as an overlay (this app's content column isn't a
      fixed-width grid the way the mockup's Findings page is). */
   .po-evidence {
-    position: fixed; top: 0; right: 0; width: 340px; height: 100vh; background: var(--po-paper);
-    border-left: 1px solid var(--po-line); padding: 20px; overflow-y: auto; transform: translateX(100%);
+    position: fixed; top: 0; right: 0; width: 520px; max-width: 92vw; height: 100vh; background: var(--po-paper);
+    border-left: 1px solid var(--po-line); padding: 24px; overflow-y: auto; transform: translateX(100%);
     transition: transform 0.18s ease; z-index: 30;
   }
   .po-evidence.open { transform: translateX(0); }
@@ -396,9 +405,9 @@
   .po-relation { font-size: 11px; padding: 10px 0; border-top: 1px solid var(--po-line); color: var(--po-muted); }
   .po-relation strong { display: block; color: var(--po-ink); margin-top: 2px; font-weight: 500; }
 
-  .po-turn { margin-bottom: 30px; }
-  .po-q { font-size: 15px; color: var(--po-muted); margin-bottom: 10px; }
-  .po-q strong { color: var(--po-ink); }
+  .po-turn { margin-bottom: 20px; }
+  .po-q { font: 600 19px/1.4 var(--po-serif); color: var(--po-ink); margin-bottom: 14px; }
+  .po-q strong { color: var(--po-accent); margin-right: 2px; }
   .po-error { background: var(--po-soft); border: 1px solid var(--po-warn); border-radius: 8px; padding: 12px 14px; color: var(--po-warn); font-size: 13px; }
   .po-retry { margin-top: 8px; }
   .po-usagebar { font-size: 11px; color: var(--po-muted); padding: 0 0 6px; min-height: 1em; }
@@ -591,6 +600,32 @@
   .ps-stage p { font-size: 11px; color: var(--po-muted); line-height: 1.6; min-height: 35px; margin: 0; }
   .ps-stage button { margin-top: auto; font-size: 12px; }
   .ps-stage small { font-size: 10px; color: var(--po-muted); }
+  /* Each pipeline stage splits into a drafts/RFC half and an email half,
+     run as independent actions -- see renderSourceGroup's content/mail
+     split (drops the old combined "N passages indexed" caption, which hid
+     whether email had actually been indexed at all). */
+  .ps-substage { display: flex; gap: 10px; width: 100%; margin-top: auto; }
+  .ps-substage > div { flex: 1 1 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+  .ps-substage button { font-size: 11px; width: 100%; white-space: normal; }
+  .ps-substage button:disabled { opacity: 0.45; cursor: default; }
+  /* Persistent column identity, independent of sync/build state -- a left
+     accent bar so drafts/RFC vs email reads at a glance even when both
+     buttons happen to be the same (secondary/already-done) style. */
+  .ps-substage > div.ps-col-content { border-left: 3px solid var(--po-accent); padding-left: 7px; }
+  .ps-substage > div.ps-col-mail { border-left: 3px solid var(--po-purple); padding-left: 7px; }
+  /* First-time action (Sync/Build, nothing done yet) is filled/attention-
+     grabbing; repeating one (Re-sync/Rebuild, already done once) drops back
+     to the plain outlined .po-secondary -- same solid-vs-outline language
+     already used for the dense-index stage, now applied to all three.
+     po-primary-mail reuses that same filled treatment but in the email
+     column's own hue, so "needs action" and "which column" are both
+     legible without relying on label text alone. */
+  .po-primary-mail {
+    background: linear-gradient(110deg, #a54aca, #d88aef); color: #fff; border: none; border-radius: 7px;
+    padding: 9px 16px; font-size: 13px; font-weight: 600;
+  }
+  .po-primary-mail:hover { filter: brightness(1.08); }
+  .ps-substage small { font-size: 10px; color: var(--po-muted); }
   .ps-more { border-top: 1px solid var(--po-line); margin-top: 21px; padding-top: 14px; }
   .ps-more > summary { font-size: 13px; color: var(--po-accent); cursor: pointer; }
   .ps-resources-intro { font-size: 12px; color: var(--po-muted); margin: 14px 0; line-height: 1.7; }
@@ -714,7 +749,7 @@
   .po-evswitch button[aria-pressed="true"] { background: var(--po-paper); color: var(--po-accent); }
   .po-evbar { display: flex; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; font-size: 12px; color: var(--po-muted); }
   .po-evgrid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
-  .po-evmap { padding: 20px; border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-soft); }
+  .po-evmap { padding: 16px; border: 1px solid var(--po-line); border-radius: 14px; background: var(--po-soft); }
   .po-evcaption { font-size: 11px; color: var(--po-muted); margin-bottom: 16px; }
   .po-evstage { display: grid; grid-template-columns: 58px 1fr; gap: 16px; position: relative; padding-bottom: 20px; }
   .po-evyear { font-size: 12px; color: var(--po-muted); padding-top: 10px; }
@@ -725,7 +760,7 @@
   .po-evnode.inspect { outline: 2px solid var(--po-accent); outline-offset: 2px; }
   .po-evedge { display: block; text-align: left; margin: 10px 0; padding: 9px 11px; background: var(--po-soft); color: var(--po-accent); border-radius: 7px; width: 100%; font-size: 12px; cursor: pointer; }
   .po-evedge[aria-pressed="true"] { background: var(--po-tint); outline: 2px solid var(--po-accent); }
-  .po-evinspect { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 14px; padding: 20px; align-self: start; }
+  .po-evinspect { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 14px; padding: 16px; align-self: start; }
   .po-evinspect h2 { font-size: 18px; margin: 8px 0; }
   .po-evinspect h3 { font-size: 11px; color: var(--po-accent); margin: 16px 0 5px; text-transform: uppercase; letter-spacing: 0.07em; }
   .po-evinspect p { font-size: 13px; color: var(--po-muted); }
@@ -743,6 +778,7 @@
   @media (max-width: 600px) {
     .ps-pipeline { grid-template-columns: 1fr; }
     .ps-stage p { min-height: 0; }
+    .ps-substage { flex-direction: column; }
     .ps-meta { grid-template-columns: 1fr; }
     .ps-head { flex-direction: column; }
     .ps-source > summary { flex-wrap: wrap; }
@@ -855,7 +891,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
          content right now -- the rail's aria-current="page" already points
          here, so the visible content must match, not default to a stub. -->
     <section class="po-page" data-page="investigation">
-      <div class="po-context"><code id="poDraftBadge">(let the agent discover)</code><span id="poQuestionBadge"></span></div>
+      <div class="po-context"><code id="poDraftBadge">(let the agent discover)</code><span id="poQuestionBadge"></span><span id="poModelBadge" class="po-pill" hidden></span><span id="poShareBadge" class="po-pill" hidden></span></div>
       <h1 class="po-invest-title" id="poInvestTitle">Ask a question about an RFC or draft</h1>
       <div id="poInvestPills" style="margin-bottom:14px;"></div>
 
@@ -1038,11 +1074,6 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       </div>
       <div class="ps-filters">
         <input id="poSourceFilterText" class="ps-librarysearch" placeholder="Filter by RFC, draft, or working group…" aria-label="Filter sources">
-        <select id="poSourceFilterKind" class="ps-libraryfilter" aria-label="Source type">
-          <option value="all">All sources</option>
-          <option value="local">Local library</option>
-          <option value="dataset">Dify datasets</option>
-        </select>
       </div>
       <!-- Right under the filters, not after the source list -- that list
            can run to 40+ cards, and a status message appended after it
@@ -1257,6 +1288,9 @@ function loadRecentInvestigations() {
 document.getElementById('poNewBtn').addEventListener('click', () => {
   go('investigation');
   currentSessionId = null;
+  currentSessionIsOwner = true;
+  document.getElementById('poShareBadge').hidden = true;
+  document.getElementById('poModelBadge').hidden = true;
   lastInvestigation = null;
   activeAskToken++;
   document.getElementById('poConversation').innerHTML = '';
@@ -1279,7 +1313,17 @@ document.getElementById('poLogoutBtn').addEventListener('click', () => {
 // {tools: [...]} wrapper -- this previously read data.tools here, which is
 // always undefined against a bare array, so toolDisplayNames silently
 // stayed empty and toolLabel() fell back to raw tool names the whole time.
-let toolDisplayNames = {};
+// /api/tools only ever lists the CURRENTLY callable tool set, so a
+// renamed/retired tool name never comes back from it again -- a past
+// session's own trace still has its original tool calls recorded under
+// whatever name was live when it ran, though (persisted turns are never
+// rewritten), so a renamed one would otherwise permanently fall back to
+// toolLabel()'s raw-name display. Seeded here with every name this
+// project has ever retired, so an old session's journey still reads as a
+// real label instead of a bare snake_case string.
+let toolDisplayNames = {
+  search_local_source: 'Search local source (BM25) (legacy, split into drafts/RFC + mail)',
+};
 fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()).then((tools) => {
   (tools || []).forEach((t) => { toolDisplayNames[t.name] = t.display_name || t.name; });
 }).catch(() => {});
@@ -1314,6 +1358,18 @@ fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
       sel.appendChild(opt);
     });
   });
+  // Local-only sources (Sources tab) are never a real Dify dataset, so
+  // they're never in corporaCatalog above -- without this, a deployment
+  // with zero real datasets and hundreds of local sources saw nothing but
+  // the placeholder in this dropdown.
+  (data.local_sources || []).forEach((draftName) => {
+    [poDraftEl, poThreadDraftEl].forEach((sel) => {
+      const opt = document.createElement('option');
+      opt.value = draftName;
+      opt.textContent = `${draftName} (local)`;
+      sel.appendChild(opt);
+    });
+  });
 }).catch(() => {});
 
 // Shared by Documents' own lookup and Workspace's "Start from a document"
@@ -1345,6 +1401,10 @@ function matchDocuments(hint) {
 
 // -- Session list (rail) --------------------------------------------------
 let currentSessionId = null;
+// False only while viewing a session someone else shared -- gates the
+// follow-up composer (a shared session is read-only for its viewer, same
+// as a shared Source has no edit controls for anyone but its owner).
+let currentSessionIsOwner = true;
 // Archive coverage reads this -- set whenever a live run finishes or a
 // saved session is opened, not persisted anywhere new server-side.
 let lastInvestigation = null;
@@ -1352,12 +1412,41 @@ const poSessionSearchEl = document.getElementById('poSessionSearch');
 const poSessionListEl = document.getElementById('poSessionList');
 let sessionListCursor = null;
 
+// A model id usually arrives provider-qualified (e.g. "google/gemini-2.5-
+// flash", "z-ai/glm-5.2") -- the rail is too narrow for the full string,
+// and the part after the last "/" is already the real model name a human
+// would recognize, not an id that needs the provider prefix to disambiguate.
+function shortModelLabel(modelId) {
+  if (!modelId) return null;
+  const parts = modelId.split('/');
+  return parts[parts.length - 1];
+}
 function renderSessionRow(s) {
+  const isOwner = s.is_owner !== false;
+  // Which LLM actually answered, and when -- confirmed needed after
+  // comparing two runs of the same question that explored very
+  // differently and turning out to be two different models, with nothing
+  // in the UI saying so. Both already came back from /api/sessions; this
+  // was purely a missing render, not a missing field.
+  const metaParts = [];
+  if (!isOwner) metaParts.push(`Shared by ${escapeHtml(s.owner_email || 'someone else')}`);
+  const modelLabel = shortModelLabel(s.model_id);
+  if (modelLabel) metaParts.push(escapeHtml(modelLabel));
+  const timeLabel = s.updated_at ? formatRelativeTime(new Date(s.updated_at).getTime() / 1000) : null;
+  if (timeLabel) metaParts.push(timeLabel);
+  const subtitle = metaParts.length ? `<small>${metaParts.join(' &middot; ')}</small>` : '';
+  const ownerControls = isOwner
+    ? `<button class="po-saved-share${s.shared ? ' is-shared' : ''}" data-share-id="${escapeHtml(s.id)}" data-shared="${s.shared ? '1' : '0'}" title="${s.shared ? 'Shared -- click to unshare' : 'Share with everyone'}">${s.shared ? 'Shared' : 'Share'}</button>
+       <button class="po-saved-rename" data-rename-id="${escapeHtml(s.id)}" title="Rename">&#9998;</button>
+       <button class="po-saved-delete" data-delete-id="${escapeHtml(s.id)}" title="Delete">&times;</button>`
+    : '';
   return `
     <div class="po-saved${s.id === currentSessionId ? ' active' : ''}" data-session-id="${escapeHtml(s.id)}">
-      <span class="po-saved-title" data-session-id="${escapeHtml(s.id)}">${escapeHtml(s.title || s.id)}</span>
-      <button class="po-saved-rename" data-rename-id="${escapeHtml(s.id)}" title="Rename">&#9998;</button>
-      <button class="po-saved-delete" data-delete-id="${escapeHtml(s.id)}" title="Delete">&times;</button>
+      <div class="po-saved-main">
+        <span class="po-saved-title" data-session-id="${escapeHtml(s.id)}">${escapeHtml(s.title || s.id)}</span>
+        ${subtitle}
+      </div>
+      ${ownerControls}
     </div>`;
 }
 
@@ -1389,6 +1478,22 @@ function loadSessionList(opts) {
     if (data.has_more) {
       poSessionListEl.insertAdjacentHTML('beforeend', '<button type="button" class="po-loadmore">Load more</button>');
     }
+    // Sessions someone ELSE shared -- appended after this account's own
+    // list, same merged-not-separate-page treatment the Sources tab
+    // already gives shared local sources. Skipped while searching (the
+    // search box only ever searches this account's own sessions) and on
+    // "load more" (own-list pagination; this capped list doesn't paginate
+    // and would just be re-appended underneath whatever just grew).
+    if (!q && !opts.append) {
+      fetch(`${PRISM_PREFIX}/api/sessions/shared`).then((r) => r.json()).then((sharedData) => {
+        const shared = sharedData.sessions || [];
+        if (!shared.length) return;
+        poSessionListEl.insertAdjacentHTML(
+          'beforeend',
+          `<div class="po-railcaption" style="margin:10px 0 2px;">Shared with you</div>${shared.map(renderSessionRow).join('')}`
+        );
+      }).catch(() => {});
+    }
   }).catch(() => {
     if (!opts.append) poSessionListEl.innerHTML = '<p class="corpora-hint" style="font-size:11px;padding:0 6px;">Couldn’t load sessions.</p>';
   });
@@ -1412,6 +1517,28 @@ poSessionListEl.addEventListener('click', (e) => {
   const loadMoreBtn = e.target.closest('.po-loadmore');
   if (loadMoreBtn) {
     loadSessionList({ lastId: sessionListCursor, append: true });
+    return;
+  }
+  const shareBtn = e.target.closest('.po-saved-share');
+  if (shareBtn) {
+    e.stopPropagation();
+    const nextShared = shareBtn.dataset.shared !== '1';
+    fetch(`${PRISM_PREFIX}/api/sessions/${shareBtn.dataset.shareId}/share`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shared: nextShared }),
+    }).then((r) => r.json()).then((result) => {
+      if (result.error) return;
+      shareBtn.dataset.shared = nextShared ? '1' : '0';
+      shareBtn.classList.toggle('is-shared', nextShared);
+      shareBtn.textContent = nextShared ? 'Shared' : 'Share';
+      shareBtn.title = nextShared ? 'Shared -- click to unshare' : 'Share with everyone';
+      if (shareBtn.dataset.shareId === currentSessionId) {
+        const badgeEl = document.getElementById('poShareBadge');
+        badgeEl.hidden = !nextShared;
+        if (nextShared) badgeEl.textContent = 'Shared by you';
+      }
+    }).catch(() => {});
     return;
   }
   const delBtn = e.target.closest('.po-saved-delete');
@@ -1490,6 +1617,30 @@ function openSession(id) {
   fetch(`${PRISM_PREFIX}/api/sessions/${id}`).then((r) => r.json()).then((data) => {
     if (data.error) throw new Error(data.error);
     currentSessionId = data.id;
+    currentSessionIsOwner = data.is_owner !== false;
+    const shareBadgeEl = document.getElementById('poShareBadge');
+    if (!currentSessionIsOwner) {
+      shareBadgeEl.hidden = false;
+      shareBadgeEl.textContent = data.owner_email ? `Shared by ${data.owner_email} · read-only` : 'Shared with you · read-only';
+    } else if (data.shared) {
+      shareBadgeEl.hidden = false;
+      shareBadgeEl.textContent = 'Shared by you';
+    } else {
+      shareBadgeEl.hidden = true;
+    }
+    // Which LLM actually answered, and when -- same reasoning as the rail
+    // row's own subtitle (see renderSessionRow/shortModelLabel): two runs
+    // of the same question explored very differently and turned out to be
+    // two different models, with nothing in the UI saying so.
+    const modelBadgeEl = document.getElementById('poModelBadge');
+    const modelLabel = shortModelLabel(data.model_id);
+    const timeLabel = data.updated_at ? formatRelativeTime(new Date(data.updated_at).getTime() / 1000) : null;
+    if (modelLabel || timeLabel) {
+      modelBadgeEl.hidden = false;
+      modelBadgeEl.textContent = [modelLabel, timeLabel].filter(Boolean).join(' · ');
+    } else {
+      modelBadgeEl.hidden = true;
+    }
     activeAskToken++;
     if (data.model_provider && data.model_id) {
       poModelEl.value = `${data.model_provider}|||${data.model_id}`;
@@ -1526,11 +1677,44 @@ function renderClaimText(text, claimLabels) {
   let html = escapeHtml(text);
   html = html.replace(/`([^`\n]+)`/g, '<code>$1</code>');
   html = html.replace(/\*\*([^\n]+?)\*\*/g, '<strong>$1</strong>');
-  html = html.replace(/(https?:\/\/\S+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
-  return html.replace(/\[(\d+)\]/g, (whole, n) => {
-    const status = (claimLabels || {})[n];
-    const pillHtml = status ? `<span class="po-claim-pill po-claim-pill-${status}">${status}</span>` : '';
-    return `<button type="button" class="po-cite" data-n="${n}">[${n}]${pillHtml}</button>`;
+  // One combined pass, not two sequential ones -- a markdown-style
+  // [label](url) link immediately followed by nothing but whitespace has
+  // no gap for the old bare-URL regex's greedy \S+ to stop at, so it used
+  // to swallow straight through the ']' and '(' into a SECOND copy of the
+  // same URL, producing a corrupted href containing both (confirmed live:
+  // the model writing [https://...](https://...) -- a redundant but valid
+  // way to cite a URL -- produced a link that 404'd until the back half
+  // was manually deleted). The bare-URL alternative also now stops at ')'
+  // and ']', not just whitespace, so a plain URL immediately followed by
+  // closing punctuation (e.g. inside a parenthetical) doesn't swallow that
+  // punctuation into the link either.
+  html = html.replace(
+    /\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)|(https?:\/\/[^\s)\]]+)/g,
+    (whole, mdLabel, mdUrl, bareUrl) => {
+      if (mdUrl) return `<a href="${mdUrl}" target="_blank" rel="noopener">${mdLabel}</a>`;
+      return `<a href="${bareUrl}" target="_blank" rel="noopener">${bareUrl}</a>`;
+    }
+  );
+  // The model sometimes cites a run of sources as one bracket with commas
+  // ("[1, 2, 3, 4]") instead of adjacent brackets ("[1][2][3][4]") -- both
+  // are the same citation list, just written differently, but the old
+  // regex only ever matched a single bare digit inside one bracket pair,
+  // so a comma-separated one matched nothing at all and rendered as dead,
+  // unclickable text (confirmed live). Matches one-or-more comma-separated
+  // numbers in a single bracket now, and turns EACH one into its own
+  // separately-clickable [N] button, same as if they'd been written
+  // adjacently -- a plain "[3]" still matches as a list of one, so this is
+  // a strict superset of the old behavior, not a replacement for it.
+  return html.replace(/\[\s*(\d+(?:\s*,\s*\d+)*)\s*\]/g, (whole, nums) => {
+    return nums
+      .split(',')
+      .map((raw) => {
+        const n = raw.trim();
+        const status = (claimLabels || {})[n];
+        const pillHtml = status ? `<span class="po-claim-pill po-claim-pill-${status}">${status}</span>` : '';
+        return `<button type="button" class="po-cite" data-n="${n}">[${n}]${pillHtml}</button>`;
+      })
+      .join('');
   });
 }
 
@@ -1575,7 +1759,11 @@ function renderDecisionBrief(answerText, claimLabels) {
 const poEvidenceEl = document.getElementById('poEvidence');
 const poEvidenceBodyEl = document.getElementById('poEvidenceBody');
 const poEvidenceNoEl = document.getElementById('poEvidenceNo');
-const EVIDENCE_KIND_LABELS = { mail: 'Mailing-list search', evolution: 'Draft evolution search' };
+const EVIDENCE_KIND_LABELS = {
+  mail: 'Mailing-list search', evolution: 'Draft evolution search',
+  draft: 'Draft text', rfc: 'RFC text', mail_thread: 'Local mail search',
+  minutes: 'Meeting minutes', iesg_ballot: 'IESG ballot comments',
+};
 
 function openEvidencePanel(n, item) {
   poEvidenceNoEl.textContent = `/ ${n}`;
@@ -2167,9 +2355,19 @@ let activeAskToken = 0;
 // turn in it. Call this any time poConversation's turn count changes.
 function updateInvestigationComposerVisibility() {
   const hasConversation = document.getElementById('poConversation').children.length > 0;
-  document.getElementById('poComposerBar').hidden = hasConversation;
-  document.getElementById('poFollowupForm').hidden = !hasConversation;
-  document.getElementById('poInvestTitle').classList.toggle('is-asked', hasConversation);
+  document.getElementById('poComposerBar').hidden = hasConversation || !currentSessionIsOwner;
+  document.getElementById('poFollowupForm').hidden = !hasConversation || !currentSessionIsOwner;
+  const titleEl = document.getElementById('poInvestTitle');
+  titleEl.classList.toggle('is-asked', hasConversation);
+  // Once there's a conversation, each turn's own "Q:" line (renderStaticTurn/
+  // runAsk's qHtml) already shows that turn's question -- this heading used
+  // to be set to the exact same text at the same time, reading as the same
+  // question printed twice back to back. It only earns its keep as the
+  // empty-state prompt ("Ask a question about an RFC or draft"); hidden
+  // once there's real content to show instead, not fighting it for the
+  // same words. Also the only title a multi-turn session could show
+  // without being wrong for every turn but the last one.
+  titleEl.hidden = hasConversation;
 }
 
 function runAsk() {
@@ -2783,22 +2981,33 @@ poThreadBodyEl.addEventListener('click', (e) => {
 // not fetch_draft_text/fetch_rfc_text, caught live: the first version of
 // this used the wrong names and every row silently read "not searched"
 // even for a turn that clearly had searched).
+// search_local_drafts_rfc/search_local_mailarchive (a local-only source's
+// own content vs. mail search, split from one combined search_local_source
+// specifically so this coverage breakdown could tell them apart) fold into
+// the SAME rows their real-dataset equivalents already occupy below,
+// rather than keeping a separate "Local-only source" bucket -- a local
+// source's mail search answering a question is "Mailing-list archive"
+// coverage exactly the same as a real dataset's mail search would be, and
+// collapsing them into one unlabeled bucket was the reason this looked
+// drafts/RFC-only at a glance even when the real answer came from email.
+// add_local_source counts toward both, since one call writes both tiers.
+// search_local_source (retired) also counts toward both, for the same
+// reason -- a past session's own trace still has its calls recorded under
+// that name (persisted turns are never rewritten), and it genuinely did
+// search both tiers together, so it's accurate coverage for both rows,
+// not just a display nicety.
 const COVERAGE_ROWS = [
   {
     title: 'This draft or RFC\'s own text', desc: 'The specification text itself',
-    tools: ['fetch_ietf_draft_text', 'fetch_ietf_rfc_text', 'diff_ietf_draft_revisions', 'cite_iddiff_url'],
-  },
-  {
-    title: 'Local-only source', desc: 'Not yet in the real mailarchive/evolution datasets -- pulled and searched locally instead',
-    tools: ['search_local_source', 'add_local_source'],
+    tools: ['fetch_ietf_draft_text', 'fetch_ietf_rfc_text', 'diff_ietf_draft_revisions', 'cite_iddiff_url', 'search_local_drafts_rfc', 'search_local_source', 'add_local_source'],
   },
   {
     title: 'Draft evolution (revision history)', desc: 'What changed across revisions, and when',
     tools: ['search_ietf_evolution_dataset'],
   },
   {
-    title: 'Mailing-list archive', desc: 'Original discussion and responses',
-    tools: ['search_ietf_mailarchive_dataset', 'get_iesg_ballot_comments', 'search_wg_minutes'],
+    title: 'Mailing-list archive', desc: 'Original discussion and responses -- including a local-only source\'s own WG mail',
+    tools: ['search_ietf_mailarchive_dataset', 'get_iesg_ballot_comments', 'search_wg_minutes', 'search_local_mailarchive', 'search_local_source', 'add_local_source'],
   },
   {
     title: 'Wider RFC landscape', desc: 'Other RFCs connected to this one -- structurally, by citation, or by topic',
@@ -3448,6 +3657,17 @@ const SOURCE_PAGE_SIZE = 12;
 let sourceCorpora = [];
 let wgResourceState = {};
 let sourceOffset = 0;
+// This endpoint can take anywhere from a couple seconds to ~90s depending
+// on how many not-yet-resolved local sources land on the page (see
+// api_corpora_freshness's own docstring) -- confirmed live that typing a
+// filter query fires one fetch per keystroke-after-debounce, and with a
+// response that slow, an *older* query's response can easily arrive after
+// a *newer* one's, stomping the correct, freshly-filtered list with a
+// stale (often unfiltered) one a moment later. Every call gets a sequence
+// number; a response is only applied if nothing newer has been issued
+// since -- "loading forever, then nothing/everything" was this, not a
+// hang.
+let sourceFetchSeq = 0;
 function fetchSources() {
   sourceOffset = 0;
   sourceCorpora = [];
@@ -3458,11 +3678,11 @@ function fetchSources() {
 function loadSourcesChunk() {
   const listEl = document.getElementById('poSourcesList');
   const q = document.getElementById('poSourceFilterText').value.trim();
-  const kind = document.getElementById('poSourceFilterKind').value;
   const params = new URLSearchParams({ page_size: String(SOURCE_PAGE_SIZE), offset: String(sourceOffset) });
   if (q) params.set('q', q);
-  if (kind !== 'all') params.set('kind', kind);
+  const mySeq = ++sourceFetchSeq;
   fetch(`${PRISM_PREFIX}/api/corpora/freshness?${params}`).then((r) => r.json()).then((data) => {
+    if (mySeq !== sourceFetchSeq) return; // superseded by a newer filter/load-more call
     if (data.error) throw new Error(data.error);
     const corpora = data.corpora || [];
     const startIdx = sourceCorpora.length;
@@ -3489,11 +3709,12 @@ function loadSourcesChunk() {
       });
     }
     if (!sourceCorpora.length) {
-      listEl.innerHTML = sourceOffset === corpora.length && !q && kind === 'all'
+      listEl.innerHTML = sourceOffset === corpora.length && !q
         ? '<p class="corpora-hint">No sources yet -- use "+ Add source" above to add one.</p>'
         : '<p class="corpora-hint">No sources match this filter.</p>';
     }
   }).catch((err) => {
+    if (mySeq !== sourceFetchSeq) return;
     listEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load sources.')}</div>`;
   });
 }
@@ -3545,11 +3766,29 @@ function refreshSingleSource(draftName) {
 // this page's local-index routes at all).
 function sourceStatusPill(c) {
   if (!c.is_local) return '<span class="po-pill">Ready for research</span>';
-  const idxStat = c.index_status || {};
-  const embStat = c.embedding_index_status || {};
-  if (idxStat.built && embStat.status === 'completed') return '<span class="po-pill">Indexed</span>';
-  if (idxStat.built) return '<span class="po-pill">BM25 indexed</span>';
+  const contentIdx = c.content_index_status || {};
+  const mailIdx = c.mail_index_status || {};
+  const contentEmb = c.content_embedding_index_status || {};
+  const mailEmb = c.mail_embedding_index_status || {};
+  const bothBm25 = contentIdx.built && mailIdx.built;
+  const bothEmb = contentEmb.status === 'completed' && mailEmb.status === 'completed';
+  if (bothBm25 && bothEmb) return '<span class="po-pill">Indexed</span>';
+  if (contentIdx.built || mailIdx.built) return '<span class="po-pill">BM25 indexed</span>';
   return '<span class="po-pill po-warn">Not indexed</span>';
+}
+// Just the freshness, never a passage/document count -- a combined "N
+// passages indexed" count (the only thing shown here before this split)
+// hid which content kind actually got indexed: confirmed live, a source
+// reading "12 passages indexed" turned out to be 11 drafts + 1 RFC and
+// zero mail, which read as a healthy index until actually checked.
+function buildCaption(stat) {
+  if (!stat) return 'Not built';
+  if (stat.error) return stat.error;
+  if (!stat.built) return 'Not built';
+  return stat.built_at ? `Built ${formatRelativeTime(stat.built_at)}` : 'Built';
+}
+function syncSubCaption(timestamp) {
+  return timestamp ? `Synced ${formatRelativeTime(timestamp)}` : 'Never synced';
 }
 // "you" beats an email for the common case (skimming your own list), and
 // avoids exposing another account's address in a UI two strangers might
@@ -3565,56 +3804,115 @@ function renderSourceGroup(c, idx) {
   let bodyHtml;
   if (c.is_local) {
     const ls = c.local_status || {};
-    const mailMeta = c.wg ? `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}` : 'No WG for this draft';
+    // Real counts once threading has actually run (same real number
+    // search_local_mailarchive/the indexes see, not just a sync checkmark) --
+    // falls back to the raw/threaded checkmarks for a source that's only
+    // partway through the pipeline, same reasoning as draftMeta below
+    // falling back to "No revisions downloaded yet".
+    const mailMeta = c.wg
+      ? (ls.mail_thread_downloaded && ls.mail_total_emails != null
+          ? `${ls.mail_total_emails.toLocaleString()} email${ls.mail_total_emails === 1 ? '' : 's'} &middot; ${ls.mail_total_threads.toLocaleString()} thread${ls.mail_total_threads === 1 ? '' : 's'}`
+          : `${ls.mail_downloaded ? 'raw ✓' : 'raw —'}, ${ls.mail_thread_downloaded ? 'threaded ✓' : 'threaded —'}`)
+      : 'No WG for this draft';
     const draftMeta = ls.revisions_downloaded
       ? `${ls.revisions_downloaded} rev${ls.revisions_downloaded === 1 ? '' : 's'} (latest ${escapeHtml(String(ls.latest_revision_downloaded || '?'))})${c.rfc_number ? (ls.rfc_downloaded ? ` &middot; RFC ${escapeHtml(String(c.rfc_number))} ✓` : ` &middot; RFC ${escapeHtml(String(c.rfc_number))} pending`) : ''}`
       : 'No revisions downloaded yet';
     // A local source downloads to disk but stays invisible to the agent's
-    // search_local_source tool until one of these is actually built --
+    // search_local_drafts_rfc/search_local_mailarchive tools until one of these is actually built --
     // "download only" was never meant to mean "download and stop". Real
     // same backend as classic's own local-index-table (POST local-index/
     // local-embedding-index, GET .../status), reframed as a 3-stage
     // content -> BM25 -> embeddings pipeline per the v2 mockup, not the
     // disabled Extract-text/per-doctype variants that table also shows --
     // those aren't functional in classic either.
-    const idxStat = c.index_status || {};
-    const embStat = c.embedding_index_status || { status: 'not_started' };
-    const embRunning = embStat.status === 'queued' || embStat.status === 'running';
-    const syncCaption = ls.last_synced_at ? `Synced ${formatRelativeTime(ls.last_synced_at)}` : 'Never synced';
-    const sparseCaption = idxStat.error ? idxStat.error : (idxStat.built ? `${idxStat.total_documents} passages indexed${idxStat.built_at ? ' &middot; built ' + formatRelativeTime(idxStat.built_at) : ''}` : 'Not built');
-    let denseCaption;
-    if (embRunning) denseCaption = escapeHtml(embStat.message || (embStat.status === 'queued' ? 'Queued…' : 'Running…'));
-    else if (embStat.status === 'error') denseCaption = escapeHtml(embStat.message || 'Failed');
-    else if (embStat.status === 'completed') denseCaption = `Built${embStat.updated_at ? ' ' + formatRelativeTime(embStat.updated_at) : ''}`;
-    else denseCaption = 'Not built';
-    const denseLabel = embRunning ? 'Building…' : (embStat.status === 'completed' ? 'Rebuild' : 'Build');
+    const contentIdxStat = c.content_index_status || {};
+    const mailIdxStat = c.mail_index_status || {};
+    const contentEmbStat = c.content_embedding_index_status || { status: 'not_started' };
+    const mailEmbStat = c.mail_embedding_index_status || { status: 'not_started' };
+    const contentEmbRunning = contentEmbStat.status === 'queued' || contentEmbStat.status === 'running';
+    const mailEmbRunning = mailEmbStat.status === 'queued' || mailEmbStat.status === 'running';
+    const syncContentCaption = syncSubCaption(ls.content_synced_at);
+    const syncMailCaption = c.wg ? syncSubCaption(ls.mail_synced_at) : 'No WG for this draft';
+    const sparseContentCaption = buildCaption(contentIdxStat);
+    const sparseMailCaption = buildCaption(mailIdxStat);
+    function denseCaptionFor(stat, running) {
+      if (running) return escapeHtml(stat.message || (stat.status === 'queued' ? 'Queued…' : 'Running…'));
+      if (stat.status === 'error') return escapeHtml(stat.message || 'Failed');
+      if (stat.status === 'completed') return stat.updated_at ? `Built ${formatRelativeTime(stat.updated_at)}` : 'Built';
+      return 'Not built';
+    }
+    const denseContentCaption = denseCaptionFor(contentEmbStat, contentEmbRunning);
+    const denseMailCaption = denseCaptionFor(mailEmbStat, mailEmbRunning);
+    // Filled (po-primary/po-primary-mail) = nothing built yet, needs action;
+    // outlined (po-secondary) = already done once, this is just a refresh --
+    // same solid-vs-outline language on all three stages now, not just
+    // dense-index. The column's own hue (purple for drafts/RFC, magenta for
+    // email -- see .ps-col-content/.ps-col-mail) carries through into which
+    // filled variant is used, so content vs email reads from color alone
+    // too, not just the "drafts/RFC"/"email" text in the label.
+    const syncContentBtnClass = ls.content_synced_at ? 'po-secondary' : 'po-primary';
+    const syncMailBtnClass = ls.mail_synced_at ? 'po-secondary' : 'po-primary-mail';
+    const sparseContentBtnClass = contentIdxStat.built ? 'po-secondary' : 'po-primary';
+    const sparseMailBtnClass = mailIdxStat.built ? 'po-secondary' : 'po-primary-mail';
+    const denseContentBtnClass = contentEmbStat.status === 'completed' ? 'po-secondary' : 'po-primary';
+    const denseMailBtnClass = mailEmbStat.status === 'completed' ? 'po-secondary' : 'po-primary-mail';
+    // Every button names its own column explicitly -- a bare "Build"/"Build"
+    // pair (the embeddings stage's old labels) was indistinguishable without
+    // reading color or position, unlike the sync/BM25 stages' own
+    // "...drafts/RFC"/"...email" labels.
+    const denseContentLabel = contentEmbRunning ? 'Building drafts/RFC…' : (contentEmbStat.status === 'completed' ? 'Rebuild drafts/RFC' : 'Build drafts/RFC');
+    const denseMailLabel = mailEmbRunning ? 'Building email…' : (mailEmbStat.status === 'completed' ? 'Rebuild email' : 'Build email');
     bodyHtml = `
       <div class="ps-meta">
         <div>Email${c.wg ? ' &middot; ' + escapeHtml(c.wg) : ''}<small>${escapeHtml(mailMeta)}</small></div>
         <div>Drafts &amp; RFC<small>${draftMeta}</small>${c.rfc_number ? `<button type="button" class="po-linkbutton" style="margin-top:6px;" data-read-rfc="RFC${escapeHtml(String(c.rfc_number))}">Read RFC →</button>` : ''}</div>
       </div>
-      <div class="ps-label"><span>Source-wide operations</span><span>Each action includes both email and draft text.</span></div>
+      <div class="ps-label"><span>Source-wide operations</span><span>Drafts/RFC and email run as separate actions.</span></div>
       <div class="ps-pipeline">
         <div class="ps-stage">
           <span class="ps-number">01 / CONTENT</span>
           <h3>Sync local copy</h3>
           <p>Refresh the downloaded source material.</p>
-          <button type="button" class="po-secondary" data-local-sync="${escapeHtml(c.draft_name)}">${ls.last_synced_at ? 'Re-sync' : 'Sync'}</button>
-          <small>${escapeHtml(syncCaption)}</small>
+          <div class="ps-substage">
+            <div class="ps-col-content">
+              <button type="button" class="${syncContentBtnClass}" data-local-sync="${escapeHtml(c.draft_name)}" data-target="content">${ls.content_synced_at ? 'Re-sync drafts/RFC' : 'Sync drafts/RFC'}</button>
+              <small>${escapeHtml(syncContentCaption)}</small>
+            </div>
+            <div class="ps-col-mail">
+              <button type="button" class="${syncMailBtnClass}" data-local-sync="${escapeHtml(c.draft_name)}" data-target="mail" ${c.wg ? '' : 'disabled'}>${ls.mail_synced_at ? 'Re-sync email' : 'Sync email'}</button>
+              <small>${escapeHtml(syncMailCaption)}</small>
+            </div>
+          </div>
         </div>
         <div class="ps-stage">
           <span class="ps-number">02 / KEYWORD SEARCH</span>
           <h3>Sparse index &middot; BM25</h3>
           <p>Find exact terms and protocol identifiers.</p>
-          <button type="button" class="po-secondary" data-local-index="${escapeHtml(c.draft_name)}">${idxStat.built ? 'Rebuild' : 'Build'}</button>
-          <small>${sparseCaption}</small>
+          <div class="ps-substage">
+            <div class="ps-col-content">
+              <button type="button" class="${sparseContentBtnClass}" data-local-index="${escapeHtml(c.draft_name)}" data-target="content">${contentIdxStat.built ? 'Rebuild drafts/RFC' : 'Build drafts/RFC'}</button>
+              <small>${escapeHtml(sparseContentCaption)}</small>
+            </div>
+            <div class="ps-col-mail">
+              <button type="button" class="${sparseMailBtnClass}" data-local-index="${escapeHtml(c.draft_name)}" data-target="mail" ${c.wg ? '' : 'disabled'}>${mailIdxStat.built ? 'Rebuild email' : 'Build email'}</button>
+              <small>${escapeHtml(sparseMailCaption)}</small>
+            </div>
+          </div>
         </div>
         <div class="ps-stage">
           <span class="ps-number">03 / SEMANTIC SEARCH</span>
           <h3>Dense index &middot; embeddings</h3>
           <p>Find related meaning beyond exact words.</p>
-          <button type="button" class="${embStat.status === 'completed' ? 'po-secondary' : 'po-primary'}" data-local-embed="${escapeHtml(c.draft_name)}" ${embRunning ? 'disabled' : ''}>${denseLabel}</button>
-          <small>${denseCaption}</small>
+          <div class="ps-substage">
+            <div class="ps-col-content">
+              <button type="button" class="${denseContentBtnClass}" data-local-embed="${escapeHtml(c.draft_name)}" data-target="content" ${contentEmbRunning ? 'disabled' : ''}>${denseContentLabel}</button>
+              <small>${denseContentCaption}</small>
+            </div>
+            <div class="ps-col-mail">
+              <button type="button" class="${denseMailBtnClass}" data-local-embed="${escapeHtml(c.draft_name)}" data-target="mail" ${(mailEmbRunning || !c.wg) ? 'disabled' : ''}>${denseMailLabel}</button>
+              <small>${denseMailCaption}</small>
+            </div>
+          </div>
         </div>
       </div>
       ${c.is_owner ? `
@@ -3685,56 +3983,64 @@ function runLocalShare(btn) {
 }
 function runLocalIndex(btn) {
   const draftName = btn.dataset.localIndex;
+  const target = btn.dataset.target || 'content';
+  const label = target === 'mail' ? 'email' : 'drafts/RFC';
   btn.disabled = true;
   btn.textContent = 'Indexing…';
-  setSourceQueueText(`${draftName}: building sparse (BM25) index…`);
+  setSourceQueueText(`${draftName}: building ${label} sparse (BM25) index…`);
   fetch(`${PRISM_PREFIX}/api/corpora/local-index`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ draft_name: draftName }),
+    body: JSON.stringify({ draft_name: draftName, target }),
   }).then(async (r) => {
     if (!r.ok) {
       const result = await r.json().catch(() => ({}));
-      setSourceQueueText(`${draftName}: ${result.error || 'sparse index failed.'}`);
+      setSourceQueueText(`${draftName}: ${result.error || `${label} sparse index failed.`}`);
     } else {
-      setSourceQueueText(`${draftName}: sparse index built.`);
+      setSourceQueueText(`${draftName}: ${label} sparse index built.`);
     }
     refreshSingleSource(draftName);
-  }).catch(() => { setSourceQueueText(`${draftName}: sparse index failed.`); refreshSingleSource(draftName); });
+  }).catch(() => { setSourceQueueText(`${draftName}: ${label} sparse index failed.`); refreshSingleSource(draftName); });
 }
 // The embedding build is fire-and-forget server-side (a Celery task, not a
 // blocking request) -- POST just returns the initial queued/running state,
 // so progress comes from polling the status route every 2s until it lands
 // on completed/error, same as classic's own startEmbedPollingIfNeeded.
+// Keyed by `${draftName}:${target}` since content and mail embeddings for
+// the same source can now be building independently/concurrently.
 const activeEmbedPolls = new Set();
 function runLocalEmbed(btn) {
   const draftName = btn.dataset.localEmbed;
+  const target = btn.dataset.target || 'content';
+  const label = target === 'mail' ? 'email' : 'drafts/RFC';
   btn.disabled = true;
   btn.textContent = 'Building…';
-  setSourceQueueText(`${draftName}: starting embeddings build…`);
+  setSourceQueueText(`${draftName}: starting ${label} embeddings build…`);
   fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ draft_name: draftName }),
+    body: JSON.stringify({ draft_name: draftName, target }),
   }).then((r) => r.json()).then((status) => {
-    setSourceQueueText(`${draftName}: ${status.message || status.status || 'embeddings build started.'}`);
-    pollEmbedStatus(draftName);
-  }).catch(() => { setSourceQueueText(`${draftName}: couldn’t start embeddings build.`); refreshSingleSource(draftName); });
+    setSourceQueueText(`${draftName}: ${status.message || status.status || `${label} embeddings build started.`}`);
+    pollEmbedStatus(draftName, target);
+  }).catch(() => { setSourceQueueText(`${draftName}: couldn’t start ${label} embeddings build.`); refreshSingleSource(draftName); });
 }
-function pollEmbedStatus(draftName) {
-  if (activeEmbedPolls.has(draftName)) return;
-  activeEmbedPolls.add(draftName);
+function pollEmbedStatus(draftName, target) {
+  const pollKey = `${draftName}:${target}`;
+  if (activeEmbedPolls.has(pollKey)) return;
+  activeEmbedPolls.add(pollKey);
+  const label = target === 'mail' ? 'email' : 'drafts/RFC';
   const poll = () => {
-    fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index/status?draft_name=${encodeURIComponent(draftName)}`).then((r) => r.json()).then((status) => {
+    fetch(`${PRISM_PREFIX}/api/corpora/local-embedding-index/status?draft_name=${encodeURIComponent(draftName)}&target=${encodeURIComponent(target)}`).then((r) => r.json()).then((status) => {
       if (status.status === 'queued' || status.status === 'running') {
         setSourceQueueText(`${draftName}: ${status.message || status.status}…`);
         setTimeout(poll, 2000);
       } else {
-        activeEmbedPolls.delete(draftName);
-        setSourceQueueText(`${draftName}: embeddings ${status.status === 'completed' ? 'build complete.' : (status.message || 'build failed.')}`);
+        activeEmbedPolls.delete(pollKey);
+        setSourceQueueText(`${draftName}: ${label} embeddings ${status.status === 'completed' ? 'build complete.' : (status.message || 'build failed.')}`);
         refreshSingleSource(draftName);
       }
-    }).catch(() => { activeEmbedPolls.delete(draftName); });
+    }).catch(() => { activeEmbedPolls.delete(pollKey); });
   };
   poll();
 }
@@ -3866,24 +4172,29 @@ function runDraftDownload(btn) {
   }).catch(() => { setSourceQueueText(`${draftName}: download failed.`); refreshSingleSource(draftName); });
 }
 function runLocalSync(draftName, btn) {
+  const target = btn ? (btn.dataset.target || '') : '';
+  const label = target === 'mail' ? 'email' : (target === 'content' ? 'drafts/RFC' : '');
+  const describe = (suffix) => label ? `${draftName} (${label})${suffix}` : `${draftName}${suffix}`;
   if (btn) { btn.disabled = true; btn.textContent = 'Syncing…'; }
-  setSourceQueueText(`Syncing ${draftName}…`);
-  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/local-sync?draft_name=${encodeURIComponent(draftName)}`);
+  setSourceQueueText(`Syncing ${describe('')}…`);
+  const qs = new URLSearchParams({ draft_name: draftName });
+  if (target) qs.set('target', target);
+  const source = new EventSource(`${PRISM_PREFIX}/api/corpora/local-sync?${qs.toString()}`);
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     if (msg.type === 'progress') {
-      setSourceQueueText(msg.message || `Syncing ${draftName}…`);
+      setSourceQueueText(msg.message || `Syncing ${describe('')}…`);
     } else if (msg.type === 'result') {
       source.close();
-      setSourceQueueText(msg.data.error ? `${draftName}: ${msg.data.error}` : `${draftName}: sync complete.`);
+      setSourceQueueText(msg.data.error ? `${describe('')}: ${msg.data.error}` : `${describe('')}: sync complete.`);
       refreshSingleSource(draftName);
     } else if (msg.type === 'error') {
       source.close();
-      setSourceQueueText(`${draftName}: ${msg.message}`);
+      setSourceQueueText(`${describe('')}: ${msg.message}`);
       refreshSingleSource(draftName);
     }
   };
-  source.onerror = () => { source.close(); setSourceQueueText(`${draftName}: connection lost while syncing.`); refreshSingleSource(draftName); };
+  source.onerror = () => { source.close(); setSourceQueueText(`${describe('')}: connection lost while syncing.`); refreshSingleSource(draftName); };
 }
 
 // -- Filter bar -- now a real server-side query (q/kind on
@@ -3895,7 +4206,6 @@ document.getElementById('poSourceFilterText').addEventListener('input', () => {
   clearTimeout(sourceFilterDebounce);
   sourceFilterDebounce = setTimeout(fetchSources, 300);
 });
-document.getElementById('poSourceFilterKind').addEventListener('change', fetchSources);
 
 // -- Add-source dialog -- a real <dialog> with two tabs, matching classic's
 // own modal-based flow (and the v2 mockup's) instead of the inline search
@@ -3931,6 +4241,10 @@ let sourceOneDebounce = null;
 const poSourceOneSearchEl = document.getElementById('poSourceOneSearch');
 const poSourceOneResultsEl = document.getElementById('poSourceOneResults');
 const poSourceDraftNameEl = document.getElementById('poSourceDraftName');
+// Typing directly into Draft name is the person overriding whatever the
+// search box resolved -- stop the numeric-query auto-fill below from
+// clobbering it on the next keystroke in the search box.
+poSourceDraftNameEl.addEventListener('input', () => { delete poSourceDraftNameEl.dataset.autofilled; });
 poSourceOneSearchEl.addEventListener('input', () => {
   clearTimeout(sourceOneDebounce);
   const query = normalizeSourceQuery(poSourceOneSearchEl.value.trim());
@@ -3951,6 +4265,21 @@ poSourceOneSearchEl.addEventListener('input', () => {
           poSourceOneSearchEl.value = b.dataset.label;
         });
       });
+      // A bare RFC number (the common way someone types this) has exactly
+      // one possible match, since RFC numbers are unique -- no reason to
+      // force a click just to confirm the one answer there can be.
+      // Dropdown stays open underneath so a WG/draft-name query (which can
+      // return several real candidates) still requires picking one by
+      // hand. Only auto-fills while the field is still blank or holds a
+      // value *this* search already produced, so it never clobbers
+      // something the person typed in by hand.
+      if (/^\d+$/.test(query)) {
+        const exact = suggestions.find((s) => (s.doc_id || '').toUpperCase() === `RFC${query}`);
+        if (exact && (!poSourceDraftNameEl.value.trim() || poSourceDraftNameEl.dataset.autofilled === '1')) {
+          poSourceDraftNameEl.value = resolveDraftNameFromRfcSuggestion(exact);
+          poSourceDraftNameEl.dataset.autofilled = '1';
+        }
+      }
     }).catch(() => {});
   }, 300);
 });

@@ -37,10 +37,12 @@ Then open http://localhost:8765/ (or whatever port is mapped).
 # ruff: noqa: T201 -- stdout output is the point of a CLI tool
 
 import os
+import re
 import sys
 import threading
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, "/app/api")
@@ -89,7 +91,8 @@ _TOOL_KIND = {
     "search_rfc_corpus_bm25": "discovery",
     "find_similar_rfcs_by_meaning": "discovery",
     "get_iesg_ballot_comments": "retrieval",
-    "search_local_source": "retrieval",
+    "search_local_drafts_rfc": "retrieval",
+    "search_local_mailarchive": "retrieval",
     "add_local_source": "action",
 }
 
@@ -255,17 +258,33 @@ _TOOL_DETAILS = {
             '  query="SKI"\n)\n# -> Stephen Farrell\'s DISCUSS questioning the hardcoded SHA-1 SKI length'
         ),
     },
-    "search_local_source": {
+    "search_local_drafts_rfc": {
         "resource": (
-            "Local BM25 index built from one Sources-tab local source's own downloaded files -- draft/"
-            "RFC text plus its WG's threaded mail (services/local_source_index_service.py), built via "
-            "the Sources tab's \"Build index\" button. No external call at query time; no real Dify "
-            "dataset involved at all."
+            "Local BM25 index built from one Sources-tab local source's own draft/RFC text only "
+            "(services/local_source_index_service.py, scope='content'), built via the Sources tab's "
+            "\"Build index\" button. No external call at query time; no real Dify dataset involved at "
+            "all. Local equivalent of search_ietf_evolution_dataset -- tells you WHAT the spec says, "
+            "not why."
         ),
         "example": (
-            'search_local_source(\n  draft_name="draft-ietf-quic-transport",\n'
-            '  query="stream priority"\n)\n# -> ranked mail threads and draft/RFC text from that '
-            "source's own local index, e.g. the \"HTTP/3 with strict priorities\" thread"
+            'search_local_drafts_rfc(\n  draft_name="draft-ietf-quic-transport",\n'
+            '  query="stream priority"\n)\n# -> ranked draft/RFC text from that source\'s own local '
+            "index"
+        ),
+    },
+    "search_local_mailarchive": {
+        "resource": (
+            "Local BM25 index built from one Sources-tab local source's WG's threaded mail only "
+            "(services/local_source_index_service.py, scope='mail'), built via the Sources tab's "
+            "\"Build index\" button. No external call at query time; no real Dify dataset involved at "
+            "all. Local equivalent of search_ietf_mailarchive_dataset -- this is where rationale "
+            "actually lives. Scoped per working group, not per draft: indexing one draft's WG makes "
+            "every other local draft in that same WG searchable here too."
+        ),
+        "example": (
+            'search_local_mailarchive(\n  draft_name="draft-ietf-quic-transport",\n'
+            '  query="stream priority"\n)\n# -> ranked mail threads from that WG\'s own local index, '
+            'e.g. the "HTTP/3 with strict priorities" thread'
         ),
     },
     "add_local_source": {
@@ -278,7 +297,8 @@ _TOOL_DETAILS = {
         "example": (
             'add_local_source(identifier="4035")\n'
             "# -> resolves RFC4035 to draft-ietf-dnsext-dnssec-protocol, pulls its revisions + RFC + "
-            "dnsext WG mail,\n# indexes all of it, ready for search_local_source in the same turn"
+            "dnsext WG mail,\n# indexes all of it, ready for search_local_drafts_rfc/"
+            "search_local_mailarchive in the same turn"
         ),
     },
 }
@@ -429,6 +449,16 @@ def _render_spectrum_page(account) -> str:
 # never changes within a container's lifetime -- cached here so only the
 # first request pays that cost; every request after returns instantly.
 _global_graph_cache: dict | None = None
+# Guards the cache build itself -- without this, two requests landing
+# during the same cold-start window (confirmed live: two browser tabs, or
+# one tab's client-side retry after its own request looked stalled) each
+# see _global_graph_cache as None and kick off their own independent ~2
+# minute rebuild, doubling the Datatracker hammering and, worse, starving
+# every *other* concurrent request's thread of the GIL badly enough to
+# make an otherwise-instant endpoint (like /api/corpora/freshness) time
+# out too. The second caller now just blocks on the lock and reuses
+# whatever the first caller produces.
+_global_graph_lock = threading.Lock()
 
 
 def _sse_stream(app, work_fn):
@@ -735,10 +765,27 @@ def main() -> None:
     @app.route(f"{_URL_PREFIX}/api/corpora", methods=["GET"])
     def api_corpora():
         from scripts.agentic_rag.ask_decision_agent import _list_available_corpora
+        from services.ietf_import_service import IetfImportService
 
         try:
             _text, catalog = _list_available_corpora(g.account.id)
-            return jsonify({"catalog": catalog})
+            # catalog only ever holds real Dify-dataset drafts (see
+            # _list_available_corpora's own docstring -- local sources are
+            # deliberately kept out of it since other callers rely on every
+            # catalog entry carrying a real evolution_dataset_id). That's
+            # correct for those callers, but it means the Draft picker
+            # dropdown (this endpoint's only consumer) showed nothing but
+            # the placeholder on a deployment like this one with zero real
+            # datasets and hundreds of local-only sources -- so local
+            # source names are listed here too, as their own field, rather
+            # than folded into catalog.
+            registered_names = {entry["draft_name"] for entry in catalog}
+            local_sources = [
+                name
+                for name in IetfImportService.list_local_source_names(g.account.id)
+                if name not in registered_names
+            ]
+            return jsonify({"catalog": catalog, "local_sources": local_sources})
         except Exception as exc:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
@@ -837,13 +884,32 @@ def main() -> None:
         query = (request.args.get("q") or "").strip().lower()
         kind = (request.args.get("kind") or "").strip().lower()
         if query:
+            unfiltered_identities = identities
             identities = [
                 e
-                for e in identities
+                for e in unfiltered_identities
                 if query in e["draft_name"].lower()
                 or query in str(e.get("rfc_number") or "").lower()
                 or query in str(e.get("wg") or "").lower()
             ]
+            # A bare RFC-number query (e.g. "5844" or "RFC 5844") can never
+            # match a *local-only* entry above -- its rfc_number is
+            # deliberately left unresolved until _enrich() below, exactly
+            # so this filter stays cheap (see this route's own docstring).
+            # Confirmed live: searching the RFC number of a draft you just
+            # added as a local source returns nothing because of this.
+            # Fixed with one reverse lookup (RFC -> draft name, the same
+            # mechanism resolve_draft_name_for_rfc already exists for) --
+            # far cheaper than resolving every local source's rfc_number
+            # just to support this one query shape.
+            normalized_query = re.sub(r"^rfc\s*", "", query, flags=re.IGNORECASE).strip()
+            if normalized_query.isdigit():
+                matched_names = {e["draft_name"] for e in identities}
+                target_draft = IetfImportService.resolve_draft_name_for_rfc(normalized_query)
+                if target_draft and target_draft not in matched_names:
+                    extra = next((e for e in unfiltered_identities if e["draft_name"] == target_draft), None)
+                    if extra is not None:
+                        identities.append(extra)
         if kind in ("local", "dataset"):
             identities = [e for e in identities if e["is_local"] == (kind == "local")]
 
@@ -923,21 +989,42 @@ def main() -> None:
                 try:
                     from services.local_source_index_service import LocalSourceIndexService
 
-                    row["index_status"] = LocalSourceIndexService.get_index_status(draft_name)
+                    row["content_index_status"] = LocalSourceIndexService.get_content_index_status(draft_name)
+                    # WG-keyed, not draft-keyed -- see _mail_index_path. draft_name
+                    # is still passed for the legacy pre-split/pre-WG-keying
+                    # fallback only.
+                    row["mail_index_status"] = LocalSourceIndexService.get_mail_index_status(wg, draft_name)
                 except Exception as exc:
-                    row["index_status"] = {"error": str(exc)}
+                    row["content_index_status"] = {"error": str(exc)}
+                    row["mail_index_status"] = {"error": str(exc)}
                 try:
                     from services.job_status_service import JobStatusService
 
-                    row["embedding_index_status"] = JobStatusService.get_status(f"embed:{draft_name}") or {
-                        "status": "not_started"
-                    }
+                    row["content_embedding_index_status"] = JobStatusService.get_status(
+                        f"embed-content:{draft_name}"
+                    ) or {"status": "not_started"}
+                    # WG-keyed job, same reasoning as the mail index itself --
+                    # two drafts in the same WG building "their" mail
+                    # embeddings is really one job, not two.
+                    row["mail_embedding_index_status"] = (
+                        JobStatusService.get_status(f"embed-mail:{wg}") if wg else None
+                    ) or {"status": "not_started"}
                 except Exception as exc:
-                    row["embedding_index_status"] = {"status": "error", "message": str(exc)}
+                    row["content_embedding_index_status"] = {"status": "error", "message": str(exc)}
+                    row["mail_embedding_index_status"] = {"status": "error", "message": str(exc)}
             return row
 
-        from concurrent.futures import ThreadPoolExecutor
-
+        # concurrent.futures.ThreadPoolExecutor, not gevent.pool.Pool --
+        # this process is `python scripts/agentic_rag/serve_ui.py`'s own
+        # plain Flask dev server (threaded=True), never gunicorn, so it is
+        # never gevent-monkey-patched (see api/app.py: monkey patching is
+        # applied only by gunicorn's gevent worker class / Celery, not
+        # here). Without that patching, gevent greenlets block the real OS
+        # thread on every raw socket call instead of cooperatively
+        # yielding -- confirmed live, a gevent.pool.Pool here hung for 180s+
+        # on a page that a plain ThreadPoolExecutor (real OS threads, which
+        # this exact function's own nested get_draft_relations() already
+        # uses successfully below) finishes in a few seconds.
         with ThreadPoolExecutor(max_workers=min(12, max(1, len(identities)))) as pool:
             corpora = list(pool.map(_enrich, identities))
         return jsonify(
@@ -1101,23 +1188,33 @@ def main() -> None:
 
     @app.route(f"{_URL_PREFIX}/api/corpora/local-sync", methods=["GET"])
     def api_corpora_local_sync():
-        """The single "Sync" action for a local source's own unit card:
+        """A local source's own unit card's "Sync" action -- either its
         draft revisions + RFC (idempotent -- only what's missing gets
-        fetched) plus its WG's mail, both raw and threaded, all in one
-        call. Replaces three separate buttons (draft-download-all,
-        mailarchive-download, mailarchive-thread-download) that turned out
-        to be more granularity than useful -- a local source realistically
-        has exactly two things you'd ever want to do with it: get current
-        (this), or make it searchable (local-index below).
+        fetched), or its WG's mail (both raw and threaded), run
+        independently per `target` so the Sources tab's two sync buttons
+        don't always move together. `target` omitted keeps the old combined
+        behavior (both in one call) for any other caller.
         """
         from services.ietf_import_service import IetfImportService
 
         draft_name = (request.args.get("draft_name") or "").strip()
+        target = (request.args.get("target") or "").strip()
         if not draft_name:
             return jsonify({"error": "draft_name is required"}), 400
+        if target not in ("", "content", "mail"):
+            return jsonify({"error": "target must be 'content' or 'mail'"}), 400
         account_id = g.account.id
 
         def work(on_event):
+            if target == "content":
+                return IetfImportService.download_all_draft_revisions_to_local(
+                    draft_name, on_event=on_event, owner_account_id=account_id
+                )
+            if target == "mail":
+                wg = IetfImportService.resolve_wg_for_draft(draft_name)
+                if not wg:
+                    return {"error": "Could not resolve a working group for this draft."}
+                return IetfImportService.sync_local_source_mail(wg, on_event=on_event)
             return IetfImportService.sync_local_source(draft_name, on_event=on_event, owner_account_id=account_id)
 
         return _sse_stream(app, work)
@@ -1125,7 +1222,8 @@ def main() -> None:
     @app.route(f"{_URL_PREFIX}/api/corpora/local-index", methods=["POST"])
     def api_corpora_local_index():
         """Build (or rebuild) a local BM25 index over one source's own
-        downloaded content -- draft/RFC text plus threaded mail, whatever's
+        downloaded content -- draft/RFC text, threaded mail, or both (per
+        `target`, omitted keeps the old combined behavior), whatever's
         actually on disk for it. See LocalSourceIndexService; this is a
         from-scratch rebuild every time (cheap -- a handful of local text
         files, not a whole corpus), not an incremental update.
@@ -1135,12 +1233,22 @@ def main() -> None:
 
         data = request.get_json(silent=True) or {}
         draft_name = (data.get("draft_name") or "").strip()
+        target = (data.get("target") or "").strip()
         if not draft_name:
             return jsonify({"error": "draft_name is required"}), 400
+        if target not in ("", "content", "mail"):
+            return jsonify({"error": "target must be 'content' or 'mail'"}), 400
         try:
             wg = IetfImportService.resolve_wg_for_draft(draft_name)
             rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
-            result = LocalSourceIndexService.build_index(draft_name, wg, rfc_number)
+            if target == "content":
+                result = LocalSourceIndexService.build_content_index(draft_name, rfc_number)
+            elif target == "mail":
+                if not wg:
+                    return jsonify({"error": "Could not resolve a working group for this draft."}), 400
+                result = LocalSourceIndexService.build_mail_index(wg)
+            else:
+                result = LocalSourceIndexService.build_index(draft_name, wg, rfc_number)
             if result.get("error"):
                 return jsonify(result), 400
             return jsonify(result)
@@ -1151,11 +1259,12 @@ def main() -> None:
     @app.route(f"{_URL_PREFIX}/api/corpora/local-embedding-index", methods=["POST"])
     def api_corpora_local_embedding_index():
         """Kick off the (slow) embedding tier for one source's own local
-        content -- unlike build_index's BM25 tier above, this runs as a
-        real Celery task (see tasks/local_source_embedding_index_task.py)
-        so it keeps going after this request returns, and after the
-        requesting page closes. Poll api_corpora_local_embedding_index_status
-        for progress instead of waiting on this request.
+        content or mail (per `target`) -- unlike build_index's BM25 tier
+        above, this runs as a real Celery task (see
+        tasks/local_source_embedding_index_task.py) so it keeps going after
+        this request returns, and after the requesting page closes. Poll
+        api_corpora_local_embedding_index_status for progress instead of
+        waiting on this request.
         """
         from services.ietf_import_service import IetfImportService
         from services.job_status_service import JobStatusService
@@ -1163,28 +1272,44 @@ def main() -> None:
 
         data = request.get_json(silent=True) or {}
         draft_name = (data.get("draft_name") or "").strip()
+        target = (data.get("target") or "content").strip()
         if not draft_name:
             return jsonify({"error": "draft_name is required"}), 400
+        if target not in ("content", "mail"):
+            return jsonify({"error": "target must be 'content' or 'mail'"}), 400
 
-        job_key = f"embed:{draft_name}"
+        wg = IetfImportService.resolve_wg_for_draft(draft_name)
+        rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
+        if target == "mail" and not wg:
+            return jsonify({"error": "Could not resolve a working group for this draft."}), 400
+        # Mail is WG-keyed (see LocalSourceIndexService._mail_index_path) --
+        # two drafts in the same WG building "their" mail embeddings are
+        # really one job, so the job key (and therefore in-progress/
+        # already-completed detection) is keyed the same way.
+        job_key = f"embed-mail:{wg}" if target == "mail" else f"embed-content:{draft_name}"
         existing = JobStatusService.get_status(job_key)
         if existing and existing["status"] in ("queued", "running"):
             return jsonify({"job_key": job_key, **existing})
 
-        wg = IetfImportService.resolve_wg_for_draft(draft_name)
-        rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
         JobStatusService.set_status(job_key, "queued", message="Queued…")
-        local_source_embedding_index_task.delay(job_key, draft_name, wg, rfc_number)
+        local_source_embedding_index_task.delay(job_key, draft_name, wg, rfc_number, target)
         return jsonify({"job_key": job_key, "status": "queued"})
 
     @app.route(f"{_URL_PREFIX}/api/corpora/local-embedding-index/status", methods=["GET"])
     def api_corpora_local_embedding_index_status():
+        from services.ietf_import_service import IetfImportService
         from services.job_status_service import JobStatusService
 
         draft_name = (request.args.get("draft_name") or "").strip()
+        target = (request.args.get("target") or "content").strip()
         if not draft_name:
             return jsonify({"error": "draft_name is required"}), 400
-        status = JobStatusService.get_status(f"embed:{draft_name}")
+        if target == "mail":
+            wg = IetfImportService.resolve_wg_for_draft(draft_name)
+            job_key = f"embed-mail:{wg}" if wg else None
+        else:
+            job_key = f"embed-content:{draft_name}"
+        status = JobStatusService.get_status(job_key) if job_key else None
         if status is None:
             return jsonify({"status": "not_found"})
         return jsonify(status)
@@ -1466,10 +1591,16 @@ def main() -> None:
             if _global_graph_cache is not None:
                 on_event({"stage": "building", "message": "Using cached graph…"})
                 return _global_graph_cache
-            result = IetfImportService.get_global_structural_graph(on_event=on_event)
-            if not result.get("error"):
-                _global_graph_cache = result
-            return result
+            if _global_graph_lock.locked():
+                on_event({"stage": "building", "message": "Another request is already building this — waiting…"})
+            with _global_graph_lock:
+                if _global_graph_cache is not None:
+                    on_event({"stage": "building", "message": "Using cached graph…"})
+                    return _global_graph_cache
+                result = IetfImportService.get_global_structural_graph(on_event=on_event)
+                if not result.get("error"):
+                    _global_graph_cache = result
+                return result
 
         return _sse_stream(app, work)
 
@@ -1735,10 +1866,20 @@ def main() -> None:
     def api_sessions_get(session_id):
         from services.agentic_rag_session_service import AgenticRagSessionService
 
-        session = AgenticRagSessionService.get_session(session_id, account=g.account)
+        # get_session_for_view, not get_session -- lets this account open a
+        # session it doesn't own if the owner has shared it, read-only.
+        session = AgenticRagSessionService.get_session_for_view(session_id, account=g.account)
         if session is None:
             return jsonify({"error": "session not found"}), 404
+        is_owner = session.from_account_id == g.account.id
         turns = AgenticRagSessionService.get_turns(session_id, account=g.account)
+        owner_email = None
+        if not is_owner:
+            from extensions.ext_database import db
+            from models.account import Account
+
+            owner_row = db.session.query(Account.email).filter(Account.id == session.from_account_id).first()
+            owner_email = owner_row[0] if owner_row else None
         return jsonify(
             {
                 "id": session.id,
@@ -1746,8 +1887,31 @@ def main() -> None:
                 "turns": turns,
                 "model_provider": session.model_provider,
                 "model_id": session.model_id,
+                "is_owner": is_owner,
+                "shared": AgenticRagSessionService.get_session_shared(session_id),
+                "owner_email": owner_email,
+                "updated_at": session.updated_at.isoformat(),
             }
         )
+
+    @app.route(f"{_URL_PREFIX}/api/sessions/<session_id>/share", methods=["POST"])
+    def api_sessions_share(session_id):
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        shared = bool((request.get_json(silent=True) or {}).get("shared"))
+        result = AgenticRagSessionService.set_session_shared(session_id, account=g.account, shared=shared)
+        if result.get("error"):
+            return jsonify(result), 404
+        return jsonify(result)
+
+    @app.route(f"{_URL_PREFIX}/api/sessions/shared", methods=["GET"])
+    def api_sessions_shared_list():
+        """Sessions someone ELSE has shared -- the Investigations-rail
+        counterpart to the Sources tab's own-plus-shared merge.
+        """
+        from services.agentic_rag_session_service import AgenticRagSessionService
+
+        return jsonify({"sessions": AgenticRagSessionService.list_shared_sessions(account=g.account)})
 
     @app.route(f"{_URL_PREFIX}/api/sessions/<session_id>", methods=["PATCH"])
     def api_sessions_rename(session_id):

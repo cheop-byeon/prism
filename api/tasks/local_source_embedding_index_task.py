@@ -28,7 +28,9 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(queue="dataset")
-def local_source_embedding_index_task(job_key: str, draft_name: str, wg: str | None, rfc_number: str | None) -> None:
+def local_source_embedding_index_task(
+    job_key: str, draft_name: str, wg: str | None, rfc_number: str | None, target: str = "content"
+) -> None:
     JobStatusService.set_status(job_key, "running", message="Starting…")
 
     def on_event(event: dict) -> None:
@@ -41,7 +43,10 @@ def local_source_embedding_index_task(job_key: str, draft_name: str, wg: str | N
         )
 
     try:
-        result = LocalSourceIndexService.build_embedding_index(draft_name, wg, rfc_number, on_event=on_event)
+        if target == "mail":
+            result = LocalSourceIndexService.build_mail_embedding_index(wg, on_event=on_event)
+        else:
+            result = LocalSourceIndexService.build_content_embedding_index(draft_name, rfc_number, on_event=on_event)
     except Exception as exc:
         logger.exception("local_source_embedding_index_task failed for draft %s", draft_name)
         JobStatusService.set_status(job_key, "error", message=f"{type(exc).__name__}: {exc}")

@@ -35,6 +35,7 @@ from .enums import (
 )
 from .execution_extra_content import ExecutionExtraContent, HumanInputContent
 from .human_input import HumanInputForm
+from .ietf_agentic_session_share import IetfAgenticSessionShare
 from .ietf_local_source import IetfLocalSource
 from .model import (
     AccountTrialAppRecord,
@@ -164,6 +165,7 @@ __all__ = [
     "HumanInputContent",
     "HumanInputForm",
     "IconType",
+    "IetfAgenticSessionShare",
     "IetfLocalSource",
     "InstalledApp",
     "InvitationCode",
