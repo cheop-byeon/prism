@@ -18,6 +18,7 @@
 })();
 </script>
 <title>Prism</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   /* Prismatic palette, taken directly from the prism-spectrum mockup's own
      --po-* names and light-dark() pairs (light value first, dark value
@@ -953,7 +954,13 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <div id="poEvWithin">
           <p class="corpora-hint">Trace one specific decision phrase's exact wording across every draft revision it appears in -- tighter phrases work better than bare identifiers.</p>
           <form class="pt-form" id="poThreadForm">
-            <label>Document<select id="poThreadDraft"><option value="">(let the agent discover)</option></select></label>
+            <label>Document
+              <div class="po-draftcombo" id="poThreadDraftCombo">
+                <input type="text" id="poThreadDraft" class="po-draftcombo-input" placeholder="(let the agent discover)"
+                  role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="poThreadDraftListbox" autocomplete="off">
+                <ul id="poThreadDraftListbox" class="po-draftcombo-list" role="listbox" hidden></ul>
+              </div>
+            </label>
             <label>Keyword or exact phrase<input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'></label>
             <button id="poThreadBtn" class="pt-action" type="submit">Track phrase</button>
           </form>
@@ -1371,23 +1378,19 @@ fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
 const poDraftEl = document.getElementById('poDraft');
 const poDraftListEl = document.getElementById('poDraftListbox');
 const poThreadDraftEl = document.getElementById('poThreadDraft');
+const poThreadDraftListEl = document.getElementById('poThreadDraftListbox');
 let corporaCatalog = [];
-// Investigations' own document field (poDraft) is an editable combobox --
-// typing filters draftOptions below by substring against both the draft
-// name and its resolved RFC number (so "123" matches 4123/5123/1234, not
-// just names starting with it), built fresh from the same /api/corpora
-// response Decision history's plain <select> (poThreadDraft, unchanged)
-// already uses.
+// Both Investigations' own document field (poDraft) and Decision history's
+// "Within a document" picker (poThreadDraft) are editable combobox pairs
+// sharing this one draftOptions list -- typing filters by substring against
+// both the draft name and its resolved RFC number (so "123" matches
+// 4123/5123/1234, not just names starting with it).
 let draftOptions = [];
 fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
   corporaCatalog = data.catalog || [];
   corporaCatalog.forEach((c) => {
     if (!c.draft_name) return;
     draftOptions.push({ draftName: c.draft_name, rfcNumber: c.rfc_number || null, local: false });
-    const opt = document.createElement('option');
-    opt.value = c.draft_name;
-    opt.textContent = c.draft_name;
-    poThreadDraftEl.appendChild(opt);
   });
   // Local-only sources (Sources tab) are never a real Dify dataset, so
   // they're never in corporaCatalog above -- without this, a deployment
@@ -1400,14 +1403,9 @@ fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
   // (or isn't in the index), not a resolution failure.
   (data.local_sources || []).forEach((entry) => {
     draftOptions.push({ draftName: entry.draft_name, rfcNumber: entry.rfc_number || null, local: true });
-    // poThreadDraftEl's own label formatting is untouched here -- Decision
-    // history's "Within a document" picker stays exactly as it was.
-    const opt = document.createElement('option');
-    opt.value = entry.draft_name;
-    opt.textContent = `${entry.draft_name} (local)`;
-    poThreadDraftEl.appendChild(opt);
   });
-  renderDraftOptions(filterDraftOptions(poDraftEl.value));
+  renderDraftOptions(filterDraftOptions(poDraftEl.value), poDraftListEl);
+  renderDraftOptions(filterDraftOptions(poThreadDraftEl.value), poThreadDraftListEl);
 }).catch(() => {});
 
 function filterDraftOptions(query) {
@@ -1415,42 +1413,49 @@ function filterDraftOptions(query) {
   if (!needle) return draftOptions;
   return draftOptions.filter((o) => o.draftName.toLowerCase().includes(needle) || (o.rfcNumber && o.rfcNumber.includes(needle)));
 }
-function renderDraftOptions(items) {
-  poDraftListEl.innerHTML = items.length
+function renderDraftOptions(items, listEl) {
+  listEl.innerHTML = items.length
     ? items.slice(0, 40).map((o) =>
         `<li class="po-draftcombo-item" role="option" data-draft="${escapeHtml(o.draftName)}">`
           + `<span>${escapeHtml(o.draftName)}</span>`
           + `<small>${o.rfcNumber ? `RFC ${escapeHtml(o.rfcNumber)}` : (o.local ? 'local' : '')}</small></li>`
       ).join('')
-    : '<li class="po-draftcombo-empty">No matches -- you can still type a draft name or RFC number directly.</li>';
+    : '<li class="po-draftcombo-empty">No matches</li>';
 }
-function openDraftList() {
-  renderDraftOptions(filterDraftOptions(poDraftEl.value));
-  poDraftListEl.hidden = false;
-  poDraftEl.setAttribute('aria-expanded', 'true');
+// One combobox's worth of open/close/filter/pick wiring -- shared by poDraft
+// and poThreadDraft so both behave identically rather than keeping two
+// parallel copies of the same five listeners in sync by hand.
+function wireDraftCombo(inputEl, listEl) {
+  function open() {
+    renderDraftOptions(filterDraftOptions(inputEl.value), listEl);
+    listEl.hidden = false;
+    inputEl.setAttribute('aria-expanded', 'true');
+  }
+  function close() {
+    listEl.hidden = true;
+    inputEl.setAttribute('aria-expanded', 'false');
+  }
+  inputEl.addEventListener('input', open);
+  inputEl.addEventListener('focus', open);
+  inputEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') close();
+    if (e.key === 'Enter') close();
+  });
+  // mousedown (not click) so this fires before the input's own blur closes
+  // the list first and strands the click on nothing.
+  listEl.addEventListener('mousedown', (e) => {
+    const li = e.target.closest('[data-draft]');
+    if (!li) return;
+    e.preventDefault();
+    inputEl.value = li.dataset.draft;
+    close();
+  });
+  document.addEventListener('click', (e) => {
+    if (!inputEl.contains(e.target) && !listEl.contains(e.target)) close();
+  });
 }
-function closeDraftList() {
-  poDraftListEl.hidden = true;
-  poDraftEl.setAttribute('aria-expanded', 'false');
-}
-poDraftEl.addEventListener('input', openDraftList);
-poDraftEl.addEventListener('focus', openDraftList);
-poDraftEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') closeDraftList();
-  if (e.key === 'Enter') closeDraftList();
-});
-// mousedown (not click) so this fires before the input's own blur closes
-// the list first and strands the click on nothing.
-poDraftListEl.addEventListener('mousedown', (e) => {
-  const li = e.target.closest('[data-draft]');
-  if (!li) return;
-  e.preventDefault();
-  poDraftEl.value = li.dataset.draft;
-  closeDraftList();
-});
-document.addEventListener('click', (e) => {
-  if (!poDraftEl.contains(e.target) && !poDraftListEl.contains(e.target)) closeDraftList();
-});
+wireDraftCombo(poDraftEl, poDraftListEl);
+wireDraftCombo(poThreadDraftEl, poThreadDraftListEl);
 
 // Shared by Documents' own lookup and Workspace's "Start from a document"
 // tab -- matches the mockup's own live-filtered doc-result, just against
@@ -1790,9 +1795,7 @@ function renderClaimText(text, claimLabels) {
       .split(',')
       .map((raw) => {
         const n = raw.trim();
-        const status = (claimLabels || {})[n];
-        const pillHtml = status ? `<span class="po-claim-pill po-claim-pill-${status}">${status}</span>` : '';
-        return `<button type="button" class="po-cite" data-n="${n}">[${n}]${pillHtml}</button>`;
+        return `<button type="button" class="po-cite" data-n="${n}">[${n}]</button>`;
       })
       .join('');
   });
@@ -1973,7 +1976,14 @@ function normalizeActivityEntry(raw, isLive) {
   return {
     tool: raw.tool || '',
     title: toolLabel(raw.tool || ''),
-    reason: isLive ? (raw.reason || null) : null,
+    // Live steps stitch the preceding "reasoning" SSE event onto this one
+    // as raw.reason (see the EventSource handler above); a reopened past
+    // session has no such stream to replay, but ask_decision_agent.py now
+    // persists the same sentence into each trace entry's own "reasoning"
+    // field -- previously absent, which is why these lines vanished the
+    // moment a session was reopened even though the rest of the step
+    // survived via this same trace.
+    reason: isLive ? (raw.reason || null) : (raw.reasoning || null),
     forced: !!raw.forced,
     errored: isLive ? raw.status === 'errored' : !!raw.errored,
     args: raw.args || {},
@@ -2944,8 +2954,8 @@ function evSelectNode(idx) {
   const item = evRfcData[idx];
   // Only offer to jump into Within-mode tracking when this investigation
   // visited a real local draft AND that draft is actually one of the
-  // dropdown's known options -- never a guess that would silently fail.
-  const draftNode = actNodes.find((n) => n.kind === 'Draft' && poThreadDraftEl.querySelector(`option[value="${CSS.escape(n.focus)}"]`));
+  // combobox's known options -- never a guess that would silently fail.
+  const draftNode = actNodes.find((n) => n.kind === 'Draft' && draftOptions.some((o) => o.draftName === n.focus));
   document.getElementById('poEvInspector').innerHTML = `<div class="po-eyebrow">Selected document · RFC ${escapeHtml(item.digits)}</div>`
     + `<h2>${escapeHtml(item.title || 'RFC ' + item.digits)}</h2>`
     + `<p>Published ${item.year}.</p>`

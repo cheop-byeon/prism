@@ -99,6 +99,18 @@ server {
       include proxy.conf;
     }
 
+    # Every Prism page's own <link rel="icon"> points at this same bare
+    # top-level path regardless of which top-level path (/login, /spectrum/*,
+    # /classic/*) actually rendered it -- same reasoning as /login-hero.jpg
+    # above. Without this, a browser with no explicit icon tag at all used
+    # to fall back to probing /favicon.ico, which fell through the catch-all
+    # `location /` below to the real Dify web console's own icon instead.
+    location = /favicon.svg {
+      rewrite ^/favicon\.svg$ /prism/favicon.svg break;
+      proxy_pass http://ietf_decision_agent_ui:8766;
+      include proxy.conf;
+    }
+
     # The bare domain root was falling through to the catch-all `location /`
     # below, which proxies straight to Dify's own web console -- so a
     # fresh, logged-out visitor landed on Dify's stock /signin page instead

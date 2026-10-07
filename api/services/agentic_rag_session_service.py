@@ -208,7 +208,13 @@ class AgenticRagSessionService:
                 {
                     "id": row.id,
                     "title": row.name,
-                    "updated_at": row.updated_at.isoformat(),
+                    # +"Z": row.updated_at is a naive datetime (no tzinfo)
+                    # that's actually always UTC -- without an explicit
+                    # marker, JS's `new Date(...)` parses a timezone-less
+                    # ISO string as LOCAL time instead, confirmed live to
+                    # show "2h ago" for a session updated seconds earlier
+                    # on a UTC+2 browser (Oslo, October/CEST).
+                    "updated_at": row.updated_at.isoformat() + "Z",
                     "model_provider": row.model_provider,
                     "model_id": row.model_id,
                     "is_owner": True,
@@ -251,7 +257,7 @@ class AgenticRagSessionService:
             {
                 "id": conversation.id,
                 "title": conversation.name,
-                "updated_at": conversation.updated_at.isoformat(),
+                "updated_at": conversation.updated_at.isoformat() + "Z",  # see list_sessions' own note
                 "model_provider": conversation.model_provider,
                 "model_id": conversation.model_id,
                 "is_owner": False,
@@ -310,7 +316,7 @@ class AgenticRagSessionService:
             {
                 "id": row.id,
                 "title": row.name,
-                "updated_at": row.updated_at.isoformat(),
+                "updated_at": row.updated_at.isoformat() + "Z",  # see list_sessions' own note
                 "model_provider": row.model_provider,
                 "model_id": row.model_id,
                 "is_owner": True,
@@ -387,7 +393,7 @@ class AgenticRagSessionService:
                     "trace": trace,
                     "claim_labels": meta.get("claim_labels", {}),
                     "evidence": meta.get("evidence", []),
-                    "created_at": row.created_at.isoformat(),
+                    "created_at": row.created_at.isoformat() + "Z",  # see list_sessions' own note
                     "feedback": feedback_row.rating.value if feedback_row else None,
                     "usage": {
                         "prompt_tokens": row.message_tokens,

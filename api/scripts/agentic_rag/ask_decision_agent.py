@@ -325,35 +325,58 @@ _RESEARCH_ADDENDUM = (
     "evolution dataset's diff alone, and use diff_ietf_draft_revisions as an "
     "independent second opinion on a change that matters. Prioritize "
     "thoroughness over speed -- more tool calls are fine if they add real "
-    "evidence, not just repetition.\n\n"
-    "Early on, decide for yourself whether this question is scoped to one draft or RFC's own "
-    "history, or whether it's actually about the WIDER RFC landscape -- and proceed accordingly; "
-    "don't assume it's narrow just because it names one draft. When it needs the wider landscape, "
-    "proactively use get_rfc_relations, find_related_rfc_family, and search_rfc_corpus_bm25 to "
-    "find other RFCs connected to the one in question -- structurally (obsoletes/updates), by "
-    "citation (find_related_rfc_family), and by topic (search_rfc_corpus_bm25, which takes an RFC "
-    "number directly as its query and searches using that RFC's own title+abstract). "
-    "find_related_rfc_family requires an exact keyword match and can come back empty even when a "
-    "real family exists (a confirmed, known limitation -- not evidence that nothing exists), so if "
-    "it's empty, try search_rfc_corpus_bm25 with the same RFC number before concluding there's no "
-    "broader family. When the question is about evolution across several RFCs, explain what each "
-    "one specifically added, corrected, or superseded -- cite the actual RFC numbers you found via "
-    "these tools, don't rely on your own prior knowledge of them without checking Datatracker first. "
-    "If the user is asking you to gather, pull, crawl, or build up local material on a topic (not "
-    "just explain it), use add_local_source on the RFCs you found that genuinely look central to the "
-    "question -- not every RFC discovery/search tool returns, since each add_local_source call is a "
-    "real, moderately expensive fetch, not a free lookup. After pulling one, search_local_drafts_rfc "
-    "and search_local_mailarchive can query it immediately in this same conversation, so you can "
-    "actually read what you just pulled before finishing your answer, not just report that you pulled "
-    "it -- and since rationale lives in the mail, not the spec text, search_local_mailarchive is the "
-    "one that actually answers a WHY question. "
-    "search_local_mailarchive's coverage is scoped per WORKING GROUP, not per draft: once you pull one "
-    "draft, searching it also searches its WG's entire mail archive, not just that one draft's own "
-    "thread. So if the central RFCs you found span more than one WG (each add_local_source/"
-    "list_available_ietf_corpora result names the WG), pull and search at least one representative "
-    "draft from EACH distinct WG before concluding the discussion was narrow -- stopping at the first "
-    "WG that returns a hit, when the question is genuinely cross-WG, understates the breadth a "
-    "wide-scope question actually needs."
+    "evidence, not just repetition."
+)
+
+# Which of these two gets appended to _RESEARCH_ADDENDUM is decided by ask()
+# itself, from whether a --draft hint was actually given (see its own
+# assembly of system_instruction) -- never both at once, since they give
+# directly contradictory guidance on the same question (go wide vs stay put).
+_WIDE_SCOPE_ADDENDUM = (
+    "No specific draft was selected for this question, so decide for yourself whether it's "
+    "scoped to one draft or RFC's own history, or whether it's actually about the WIDER RFC "
+    "landscape -- and proceed accordingly; don't assume it's narrow just because it names one "
+    "draft. When it needs the wider landscape, proactively use get_rfc_relations, "
+    "find_related_rfc_family, and search_rfc_corpus_bm25 to find other RFCs connected to the one "
+    "in question -- structurally (obsoletes/updates), by citation (find_related_rfc_family), and "
+    "by topic (search_rfc_corpus_bm25, which takes an RFC number directly as its query and "
+    "searches using that RFC's own title+abstract). find_related_rfc_family requires an exact "
+    "keyword match and can come back empty even when a real family exists (a confirmed, known "
+    "limitation -- not evidence that nothing exists), so if it's empty, try search_rfc_corpus_bm25 "
+    "with the same RFC number before concluding there's no broader family. When the question is "
+    "about evolution across several RFCs, explain what each one specifically added, corrected, or "
+    "superseded -- cite the actual RFC numbers you found via these tools, don't rely on your own "
+    "prior knowledge of them without checking Datatracker first. If the user is asking you to "
+    "gather, pull, crawl, or build up local material on a topic (not just explain it), use "
+    "add_local_source on the RFCs you found that genuinely look central to the question -- not "
+    "every RFC discovery/search tool returns, since each add_local_source call is a real, "
+    "moderately expensive fetch, not a free lookup. After pulling one, search_local_drafts_rfc and "
+    "search_local_mailarchive can query it immediately in this same conversation, so you can "
+    "actually read what you just pulled before finishing your answer, not just report that you "
+    "pulled it -- and since rationale lives in the mail, not the spec text, search_local_mailarchive "
+    "is the one that actually answers a WHY question. search_local_mailarchive's coverage is "
+    "scoped per WORKING GROUP, not per draft: once you pull one draft, searching it also searches "
+    "its WG's entire mail archive, not just that one draft's own thread. So if the central RFCs "
+    "you found span more than one WG (each add_local_source/list_available_ietf_corpora result "
+    "names the WG), pull and search at least one representative draft from EACH distinct WG before "
+    "concluding the discussion was narrow -- stopping at the first WG that returns a hit, when the "
+    "question is genuinely cross-WG, understates the breadth a wide-scope question actually needs."
+)
+
+_NARROW_SCOPE_ADDENDUM = (
+    "A specific draft was already selected for this question before you were asked -- that "
+    "selection IS the scope, not a hint to go verify or second-guess against the wider landscape. "
+    "Stay within that one draft (and its published RFC, if any) and its own working group's mail "
+    "archive and meeting minutes for this entire answer. Do NOT call get_rfc_relations, "
+    "find_related_rfc_family, search_rfc_corpus_bm25, or find_similar_rfcs_by_meaning, and do NOT "
+    "add_local_source/search_local_drafts_rfc/search_local_mailarchive/fetch_ietf_draft_text/"
+    "fetch_ietf_rfc_text any draft or RFC other than the one selected -- those are for the "
+    "cross-RFC-landscape case, which an explicit draft selection rules out here. "
+    "search_wg_minutes and get_iesg_ballot_comments remain fully in scope: they're this draft's own "
+    "WG/review history, not the wider landscape, so reach for them the same as always if mail "
+    "search comes up thin. A short or fragment-like question (a bare keyword or phrase, not a full "
+    "sentence) on top of an explicit draft selection is an especially strong signal the user wants "
+    "exactly this narrow, fast answer -- not an exhaustive survey of the whole archive."
 )
 
 _ARCHIVE_BASE = "https://www.ietf.org/archive/id/"
@@ -485,8 +508,18 @@ def _resolve_rfc_number_for_draft(draft_name: str) -> str | None:
         return None
 
 
-def _list_available_corpora(viewer_account_id: str | None = None) -> tuple[str, list[dict]]:
+def _list_available_corpora(
+    viewer_account_id: str | None = None, *, include_local_source_lines: bool = True
+) -> tuple[str, list[dict]]:
     """Return (formatted catalog for the tool observation, structured catalog).
+
+    include_local_source_lines=False skips the local-only-sources text block
+    below entirely -- confirmed live, it alone made the real caller of this
+    (/api/corpora, which only ever reads the structured `catalog` return
+    value and discards the formatted text) take 87s+ on a deployment with
+    ~300 local sources, resolving each one's WG via live Datatracker calls
+    purely to build a text block that caller never uses. ask()'s own tool
+    calls (which DO need that text) leave this at its default.
 
     The structured form is `[{draft_name, rfc_number, wg, evolution_dataset_id,
     mailarchive_dataset_id}]` -- used by ask() to auto-seed the mailarchive
@@ -571,17 +604,18 @@ def _list_available_corpora(viewer_account_id: str | None = None) -> tuple[str, 
     # context so the model knows search_local_drafts_rfc/search_local_mailarchive
     # are worth trying for them, since there's no other discovery path that
     # would tell it these exist at all.
-    registered_names = set(by_draft.keys())
-    local_lines = _list_indexed_local_sources(exclude=registered_names, viewer_account_id=viewer_account_id)
-    if local_lines:
-        lines.append("")
-        lines.append(
-            "Local-only sources (added via the Sources tab, indexed locally via BM25 -- "
-            "search with search_local_drafts_rfc (spec text) and/or search_local_mailarchive "
-            "(rationale/discussion), NOT search_ietf_evolution_dataset/"
-            "search_ietf_mailarchive_dataset, since these have no real Dify dataset):"
-        )
-        lines.extend(local_lines)
+    if include_local_source_lines:
+        registered_names = set(by_draft.keys())
+        local_lines = _list_indexed_local_sources(exclude=registered_names, viewer_account_id=viewer_account_id)
+        if local_lines:
+            lines.append("")
+            lines.append(
+                "Local-only sources (added via the Sources tab, indexed locally via BM25 -- "
+                "search with search_local_drafts_rfc (spec text) and/or search_local_mailarchive "
+                "(rationale/discussion), NOT search_ietf_evolution_dataset/"
+                "search_ietf_mailarchive_dataset, since these have no real Dify dataset):"
+            )
+            lines.extend(local_lines)
 
     return "\n".join(lines), catalog
 
@@ -720,6 +754,48 @@ def _resolve_discussion_links(mailarchive_dataset, candidate: dict) -> list[dict
     return []
 
 
+def _resolve_discussion_links_local(candidate: dict) -> list[dict]:
+    """Local-source equivalent of _resolve_discussion_links -- no
+    DocumentSegment-sibling fallback, since a local source's BM25 index has
+    no such table at all. _extract_message_links already works on any text
+    carrying build_thread_records()'s marker line regardless of where that
+    text came from (confirmed: local mail archives are threaded by the same
+    shared pipeline real-dataset mailarchives are), so the common case is
+    unaffected; only the rare mid-message BM25-split edge case that fallback
+    existed for is left unresolved here rather than chasing it into a
+    second, local-only sibling-walk that duplicates the real one.
+    """
+    return _extract_message_links(candidate["text"])
+
+
+def _find_local_discussion_candidates(draft_name: str, query_text: str, top_k: int = 5) -> list[dict]:
+    """Local-source equivalent of _find_discussion_candidates -- same
+    pre-filtering logic (administrative-notice drop, cap at 3), sourced from
+    LocalSourceIndexService's own BM25 mail index instead of a real Dify
+    mailarchive dataset's retrieval. document_id/doc_id stay None (there's
+    no DocumentSegment table backing a local index to trace them to), which
+    is fine: _resolve_discussion_links_local never reads them.
+    """
+    from services.ietf_import_service import IetfImportService
+    from services.local_source_index_service import LocalSourceIndexService
+
+    if not query_text.strip():
+        return []
+    query = " ".join(query_text.split()[:30])
+    result = LocalSourceIndexService.search(draft_name, query, top_k=top_k, scope="mail")
+    kept = []
+    for hit in result.get("results") or []:
+        text = hit.get("snippet", "")
+        subject_match = _THREAD_SUBJECT_RE.match(text)
+        subject = subject_match.group(1) if subject_match else ""
+        if subject and IetfImportService._is_administrative_notice(subject):
+            continue
+        kept.append({"text": text, "document_id": None, "doc_id": None})
+        if len(kept) >= 3:
+            break
+    return kept
+
+
 def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int = 5) -> list[dict]:
     """Gather candidate mailarchive messages for one specific change's own
     wording -- NOT a relevance verdict. Tried treating "any non-administrative
@@ -790,7 +866,7 @@ _LANE_DISCUSSION_INSTRUCTION = (
 
 def _judge_lane_discussion(
     lane: dict,
-    mailarchive_dataset,
+    resolve_links_fn,
     tenant_id: str,
     model_provider: str,
     model_name: str,
@@ -808,6 +884,13 @@ def _judge_lane_discussion(
     candidates, or if the model's response doesn't parse -- conservative by
     design, matching this project's existing rule that an unsupported claim
     should be dropped, not guessed into looking supported.
+
+    resolve_links_fn(candidate) -> list[dict]: how to turn a winning
+    candidate into real clickable archive link(s) -- a real mailarchive
+    dataset needs a DocumentSegment-sibling-walk fallback
+    (_resolve_discussion_links); a local source's own search snippet never
+    needs that fallback (see _resolve_discussion_links_local), so this is a
+    callback rather than a hardcoded dataset lookup.
     """
     from core.model_manager import ModelManager
     from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
@@ -871,7 +954,7 @@ def _judge_lane_discussion(
                 winner = candidates[cand_idx]
                 lane["edges"][idx]["has_discussion"] = True
                 lane["edges"][idx]["discussion"] = winner["text"]
-                lane["edges"][idx]["discussion_links"] = _resolve_discussion_links(mailarchive_dataset, winner)
+                lane["edges"][idx]["discussion_links"] = resolve_links_fn(winner)
 
 
 def _parse_evolution_body(body: str) -> tuple[str | None, str | None]:
@@ -908,6 +991,215 @@ def _drafts_with_matches(query: str, catalog: list[dict]) -> list[str]:
         if any(s.content and needle in s.content.lower() for s in segments):
             matches.append(entry["draft_name"])
     return matches
+
+
+def _rev_key(rev: str) -> int:
+    return int(rev) if rev.isdigit() else 10**9
+
+
+def _section_sort_key(section: str) -> tuple:
+    # (0, int) for numeric parts, (1, str) for non-numeric ones ("M1"-style
+    # appendix sections) -- keeps every tuple position the same shape so
+    # mixed numeric/non-numeric sections never raise comparing an int to a
+    # str.
+    return tuple((0, int(p)) if p.isdigit() else (1, p) for p in re.findall(r"\d+|\D+", section))
+
+
+def _build_evolution_lane(section_matches: list[dict], draft_name: str, find_candidates) -> dict:
+    """One section's cross-revision timeline: a list of text snapshots
+    (nodes, one per revision where the matched text existed) connected by
+    edges (one per consecutive node pair, each carrying a live diff URL and,
+    once _judge_lane_discussion runs, a discussion verdict).
+
+    find_candidates(text) -> list[dict]: how to gather candidate discussion
+    messages for one node's text -- a real dataset's _find_discussion_candidates
+    or a local source's _find_local_discussion_candidates, kept as a callback
+    so this function (originally decision_thread()'s own closure) doesn't
+    care which kind of draft it's building a lane for.
+    """
+    nodes: dict[str, str] = {}
+    edges: list[dict] = []
+    seen_hops: set[tuple[str, str]] = set()
+    title = ""
+    for m in section_matches:
+        hop = (m["from_rev"], m["to_rev"])
+        if hop in seen_hops:
+            continue
+        seen_hops.add(hop)
+        title = title or m["title"]
+        if m["before"] and m["from_rev"] not in nodes:
+            nodes[m["from_rev"]] = m["before"]
+        if m["after"]:
+            nodes[m["to_rev"]] = m["after"]
+        edges.append(
+            {
+                "from_rev": m["from_rev"],
+                "to_rev": m["to_rev"],
+                "type": m["type"],
+                "diff_url": _iddiff_page_url(draft_name, m["from_rev"], m["to_rev"]),
+            }
+        )
+
+    ordered_revs = sorted(nodes.keys(), key=_rev_key)
+    node_list = [{"rev": rev, "text": nodes[rev]} for rev in ordered_revs]
+
+    # Rebuild edges aligned 1:1 with consecutive node pairs -- a matched hop
+    # can skip revisions the query didn't match at all (e.g. rephrased away
+    # and back), leaving no recorded edge directly between two adjacent
+    # nodes. Falling back to a freshly built diff URL for that exact pair
+    # means the caller never has to special-case a missing connector.
+    edge_by_hop = {(e["from_rev"], e["to_rev"]): e for e in edges}
+    display_edges = []
+    for from_rev, to_rev in zip(ordered_revs, ordered_revs[1:], strict=False):
+        edge = edge_by_hop.get((from_rev, to_rev)) or {
+            "from_rev": from_rev,
+            "to_rev": to_rev,
+            "type": "modified",
+            "diff_url": _iddiff_page_url(draft_name, from_rev, to_rev),
+        }
+        display_edges.append(edge)
+
+    for i, edge in enumerate(display_edges):
+        edge["_candidates"] = find_candidates(node_list[i + 1]["text"])
+
+    return {"section": section_matches[0]["section"], "title": title, "nodes": node_list, "edges": display_edges}
+
+
+def _resolve_fallback_tenant_id(viewer_account_id: str | None) -> str:
+    """Tenant to use when no dataset-derived tenant_id is known (local-source-
+    only queries, which is almost all real usage). Prefers the viewing
+    account's own tenant; falls back to Tenant.first() only when there's no
+    viewer context at all (internal/CLI callers) or the account somehow has
+    no tenant join row.
+
+    Was a bare, unordered Tenant.first() unconditionally -- harmless while
+    exactly one tenant existed, but silently wrong the moment self-registration
+    creates a second one: a different-tenant account's query would use
+    whichever tenant's row the query planner happened to return first,
+    possibly the wrong tenant's model credentials entirely.
+    """
+    from extensions.ext_database import db
+    from models.account import Tenant, TenantAccountJoin
+
+    if viewer_account_id:
+        joins = db.session.query(TenantAccountJoin).filter(TenantAccountJoin.account_id == viewer_account_id).all()
+        current = next((j for j in joins if j.current), None)
+        if current:
+            return current.tenant_id
+        if joins:
+            return joins[0].tenant_id
+    return db.session.query(Tenant).first().id
+
+
+def _local_decision_thread(
+    draft_name: str,
+    query: str,
+    model_provider: str = _DEFAULT_MODEL_PROVIDER,
+    model_name: str = _DEFAULT_MODEL_NAME,
+    on_event=None,
+    viewer_account_id: str | None = None,
+) -> dict:
+    """Local-source equivalent of decision_thread() -- same per-revision,
+    per-section timeline, same return shape ({draft_name, rfc_number, query,
+    lanes}), computed live instead of read from a real Dify dataset's
+    precomputed DocumentSegment rows (which a local source never has --
+    decision_thread()'s own docstring covers why it can't just read those).
+
+    Reuses ietf_import_service.py's own section-diffing pipeline --
+    _fetch_all_revisions, _parse_sections, _section_line_spans,
+    _diff_version_pair -- directly: the exact same code a real dataset
+    import runs once at import time and persists, just run here live
+    on demand instead. Confirmed cheap enough to do that way: a typical
+    draft has a handful to ~20 revisions, nothing like the ~300-local-source
+    cost _list_available_corpora's own include_local_source_lines flag
+    exists to avoid -- this is a per-DRAFT cost, not a per-DEPLOYMENT one.
+    """
+    from services.ietf_import_service import IetfImportService
+
+    def _emit(stage: str, message: str) -> None:
+        if on_event:
+            on_event({"stage": stage, "message": message})
+
+    _emit("resolving", f"{draft_name} is a local-only source -- computing its revision diffs live…")
+    sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
+    parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
+    spans = {rev: IetfImportService._section_line_spans(version_texts[rev]) for rev in sorted_revs}
+
+    _emit("searching", f"Diffing {len(sorted_revs)} revisions for {query!r}…")
+    all_changes: list[dict] = []
+    for from_rev, to_rev in zip(sorted_revs, sorted_revs[1:]):
+        all_changes.extend(
+            IetfImportService._diff_version_pair(
+                parsed[from_rev],
+                parsed[to_rev],
+                from_rev,
+                to_rev,
+                draft_name,
+                old_spans=spans[from_rev],
+                new_spans=spans[to_rev],
+            )
+        )
+
+    # Same header+body string shape generate_draft_evolution writes into a
+    # real DocumentSegment's content, so the exact same parsing regexes
+    # decision_thread() uses on that content work unchanged here.
+    needle = query.strip().lower()
+    raw_matches = []
+    for change in all_changes:
+        content = change.get("content", "")
+        if not content or needle not in content.lower():
+            continue
+        match = _EVOLUTION_ENTRY_RE.match(content)
+        if not match:
+            continue
+        _draft, from_rev, to_rev, section, change_type, title = match.groups()
+        before_text, after_text = _parse_evolution_body(content[match.end() :])
+        raw_matches.append(
+            {
+                "from_rev": from_rev,
+                "to_rev": to_rev,
+                "section": section,
+                "type": change_type,
+                "title": (title or "").strip(),
+                "before": before_text,
+                "after": after_text,
+            }
+        )
+    raw_matches.sort(key=lambda m: _rev_key(m["from_rev"]))
+
+    by_section: dict[str, list[dict]] = {}
+    for m in raw_matches:
+        by_section.setdefault(m["section"], []).append(m)
+    sorted_sections = sorted(by_section, key=_section_sort_key)
+    _emit("matched", f"Found {len(raw_matches)} matching change(s) across {len(sorted_sections)} section(s)")
+
+    lanes = []
+    for section in sorted_sections:
+        _emit("building", f"Building §{section} timeline…")
+        lanes.append(
+            _build_evolution_lane(
+                by_section[section], draft_name, lambda t: _find_local_discussion_candidates(draft_name, t)
+            )
+        )
+
+    tenant_id = _resolve_fallback_tenant_id(viewer_account_id)
+    for lane in lanes:
+        _judge_lane_discussion(
+            lane, _resolve_discussion_links_local, tenant_id, model_provider, model_name, on_event=on_event
+        )
+    for lane in lanes:
+        for edge in lane["edges"]:
+            edge.pop("_candidates", None)
+            edge.setdefault("has_discussion", False)
+            edge.setdefault("discussion", None)
+            edge.setdefault("discussion_links", [])
+
+    return {
+        "draft_name": draft_name,
+        "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
+        "query": query,
+        "lanes": lanes,
+    }
 
 
 def decision_thread(
@@ -965,16 +1257,38 @@ def decision_thread(
     # explicitly rather than just naming the query/hint, since "no known
     # draft" reads as a bug report otherwise -- confirmed live this is
     # genuinely confusing without the reason spelled out.
-    _, catalog = _list_available_corpora(viewer_account_id)
+    # include_local_source_lines=False: this function's own docstring above
+    # says local sources can never resolve here anyway (no evolution_dataset_id
+    # to query), and only `catalog` is read below -- same discarded-text waste
+    # as every other _list_available_corpora call site in this file.
+    _, catalog = _list_available_corpora(viewer_account_id, include_local_source_lines=False)
     if draft_hint and draft_hint.strip():
         _emit("resolving", f"Resolving draft {draft_hint!r}…")
         resolved = _resolve_draft_hint(draft_hint, catalog)
         if not resolved:
+            # Confirmed live: the Draft picker's own (correct) local-source
+            # entries hit this exact ValueError the instant anyone actually
+            # picked one and clicked Track phrase, for every single local
+            # source in the deployment -- the real fix is a working local
+            # path, not a better error message. See _local_decision_thread's
+            # own docstring for why it's a real alternative, not a stub.
+            from services.ietf_import_service import IetfImportService
+
+            local_names = IetfImportService.list_local_source_names(viewer_account_id)
+            local_match = next((name for name in local_names if name.lower() == draft_hint.strip().lower()), None)
+            if local_match:
+                return _local_decision_thread(
+                    local_match,
+                    query,
+                    model_provider=model_provider,
+                    model_name=model_name,
+                    on_event=on_event,
+                    viewer_account_id=viewer_account_id,
+                )
             known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
             raise ValueError(
-                f"{draft_hint!r} did not match exactly one draft registered as a Dify dataset. "
-                f"Track a Decision only searches drafts imported that way, not locally-downloaded-only "
-                f"sources -- see the Sources page for which is which. Registered drafts: {known}"
+                f"{draft_hint!r} did not match exactly one draft registered as a Dify dataset, and no local "
+                f"source has that exact name either. Registered drafts: {known}"
             )
     else:
         _emit("resolving", f"No draft given -- searching every known draft for {query!r}…")
@@ -1007,9 +1321,6 @@ def decision_thread(
 
     needle = query.strip().lower()
 
-    def _rev_key(rev: str) -> int:
-        return int(rev) if rev.isdigit() else 10**9
-
     raw_matches = []
     for segment in segments:
         if not segment.content or needle not in segment.content.lower():
@@ -1032,62 +1343,6 @@ def decision_thread(
         )
     raw_matches.sort(key=lambda m: _rev_key(m["from_rev"]))
 
-    def _section_sort_key(section: str) -> tuple:
-        # (0, int) for numeric parts, (1, str) for non-numeric ones ("M1"-
-        # style appendix sections) -- keeps every tuple position the same
-        # shape so mixed numeric/non-numeric sections never raise comparing
-        # an int to a str.
-        return tuple((0, int(p)) if p.isdigit() else (1, p) for p in re.findall(r"\d+|\D+", section))
-
-    def _build_lane(section_matches: list[dict]) -> dict:
-        nodes: dict[str, str] = {}
-        edges: list[dict] = []
-        seen_hops: set[tuple[str, str]] = set()
-        title = ""
-        for m in section_matches:
-            hop = (m["from_rev"], m["to_rev"])
-            if hop in seen_hops:
-                continue
-            seen_hops.add(hop)
-            title = title or m["title"]
-            if m["before"] and m["from_rev"] not in nodes:
-                nodes[m["from_rev"]] = m["before"]
-            if m["after"]:
-                nodes[m["to_rev"]] = m["after"]
-            edges.append(
-                {
-                    "from_rev": m["from_rev"],
-                    "to_rev": m["to_rev"],
-                    "type": m["type"],
-                    "diff_url": _iddiff_page_url(draft_name, m["from_rev"], m["to_rev"]),
-                }
-            )
-
-        ordered_revs = sorted(nodes.keys(), key=_rev_key)
-        node_list = [{"rev": rev, "text": nodes[rev]} for rev in ordered_revs]
-
-        # Rebuild edges aligned 1:1 with consecutive node pairs -- a matched
-        # hop can skip revisions the query didn't match at all (e.g.
-        # rephrased away and back), leaving no recorded edge directly
-        # between two adjacent nodes. Falling back to a freshly built diff
-        # URL for that exact pair means the caller never has to
-        # special-case a missing connector.
-        edge_by_hop = {(e["from_rev"], e["to_rev"]): e for e in edges}
-        display_edges = []
-        for from_rev, to_rev in zip(ordered_revs, ordered_revs[1:], strict=False):
-            edge = edge_by_hop.get((from_rev, to_rev)) or {
-                "from_rev": from_rev,
-                "to_rev": to_rev,
-                "type": "modified",
-                "diff_url": _iddiff_page_url(draft_name, from_rev, to_rev),
-            }
-            display_edges.append(edge)
-
-        for i, edge in enumerate(display_edges):
-            edge["_candidates"] = _find_discussion_candidates(mailarchive_dataset, node_list[i + 1]["text"])
-
-        return {"section": section_matches[0]["section"], "title": title, "nodes": node_list, "edges": display_edges}
-
     # A bare keyword can genuinely span unrelated places -- a value-setting
     # sentence, a pseudocode listing, a requirements discussion -- each in a
     # different section. Merging all of it into one flat sequence would jump
@@ -1109,12 +1364,21 @@ def decision_thread(
     lanes = []
     for section in sorted_sections:
         _emit("building", f"Building §{section} timeline…")
-        lanes.append(_build_lane(by_section[section]))
+        lanes.append(
+            _build_evolution_lane(
+                by_section[section], draft_name, lambda t: _find_discussion_candidates(mailarchive_dataset, t)
+            )
+        )
 
     if mailarchive_dataset:
         for lane in lanes:
             _judge_lane_discussion(
-                lane, mailarchive_dataset, mailarchive_dataset.tenant_id, model_provider, model_name, on_event=on_event
+                lane,
+                lambda winner: _resolve_discussion_links(mailarchive_dataset, winner),
+                mailarchive_dataset.tenant_id,
+                model_provider,
+                model_name,
+                on_event=on_event,
             )
     for lane in lanes:
         for edge in lane["edges"]:
@@ -1380,7 +1644,9 @@ def resolve_document_text(hint: str) -> dict | None:
             "sections": _segment_document_text(text),
         }
 
-    _, catalog = _list_available_corpora()
+    # include_local_source_lines=False: only `catalog` is read below -- same
+    # discarded-text waste as every other _list_available_corpora call site.
+    _, catalog = _list_available_corpora(include_local_source_lines=False)
     entry = _resolve_draft_hint(hint, catalog)
     if entry is None:
         return None
@@ -2470,7 +2736,6 @@ def ask(
     )
     from dify_graph.model_runtime.entities.model_entities import ModelType
     from extensions.ext_database import db
-    from models.account import Tenant
     from models.dataset import Dataset
 
     dataset_cache: dict[str, Dataset] = {}
@@ -2505,30 +2770,76 @@ def ask(
     evolution_dataset_id_candidate = evolution_dataset_id
     mailarchive_dataset_id_candidate = mailarchive_dataset_id
 
+    # Set below, once, whenever `draft` resolves to exactly one real thing
+    # (dataset or local source) -- this pair is the deterministic decision
+    # "is this a scoped/simple search" (non-None) vs "panorama" (both None),
+    # enforced in _dispatch_tool_call by refusing out-of-scope tool calls
+    # outright rather than only asking the model not to make them in the
+    # prompt. Confirmed live: a prompt-only version of this ("stay within
+    # this draft") was NOT reliably honored across reruns of the exact same
+    # scoped question -- this makes the wrong call impossible to execute,
+    # not just discouraged.
+    scoped_draft_name: str | None = None
+    scoped_rfc_number: str | None = None
+
     # A human-friendly --draft hint (name, RFC number, or WG acronym) is a
     # deterministic fast path, same spirit as the raw dataset-id hints but
     # something an actual person could plausibly type -- resolved eagerly so
     # the agent skips discovery entirely, same efficiency win raw ids give.
     # Doesn't override raw ids if both are somehow given.
     if draft and not (evolution_dataset_id_candidate and mailarchive_dataset_id_candidate):
-        _, draft_catalog = _list_available_corpora(viewer_account_id)
+        # include_local_source_lines=False: only `draft_catalog` (real
+        # datasets) is read below -- _resolve_draft_hint never looks at
+        # local sources at all, so the local-sources text block this
+        # skips was 100% wasted work here too. Confirmed live: this call
+        # alone, left at its default, was still paying the full ~300-
+        # local-source Datatracker-WG-resolution cost on every single
+        # draft-hinted run even after the discovery-TOOL's own call site
+        # got this same fix -- this earlier one runs first, before the
+        # agent's first tool call even happens.
+        _, draft_catalog = _list_available_corpora(viewer_account_id, include_local_source_lines=False)
         resolved = _resolve_draft_hint(draft, draft_catalog)
         if not resolved:
-            known = ", ".join(entry["draft_name"] for entry in draft_catalog) or "(none found)"
-            sys.exit(f"--draft {draft!r} did not match exactly one known draft. Known drafts: {known}")
-        if verbose:
-            print(f"[draft hint] {draft!r} resolved to {resolved['draft_name']}", file=sys.stderr)
-        if not evolution_dataset_id_candidate:
-            evolution_dataset_id_candidate = resolved["evolution_dataset_id"]
-        if not mailarchive_dataset_id_candidate and resolved.get("mailarchive_dataset_id"):
-            mailarchive_dataset_id_candidate = resolved["mailarchive_dataset_id"]
+            # draft_catalog only ever holds real Dify-dataset drafts -- a
+            # draft hint naming a local-only source (Sources tab) legitimately
+            # exists but will never be in there. Confirmed live: this used to
+            # sys.exit() unconditionally here, so the Draft picker's own
+            # (correct, post-fix) local-source entries always failed the
+            # instant anyone actually picked one and asked a question --
+            # exactly the question this draft-hint path exists to make
+            # faster, broken for the majority of what this deployment has.
+            # No dataset ids to pre-seed for a local source (it has none),
+            # so this just proceeds exactly as if no draft hint were given
+            # at all -- the agent still finds it via search_local_drafts_rfc/
+            # search_local_mailarchive, same as always, just without the
+            # dataset-id shortcut a real dataset gets.
+            from services.ietf_import_service import IetfImportService
+
+            local_names = IetfImportService.list_local_source_names(viewer_account_id)
+            is_local = any(name.lower() == draft.strip().lower() for name in local_names)
+            if not is_local:
+                known = ", ".join(entry["draft_name"] for entry in draft_catalog) or "(none found)"
+                sys.exit(f"--draft {draft!r} did not match exactly one known draft. Known drafts: {known}")
+            if verbose:
+                print(f"[draft hint] {draft!r} resolved to a local-only source, no dataset ids to pre-seed", file=sys.stderr)
+            scoped_draft_name = next(name for name in local_names if name.lower() == draft.strip().lower())
+            scoped_rfc_number = IetfImportService.resolve_rfc_number_for_draft(scoped_draft_name)
+        else:
+            if verbose:
+                print(f"[draft hint] {draft!r} resolved to {resolved['draft_name']}", file=sys.stderr)
+            if not evolution_dataset_id_candidate:
+                evolution_dataset_id_candidate = resolved["evolution_dataset_id"]
+            if not mailarchive_dataset_id_candidate and resolved.get("mailarchive_dataset_id"):
+                mailarchive_dataset_id_candidate = resolved["mailarchive_dataset_id"]
+            scoped_draft_name = resolved["draft_name"]
+            scoped_rfc_number = resolved.get("rfc_number")
 
     if evolution_dataset_id_candidate:
         tenant_id = _get_dataset(evolution_dataset_id_candidate).tenant_id
     elif mailarchive_dataset_id_candidate:
         tenant_id = _get_dataset(mailarchive_dataset_id_candidate).tenant_id
     else:
-        tenant_id = db.session.query(Tenant).first().id
+        tenant_id = _resolve_fallback_tenant_id(viewer_account_id)
 
     evolution_tool_name = EVOLUTION_TOOL_NAME
     mailarchive_tool_name = MAILARCHIVE_TOOL_NAME
@@ -2547,6 +2858,12 @@ def ask(
     local_draft_search_tool_name = LOCAL_DRAFT_SEARCH_TOOL_NAME
     local_mail_search_tool_name = LOCAL_MAIL_SEARCH_TOOL_NAME
     add_local_source_tool_name = ADD_LOCAL_SOURCE_TOOL_NAME
+    # Tools that search the wider RFC landscape no matter what arguments
+    # they're given -- refused outright in scoped/simple mode (see
+    # scoped_draft_name's own comment, and _dispatch_tool_call's use of it).
+    _WIDE_SCOPE_TOOL_NAMES = frozenset(
+        {rfc_relations_tool_name, rfc_family_tool_name, rfc_bm25_search_tool_name, rfc_semantic_search_tool_name}
+    )
     tools = _build_tools()
 
     # When hints are given (as every existing battery test script does), tell
@@ -2558,9 +2875,27 @@ def ask(
         known_ids.append(f"evolution dataset_id={evolution_dataset_id_candidate}")
     if mailarchive_dataset_id_candidate:
         known_ids.append(f"mailarchive dataset_id={mailarchive_dataset_id_candidate}")
+    # scoped_draft_name is never covered by known_ids above when it resolved
+    # via a local source (which has no dataset ids at all) -- confirmed
+    # live, that gap meant the model was told (via _NARROW_SCOPE_ADDENDUM)
+    # to "stay within the one draft already selected" without ever being
+    # told which draft that was, and it reasonably answered by asking the
+    # user to name one. Always naming it here, regardless of which path
+    # resolved it, closes that gap.
+    if scoped_draft_name:
+        known_ids.append(
+            f"draft={scoped_draft_name}" + (f" (RFC {scoped_rfc_number})" if scoped_rfc_number else "")
+        )
     hint_suffix = f"\n\n(Already known: {'; '.join(known_ids)}.)" if known_ids else ""
 
     system_instruction = f"{_INSTRUCTION}\n\n{extra_instruction}" if extra_instruction else _INSTRUCTION
+    if extra_instruction:
+        # Exactly one of these, decided by whether an explicit --draft hint
+        # was given (resolved above, real dataset or local source either
+        # way) -- confirmed live, leaving the wide-scope encouragement in
+        # place even when a draft was explicitly selected is why a question
+        # scoped to one draft kept exploring hundreds of unrelated drafts.
+        system_instruction += f"\n\n{_NARROW_SCOPE_ADDENDUM if draft else _WIDE_SCOPE_ADDENDUM}"
     history_messages: list = []
     for turn in history or []:
         history_messages.append(UserPromptMessage(content=turn["query"]))
@@ -2773,7 +3108,9 @@ def ask(
             evidence.extend(numbered_evidence)
         return final
 
-    def _run_tool_call(tool_name: str, args: dict, iteration: int, forced: bool = False) -> str:
+    def _run_tool_call(
+        tool_name: str, args: dict, iteration: int, forced: bool = False, reasoning: str | None = None
+    ) -> str:
         """Thin wrapper around _dispatch_tool_call that records a trace
         entry when the caller asked for one (see ask()'s trace param) --
         kept separate from dispatch itself so every call path (model-
@@ -2825,6 +3162,15 @@ def ask(
                     "forced": forced,
                     "errored": errored,
                     "observation_preview": (observation[:400] + " …") if len(observation) > 400 else observation,
+                    # The model's own one-sentence rationale for this specific
+                    # call (agent_skill.md asks for one before every tool
+                    # call) -- previously only ever sent live via on_event's
+                    # "reasoning" stage, never persisted here, so Research
+                    # activity's reasoning lines vanished the moment a
+                    # session was reopened (fresh page load, no live SSE
+                    # stream to replay them from) even though the "✓ Tool
+                    # Name" checklist itself survived via this same trace.
+                    "reasoning": reasoning or None,
                 }
             )
         return observation
@@ -2836,9 +3182,51 @@ def ask(
         nonlocal evolution_dataset_id_candidate, mailarchive_dataset_id_candidate
         nonlocal last_verify_response
 
+        if scoped_draft_name and tool_name != discovery_tool_name:
+            # Deterministic scope enforcement, not a prompt request -- see
+            # scoped_draft_name's own comment above for why. Two cases:
+            # (1) a tool that only ever searches the WIDER landscape, no
+            # matter what arguments it's given, is refused outright; (2) a
+            # tool that takes a specific draft_name/rfc_number/identifier is
+            # refused only when that argument names something other than
+            # the one draft actually selected -- its own WG's minutes/ballot
+            # history stays fully available (those tools take no such
+            # argument at all, so they never hit this second check).
+            if tool_name in _WIDE_SCOPE_TOOL_NAMES:
+                return (
+                    f"Not available for this question: it's scoped to {scoped_draft_name} only "
+                    "(a specific draft was selected before asking, which rules out the wider "
+                    f"RFC landscape). {tool_name} is a cross-RFC-landscape tool -- stay within "
+                    "this draft's own text and its working group's mail/minutes instead."
+                )
+            candidate = (args.get("draft_name") or args.get("rfc_number") or args.get("identifier") or "").strip()
+            if candidate:
+                candidate_norm = re.sub(r"^rfc\s*", "", candidate.lower())
+                scoped_rfc_norm = re.sub(r"^rfc\s*", "", (scoped_rfc_number or "").lower())
+                matches_draft = candidate.lower() == scoped_draft_name.lower()
+                matches_rfc = bool(scoped_rfc_number) and candidate_norm == scoped_rfc_norm
+                if not (matches_draft or matches_rfc):
+                    return (
+                        f"Not available for this question: it's scoped to {scoped_draft_name} only, "
+                        f"not {candidate!r}. A specific draft was selected before asking -- stay "
+                        "within it rather than following this to a different draft or RFC."
+                    )
+
         if tool_name == discovery_tool_name:
             discovery_called = True
-            catalog_text, catalog = _list_available_corpora(viewer_account_id)
+            # include_local_source_lines=not draft: when a draft hint was
+            # already given (resolved earlier, real dataset or local-only),
+            # the model doesn't need the full local-sources listing for
+            # every OTHER source in the deployment too -- confirmed live,
+            # with ~300 accumulated local sources this alone cost ~600 live
+            # Datatracker round trips PER discovery call (the agent called
+            # it twice in one run), bloating context with hundreds of
+            # unrelated drafts and contributing to that run's eventual LLM
+            # response timeouts, independent of how narrow the actual
+            # question was.
+            catalog_text, catalog = _list_available_corpora(
+                viewer_account_id, include_local_source_lines=not draft
+            )
             if verbose:
                 print(f"[iter {iteration}] {tool_name}", file=sys.stderr)
             if len(catalog) == 1:
@@ -3062,7 +3450,7 @@ def ask(
         return f"there is no tool named {tool_name}"
 
     def _force_tool_call(tool_name: str, args: dict, content: str, iteration: int) -> None:
-        observation = _run_tool_call(tool_name, args, iteration, forced=True)
+        observation = _run_tool_call(tool_name, args, iteration, forced=True, reasoning=content.strip() or None)
         forced_call_id = str(uuid.uuid4())
         prompt_messages.append(
             AssistantPromptMessage(
@@ -3209,7 +3597,7 @@ def ask(
                 args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
             except json.JSONDecodeError:
                 args = {}
-            observation = _run_tool_call(tool_call.function.name, args, iteration)
+            observation = _run_tool_call(tool_call.function.name, args, iteration, reasoning=content.strip() or None)
             prompt_messages.append(
                 ToolPromptMessage(content=observation, tool_call_id=tool_call.id, name=tool_call.function.name)
             )

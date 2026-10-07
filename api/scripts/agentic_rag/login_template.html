@@ -3,6 +3,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sign in — Prism</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <style>
   /* Same token set as serve_ui_template.html -- kept in sync by hand since
      this is a separate small page, not because the values should diverge. */
@@ -99,6 +100,11 @@
   }
   .error-box.visible { display: block; }
   .form-footnote { text-align: center; font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 18px; }
+  .form-footnote a {
+    color: var(--accent); text-decoration: none;
+  }
+  .form-footnote a:hover { text-decoration: underline; }
+  .form-hint { font-size: var(--text-xs); color: var(--text-tertiary); margin: 6px 0 0; }
 
   /* Below this, the hero panel adds more weight than it earns on a phone-
      width screen -- collapse to just the form, same breakpoint spirit as
@@ -157,8 +163,8 @@
           <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
         </svg>
       </div>
-      <h2>Welcome back</h2>
-      <p class="form-sub">Sign in to continue to Prism</p>
+      <h2 id="cardTitle">Welcome back</h2>
+      <p class="form-sub" id="cardSub">Sign in to continue to Prism</p>
 
       __GOOGLE_BUTTON__
 
@@ -169,8 +175,21 @@
         <input id="password" type="password" autocomplete="current-password" required>
         <button type="submit" class="btn-primary" id="submitBtn">Sign in</button>
       </form>
+
+      <form id="signupForm" hidden>
+        <label for="suEmail">Email</label>
+        <input id="suEmail" type="email" autocomplete="email" required>
+        <label for="suPassword">Create a password</label>
+        <input id="suPassword" type="password" autocomplete="new-password" required>
+        <label for="suPasswordConfirm">Confirm password</label>
+        <input id="suPasswordConfirm" type="password" autocomplete="new-password" required>
+        <p class="form-hint">At least 8 characters, with letters and numbers.</p>
+        <button type="submit" class="btn-primary" id="signupSubmitBtn">Create account</button>
+      </form>
+
       <div class="error-box" id="errorBox"></div>
-      <p class="form-footnote">New here? Use "Sign in with Google" above -- it creates your account automatically.</p>
+      <p class="form-footnote" id="footnoteLogin">First time here? <a href="#" id="toggleSignup">Create an account</a>.</p>
+      <p class="form-footnote" id="footnoteSignup" hidden>Already have an account? <a href="#" id="toggleLogin">Sign in</a>.</p>
     </div>
   </div>
 </div>
@@ -202,9 +221,36 @@ function showError(message) {
   errorBox.classList.add('visible');
 }
 
+function clearError() {
+  errorBox.classList.remove('visible');
+}
+
+function errorMessage(data, fallback) {
+  // Dify's own BaseHTTPException shape is {code, message, status} --
+  // data.data is the earlier /console/api/login convention this page's
+  // login handler below already reads, kept as a second fallback in case
+  // either endpoint ever returns that shape instead.
+  return data.message || data.data || fallback;
+}
+
+async function doLogin(email, password) {
+  const res = await fetch(`${API_BASE}/console/api/login`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password: btoa(password),
+      remember_me: true,
+    }),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok && data.result === 'success', data };
+}
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
-  errorBox.classList.remove('visible');
+  clearError();
   submitBtn.disabled = true;
   submitBtn.textContent = 'Signing in…';
 
@@ -212,27 +258,108 @@ form.addEventListener('submit', async (e) => {
   const password = document.getElementById('password').value;
 
   try {
-    const res = await fetch(`${API_BASE}/console/api/login`, {
+    const { ok, data } = await doLogin(email, password);
+    if (ok) {
+      window.location.href = `${PRISM_PREFIX}/`;
+      return;
+    }
+    showError(errorMessage(data, 'Sign in failed -- check your email and password.'));
+  } catch {
+    showError(`Couldn't reach the login service at ${API_BASE}. Is the api container running?`);
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Sign in';
+  }
+});
+
+// ---- Sign up: no email-verification step -- this deployment's mail
+// provider was never fully configured (MAIL_DEFAULT_SEND_FROM unset), so
+// the real send-code-by-email flow can't reach anyone yet. Per explicit
+// direction this skips verification entirely: an email + a self-chosen
+// password is enough. POSTs to this standalone page's OWN /api/signup
+// route (serve_ui.py), not the real Dify api service -- that route still
+// calls Dify's real AccountService.create_account_and_tenant/login
+// directly (see its own docstring), it's just not reachable through
+// Dify's console-auth HTTP endpoints, which require a verified code.
+const cardTitle = document.getElementById('cardTitle');
+const cardSub = document.getElementById('cardSub');
+const footnoteLogin = document.getElementById('footnoteLogin');
+const footnoteSignup = document.getElementById('footnoteSignup');
+const signupForm = document.getElementById('signupForm');
+const signupSubmitBtn = document.getElementById('signupSubmitBtn');
+const suEmailInput = document.getElementById('suEmail');
+const suPasswordInput = document.getElementById('suPassword');
+const suPasswordConfirmInput = document.getElementById('suPasswordConfirm');
+
+function resetSignup() {
+  suEmailInput.value = '';
+  suPasswordInput.value = '';
+  suPasswordConfirmInput.value = '';
+  signupSubmitBtn.textContent = 'Create account';
+}
+
+function showSignup() {
+  clearError();
+  resetSignup();
+  form.hidden = true;
+  signupForm.hidden = false;
+  footnoteLogin.hidden = true;
+  footnoteSignup.hidden = false;
+  cardTitle.textContent = 'Create your account';
+  cardSub.textContent = 'Sign up with your email to get started';
+}
+
+function showLogin() {
+  clearError();
+  signupForm.hidden = true;
+  form.hidden = false;
+  footnoteSignup.hidden = true;
+  footnoteLogin.hidden = false;
+  cardTitle.textContent = 'Welcome back';
+  cardSub.textContent = 'Sign in to continue to Prism';
+}
+
+document.getElementById('toggleSignup').addEventListener('click', (e) => {
+  e.preventDefault();
+  showSignup();
+});
+document.getElementById('toggleLogin').addEventListener('click', (e) => {
+  e.preventDefault();
+  showLogin();
+});
+
+signupForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  clearError();
+  signupSubmitBtn.disabled = true;
+  signupSubmitBtn.textContent = 'Creating account…';
+
+  const email = suEmailInput.value.trim();
+  const password = suPasswordInput.value;
+  const confirm = suPasswordConfirmInput.value;
+
+  try {
+    if (password !== confirm) {
+      showError('Passwords do not match.');
+      return;
+    }
+    const res = await fetch(`${PRISM_PREFIX}/api/signup`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        email,
-        password: btoa(password),
-        remember_me: true,
-      }),
+      body: JSON.stringify({ email, password, password_confirm: confirm }),
     });
     const data = await res.json().catch(() => ({}));
     if (res.ok && data.result === 'success') {
       window.location.href = `${PRISM_PREFIX}/`;
       return;
     }
-    showError(data.data || data.message || 'Sign in failed -- check your email and password.');
+    showError(errorMessage(data, 'Could not create the account.'));
   } catch {
-    showError(`Couldn't reach the login service at ${API_BASE}. Is the api container running?`);
+    showError(`Couldn't reach the login service. Is the ietf_decision_agent_ui container running?`);
   } finally {
-    submitBtn.disabled = false;
-    submitBtn.textContent = 'Sign in';
+    signupSubmitBtn.disabled = false;
+    signupSubmitBtn.textContent = 'Create account';
   }
 });
 </script>

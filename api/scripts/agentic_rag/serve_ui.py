@@ -335,6 +335,13 @@ _SPECTRUM_PORT = 8766
 # this loads on every visit to the login page, unauthenticated, so size
 # matters here in a way it doesn't for the rest of this app.
 _LOGIN_HERO_JPEG = (Path(__file__).parent / "prism_hero.jpg").read_bytes()
+# Every page's own <link rel="icon"> points here -- without one, a browser
+# falls back to probing the bare domain's /favicon.ico, which (since
+# neither this app nor nginx ever defined one) fell through to whatever
+# the real Dify web console happens to serve there instead. A simple
+# triangle in this app's own title-gradient colors (--po-accent ->
+# --po-purple -> --po-cyan) reads as "a prism" even at 16x16.
+_FAVICON_SVG = (Path(__file__).parent / "prism_favicon.svg").read_bytes()
 
 # Standard 4-color Google "G" mark -- used on the login page's OAuth button.
 _GOOGLE_ICON_SVG = (
@@ -618,7 +625,7 @@ def _tenant_has_custom_credential(tenant_id: str, provider: str) -> bool:
 
 
 def main() -> None:
-    from flask import g, jsonify, redirect, request
+    from flask import g, jsonify, make_response, redirect, request
 
     app = create_app()
 
@@ -633,7 +640,7 @@ def main() -> None:
         # the form that logs them in (or the hero image it displays) --
         # everything else in this app is gated, these two routes are the
         # deliberate exception.
-        if path in ("/login", "/login-hero.jpg"):
+        if path in ("/login", "/login-hero.jpg", "/favicon.svg", "/api/signup"):
             return None
         account = _authenticate_console_request(request)
         if account is None:
@@ -651,6 +658,90 @@ def main() -> None:
     @app.route(f"{_URL_PREFIX}/login-hero.jpg", methods=["GET"])
     def login_hero():
         return _LOGIN_HERO_JPEG, 200, {"Content-Type": "image/jpeg", "Cache-Control": "public, max-age=86400"}
+
+    @app.route(f"{_URL_PREFIX}/favicon.svg", methods=["GET"])
+    def favicon():
+        return _FAVICON_SVG, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400"}
+
+    @app.route(f"{_URL_PREFIX}/api/signup", methods=["POST"])
+    def signup():
+        """Self-service account creation with no email-verification step --
+        the real /console/api/email-register/* flow (send-email -> validity
+        -> email-register) needs a working mail provider to deliver the
+        code, and this deployment's MAIL_DEFAULT_SEND_FROM was never set
+        (confirmed live: every send attempt fails with "mail from is not
+        set" in the worker logs), so that flow can't actually reach anyone
+        right now. Per explicit direction, this skips verification entirely
+        rather than wait on mail setup: an email + a self-chosen password is
+        enough to get an account.
+
+        Still "replicates Dify's business logic, not reimplementing it" the
+        same way the task asked for the real flow: every step below calls
+        Dify's own AccountService/libs functions directly (the exact same
+        ones /console/api/email-register's own final step calls), never a
+        hand-rolled account-creation path. The one real difference from
+        that endpoint is the last step -- it returns a raw token pair as
+        JSON with no cookies set; this sets the real access/refresh/csrf
+        cookies itself via the same set_*_token_to_cookie helpers
+        /console/api/login uses, so the new account is actually logged in
+        on return, with no second request needed.
+        """
+        from sqlalchemy.orm import sessionmaker
+
+        from constants.languages import languages
+        from extensions.ext_database import db
+        from libs.helper import email as validate_email_format
+        from libs.helper import extract_remote_ip
+        from libs.password import valid_password
+        from libs.token import set_access_token_to_cookie, set_csrf_token_to_cookie, set_refresh_token_to_cookie
+        from services.account_service import AccountService
+        from services.errors.account import AccountRegisterError
+
+        payload = request.get_json(silent=True) or {}
+        raw_email = (payload.get("email") or "").strip()
+        password = payload.get("password") or ""
+        password_confirm = payload.get("password_confirm") or ""
+
+        try:
+            normalized_email = validate_email_format(raw_email).lower()
+        except ValueError as exc:
+            return jsonify({"message": str(exc)}), 400
+
+        if password != password_confirm:
+            return jsonify({"message": "The passwords do not match."}), 400
+        try:
+            valid_password(password)
+        except ValueError as exc:
+            return jsonify({"message": str(exc)}), 400
+
+        with sessionmaker(db.engine).begin() as session:
+            existing = AccountService.get_account_by_email_with_case_fallback(normalized_email, session=session)
+            if existing:
+                return jsonify({"message": "A user with this email already exists."}), 400
+            try:
+                account = AccountService.create_account_and_tenant(
+                    email=normalized_email,
+                    name=normalized_email,
+                    password=password,
+                    interface_language=languages[0],
+                )
+            except AccountRegisterError:
+                return jsonify(
+                    {
+                        "message": (
+                            "This email was deleted within the past 30 days and is temporarily "
+                            "unavailable for new account registration."
+                        )
+                    }
+                ), 400
+            token_pair = AccountService.login(account=account, ip_address=extract_remote_ip(request))
+            AccountService.reset_login_error_rate_limit(normalized_email)
+
+        response = make_response(jsonify({"result": "success"}))
+        set_access_token_to_cookie(request, response, token_pair.access_token)
+        set_refresh_token_to_cookie(request, response, token_pair.refresh_token)
+        set_csrf_token_to_cookie(request, response, token_pair.csrf_token)
+        return response
 
     @app.route(f"{_URL_PREFIX}/", methods=["GET"])
     def index():
@@ -768,7 +859,11 @@ def main() -> None:
         from services.ietf_import_service import IetfImportService
 
         try:
-            _text, catalog = _list_available_corpora(g.account.id)
+            # include_local_source_lines=False: this route only ever reads
+            # `catalog` below, never the formatted text -- see that flag's
+            # own docstring for why leaving it at its (ask()-oriented)
+            # default made this single endpoint take 87s+ here.
+            _text, catalog = _list_available_corpora(g.account.id, include_local_source_lines=False)
             # catalog only ever holds real Dify-dataset drafts (see
             # _list_available_corpora's own docstring -- local sources are
             # deliberately kept out of it since other callers rely on every
@@ -859,7 +954,13 @@ def main() -> None:
 
         viewer_account_id = g.account.id
         try:
-            _text, catalog = _list_available_corpora(viewer_account_id)
+            # include_local_source_lines=False: this route does its own
+            # separate, paginated local-source WG/rfc_number resolution
+            # below (see this function's own docstring) -- the formatted
+            # text _list_available_corpora would otherwise build here is
+            # never read, just an extra ~87s of redundant live Datatracker
+            # calls on top of the paginated work this route already does.
+            _text, catalog = _list_available_corpora(viewer_account_id, include_local_source_lines=False)
         except Exception as exc:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
@@ -1406,7 +1507,11 @@ def main() -> None:
         # Known RFC numbers this instance already has -- real corpora and
         # already-added local sources alike -- so the UI can badge/pre-uncheck
         # them instead of offering to "add" something already tracked.
-        _text, catalog = _list_available_corpora(g.account.id)
+        # include_local_source_lines=False: only `catalog` is read below --
+        # local sources' own RFC numbers are resolved separately right
+        # after this, via the cheap per-draft resolve_rfc_number_for_draft,
+        # not the expensive live-WG text block this flag skips.
+        _text, catalog = _list_available_corpora(g.account.id, include_local_source_lines=False)
         known_rfc_numbers = {str(entry["rfc_number"]) for entry in catalog if entry.get("rfc_number")}
         for draft_name in IetfImportService.list_local_source_names(g.account.id):
             rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
@@ -1900,7 +2005,9 @@ def main() -> None:
                 "is_owner": is_owner,
                 "shared": AgenticRagSessionService.get_session_shared(session_id),
                 "owner_email": owner_email,
-                "updated_at": session.updated_at.isoformat(),
+                # +"Z": naive datetime that's actually UTC -- see
+                # AgenticRagSessionService.list_sessions' own note on why.
+                "updated_at": session.updated_at.isoformat() + "Z",
             }
         )
 
