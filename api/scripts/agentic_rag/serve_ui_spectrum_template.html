@@ -1138,15 +1138,11 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       </div>
       <div class="filter-toggle-row" id="poSourceFilterToggles">
         <button type="button" class="filter-toggle" data-filter="mail" role="switch" aria-checked="false" title="Only sources with WG mail indexed">
-          <span class="switch-label">Has email</span>
+          <span class="switch-label">Email</span>
           <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
         </button>
         <button type="button" class="filter-toggle" data-filter="rfc" role="switch" aria-checked="false" title="Only drafts already published as an RFC">
-          <span class="switch-label">Published as RFC</span>
-          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
-        </button>
-        <button type="button" class="filter-toggle" data-filter="draft" role="switch" aria-checked="false" title="Only drafts not yet published as an RFC">
-          <span class="switch-label">Draft only (not RFC)</span>
+          <span class="switch-label">Published</span>
           <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
         </button>
       </div>
@@ -3870,7 +3866,6 @@ function loadSourcesChunk() {
   if (q) params.set('q', q);
   if (activeFilterToggles.has('mail')) params.set('has_mail', 'true');
   if (activeFilterToggles.has('rfc')) params.set('is_rfc', 'true');
-  if (activeFilterToggles.has('draft')) params.set('is_rfc', 'false');
   const mySeq = ++sourceFetchSeq;
   fetch(`${PRISM_PREFIX}/api/corpora/freshness?${params}`).then((r) => r.json()).then((data) => {
     if (mySeq !== sourceFetchSeq) return; // superseded by a newer filter/load-more call
