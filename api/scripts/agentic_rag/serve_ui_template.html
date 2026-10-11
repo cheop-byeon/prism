@@ -775,6 +775,19 @@
     font-size: var(--text-2xs); font-weight: 600; color: var(--text-dim); border: 1px solid var(--border);
     border-radius: var(--radius-md); padding: 1px 8px; margin-left: auto;
   }
+  .corpus-stats-row + .corpus-stats-row { margin-top: 2px; }
+  .corpus-stats-row-label {
+    font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-quaternary); margin: 10px 0 4px;
+  }
+  .corpus-stats-row-label:first-child { margin-top: 0; }
+  .filter-toggle-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .filter-toggle {
+    width: auto; background: var(--panel-2); color: var(--text-dim); border: 1px solid var(--border);
+    border-radius: var(--radius-md); padding: 6px 14px; font-size: var(--text-xs); font-weight: 600;
+  }
+  .filter-toggle:hover { border-color: var(--text-quaternary); }
+  .filter-toggle.active { background: var(--accent); color: #0a0e1a; border-color: var(--accent); }
   .draft-suggest-wrap { position: relative; flex: 1; min-width: 0; }
   .draft-suggest-wrap input { width: 100%; }
   .draft-suggest-wrap input:read-only { color: var(--text-dim); cursor: default; background: var(--panel); }
@@ -1131,8 +1144,14 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       attaches or indexes into a real Dify dataset; that's still a manual Studio step, same as
       every registered corpus below was originally built.
     </p>
+    <div id="corpusStatsRow"></div>
     <div class="sources-toolbar">
       <button id="addSourceOpenBtn" type="button" class="btn-primary"><svg class="icon"><use href="#icon-plus"/></svg>Add source</button>
+    </div>
+    <div class="filter-toggle-row" id="sourceFilterToggles">
+      <button type="button" class="filter-toggle" data-filter="mail" title="Only sources with WG mail indexed">Has email</button>
+      <button type="button" class="filter-toggle" data-filter="rfc" title="Only drafts already published as an RFC">Published as RFC</button>
+      <button type="button" class="filter-toggle" data-filter="draft" title="Only drafts not yet published as an RFC">Draft only (not RFC)</button>
     </div>
     <div id="corporaList"><div class="loading">Loading…</div></div>
 
@@ -1727,6 +1746,12 @@ async function loadModels() {
 }
 
 let corporaData = [];
+// Independent on/off toggles (AND'd together when more than one is
+// active) -- client-side only, since loadCorpora() already fetches the
+// full unpaginated list (see its own docstring), re-filtering corporaData
+// in place is cheaper than a round trip and keeps already-expanded rows'
+// indices stable.
+const activeFilterToggles = new Set();
 // Which source rows are currently expanded -- tracked separately from the
 // render itself so an action button clicked *inside* an expanded row (Sync,
 // Build index, ...) doesn't collapse it back on the re-render that follows.
@@ -1769,7 +1794,13 @@ function sourceSummary(c) {
 
 function renderCorpora(corpora) {
   if (!corpora.length) return '<p class="empty-state">No corpora found.</p>';
-  const rows = corpora.map((c, idx) => {
+  // idx must be the row's position in the GLOBAL corporaData array, not
+  // this (possibly filtered) list -- every action handler below looks up
+  // corporaData[idx] directly. indexOf is safe here since corpora is
+  // always either corporaData itself or a .filter() of it, which keeps
+  // the same object references.
+  const rows = corpora.map((c) => {
+    const idx = corporaData.indexOf(c);
     const rfc = c.rfc_number ? `<span class="rfc">RFC ${escapeHtml(String(c.rfc_number))}</span>` : '';
 
     const localBadge = c.is_local ? '<span class="local-badge">local only</span>' : '';
@@ -2450,10 +2481,79 @@ async function loadCorpora() {
     const res = await fetch(`${PRISM_PREFIX}/api/corpora/freshness`);
     const data = await res.json();
     corporaData = data.corpora || [];
-    container.innerHTML = renderCorpora(corporaData);
+    renderFilteredCorpora();
     corporaData.forEach(startEmbedPollingIfNeeded);
   } catch (err) {
     container.innerHTML = `<div class="error-box">${escapeHtml(String(err))}</div>`;
+  }
+  loadCorpusStats();
+}
+
+function renderFilteredCorpora() {
+  const container = document.getElementById('corporaList');
+  let filtered = corporaData;
+  if (activeFilterToggles.has('mail')) filtered = filtered.filter((c) => c.has_wg_mail === true);
+  if (activeFilterToggles.has('rfc')) filtered = filtered.filter((c) => c.is_rfc === true);
+  if (activeFilterToggles.has('draft')) filtered = filtered.filter((c) => c.is_rfc === false);
+  container.innerHTML = renderCorpora(filtered);
+}
+
+document.getElementById('sourceFilterToggles').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-filter]');
+  if (!btn) return;
+  const key = btn.dataset.filter;
+  if (activeFilterToggles.has(key)) activeFilterToggles.delete(key);
+  else activeFilterToggles.add(key);
+  btn.classList.toggle('active', activeFilterToggles.has(key));
+  renderFilteredCorpora();
+});
+
+// Corpus-wide stats (RFC/draft counts, revisions per draft, WG mail
+// coverage) -- a small cache the backend builds offline (see
+// build_corpus_stats.py), not computed from this page's own per-source
+// data, so this fetch is independent of loadCorpora()'s own fetch/render
+// and just no-ops (renders nothing) until that cache exists at least once.
+async function loadCorpusStats() {
+  const row = document.getElementById('corpusStatsRow');
+  try {
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/stats`);
+    const data = await res.json();
+    if (!data.available) { row.innerHTML = ''; return; }
+    const pct = (data.ratio_rfcs_with_mail * 100).toFixed(0);
+    // Three rows, basics -> coverage -> derived averages, rather than one
+    // flat list -- confirmed live that 8 same-sized tiles in a row read as
+    // an undifferentiated wall of numbers with no way to tell "this is a
+    // total" from "this is a ratio of two other tiles" apart.
+    const rows = [
+      ['Corpus', [
+        ['RFCs pulled', data.total_rfcs.toLocaleString()],
+        ['Working groups', data.total_wgs.toLocaleString()],
+      ]],
+      ['Email detail', [
+        ['Raw emails', data.total_raw_emails.toLocaleString()],
+        ['Mail threads', data.total_mail_threads.toLocaleString()],
+        ['Mail files (yearly)', data.total_mail_files.toLocaleString()],
+      ]],
+      ['Coverage', [
+        ['WGs with email', `${data.wgs_with_mail.toLocaleString()} of ${data.total_wgs.toLocaleString()}`],
+        ['RFCs with WG mail', `${data.rfcs_with_wg_mail.toLocaleString()} of ${data.total_rfcs.toLocaleString()} (${pct}%)`],
+      ]],
+      ['Averages', [
+        ['Revisions / RFC', data.avg_revisions_per_draft.toFixed(1)],
+        ['Threads / RFC (with mail)', data.avg_emails_per_rfc.toFixed(1)],
+        ['Threads / WG (with mail)', data.avg_emails_per_wg.toFixed(1)],
+      ]],
+    ];
+    row.innerHTML = rows.map(([rowLabel, stats]) => `
+      <p class="corpus-stats-row-label">${rowLabel}</p>
+      <div class="observability-stats corpus-stats-row">
+        ${stats.map(([label, value]) =>
+          `<div class="observability-stat"><span class="stat-value">${value}</span><span class="stat-label">${label}</span></div>`
+        ).join('')}
+      </div>
+    `).join('');
+  } catch {
+    row.innerHTML = '';
   }
 }
 

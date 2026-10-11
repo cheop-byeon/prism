@@ -141,6 +141,13 @@ class LocalSourceIndexService:
                         record = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if not isinstance(record, dict):
+                        # A handful of lines in a few WGs' threaded output
+                        # parse as a bare JSON scalar (e.g. a stray number)
+                        # rather than an object -- confirmed live for
+                        # mipshop, which crashed build_mail_index entirely
+                        # on a single malformed line otherwise.
+                        continue
                     text = f"{record.get('subject', '')}\n{record.get('body', '')}"
                     documents.append(
                         {

@@ -268,6 +268,13 @@
   }
   .po-primary:hover { filter: brightness(1.08); }
   .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
+  .filter-toggle-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  .filter-toggle {
+    background: var(--po-paper); color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px;
+    padding: 8px 14px; font-size: 12px; font-weight: 600; width: auto;
+  }
+  .filter-toggle:hover { border-color: var(--po-accent); }
+  .filter-toggle.active { background: var(--po-accent); color: #fff; border-color: var(--po-accent); }
   .po-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .po-linkbutton { background: transparent; color: var(--po-accent); font-size: 12px; padding: 0; text-align: left; }
   .po-linkbutton:hover { text-decoration: underline; }
@@ -507,6 +514,12 @@
   .pm-groupfoot { border-top: 1px solid var(--po-line); padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 11px; color: var(--po-muted); flex-wrap: wrap; }
   .pm-queue { padding: 14px 18px; border-left: 2px solid var(--po-cyan); background: var(--po-soft); border-radius: 0 8px 8px 0; margin-top: 18px; font-size: 12px; line-height: 1.7; }
   .pm-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 18px 0 26px; }
+  #poSourceStatsRow .pm-metrics { margin: 10px 0; }
+  .pm-metrics-row-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--po-muted); margin: 14px 0 6px;
+  }
+  .pm-metrics-row-label:first-child { margin-top: 0; }
   .pm-metric { padding: 16px; background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 10px; }
   .pm-metric small { font-size: 11px; color: var(--po-muted); }
   .pm-metric strong { display: block; font-size: 26px; letter-spacing: -0.5px; font-weight: 500; margin: 8px 0 3px; }
@@ -1103,8 +1116,14 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <div><h1 class="po-title">From archive to evidence.</h1><p>Manage downloaded content and the indexes that make it searchable.</p></div>
         <button class="po-primary" type="button" id="poSourceAddOpenBtn"><span>+</span>Add source</button>
       </div>
+      <div id="poSourceStatsRow"></div>
       <div class="ps-filters">
         <input id="poSourceFilterText" class="ps-librarysearch" placeholder="Filter by RFC, draft, or working group…" aria-label="Filter sources">
+      </div>
+      <div class="filter-toggle-row" id="poSourceFilterToggles">
+        <button type="button" class="filter-toggle" data-filter="mail" title="Only sources with WG mail indexed">Has email</button>
+        <button type="button" class="filter-toggle" data-filter="rfc" title="Only drafts already published as an RFC">Published as RFC</button>
+        <button type="button" class="filter-toggle" data-filter="draft" title="Only drafts not yet published as an RFC">Draft only (not RFC)</button>
       </div>
       <!-- Right under the filters, not after the source list -- that list
            can run to 40+ cards, and a status message appended after it
@@ -3712,6 +3731,55 @@ function runUsage() {
 // idempotent), not two different mechanisms. -----------------------------
 function loadSourcesPage() {
   fetchSources();
+  loadSourceStats();
+}
+
+// Corpus-wide stats (RFC/draft counts, revisions per draft, WG mail
+// coverage) -- a small cache the backend builds offline (see
+// build_corpus_stats.py), independent of fetchSources()'s own per-source
+// list; no-ops (renders nothing) until that cache exists at least once.
+async function loadSourceStats() {
+  const row = document.getElementById('poSourceStatsRow');
+  try {
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/stats`);
+    const data = await res.json();
+    if (!data.available) { row.innerHTML = ''; return; }
+    const pct = (data.ratio_rfcs_with_mail * 100).toFixed(0);
+    // Three rows, basics -> coverage -> derived averages, rather than one
+    // flat grid -- confirmed live that same-sized tiles with no grouping
+    // read as an undifferentiated wall of numbers, with no way to tell
+    // "this is a total" from "this is a ratio of two other tiles" apart.
+    const rows = [
+      ['Corpus', [
+        ['RFCs pulled', data.total_rfcs.toLocaleString(), ''],
+        ['Working groups', data.total_wgs.toLocaleString(), ''],
+      ]],
+      ['Email detail', [
+        ['Raw emails', data.total_raw_emails.toLocaleString(), 'individual messages'],
+        ['Mail threads', data.total_mail_threads.toLocaleString(), 'post-processed, searchable'],
+        ['Mail files', data.total_mail_files.toLocaleString(), 'one per WG per year'],
+      ]],
+      ['Coverage', [
+        ['WGs with email', `${data.wgs_with_mail.toLocaleString()} of ${data.total_wgs.toLocaleString()}`, ''],
+        ['RFCs with WG mail', `${data.rfcs_with_wg_mail.toLocaleString()} of ${data.total_rfcs.toLocaleString()}`, `${pct}%`],
+      ]],
+      ['Averages', [
+        ['Revisions / RFC', data.avg_revisions_per_draft.toFixed(1), ''],
+        ['Threads / RFC (with mail)', data.avg_emails_per_rfc.toFixed(1), ''],
+        ['Threads / WG (with mail)', data.avg_emails_per_wg.toFixed(1), ''],
+      ]],
+    ];
+    row.innerHTML = rows.map(([rowLabel, metrics]) => `
+      <p class="pm-metrics-row-label">${escapeHtml(rowLabel)}</p>
+      <div class="pm-metrics">
+        ${metrics.map(([label, value, sub]) =>
+          `<div class="pm-metric"><small>${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong>${sub ? `<span>${escapeHtml(sub)}</span>` : ''}</div>`
+        ).join('')}
+      </div>
+    `).join('');
+  } catch {
+    row.innerHTML = '';
+  }
 }
 function setSourceQueueText(text) {
   const queueEl = document.getElementById('poSourceQueue');
@@ -3747,6 +3815,11 @@ const SOURCE_PAGE_SIZE = 12;
 let sourceCorpora = [];
 let wgResourceState = {};
 let sourceOffset = 0;
+// Independent on/off toggles (AND'd together when more than one is
+// active), sent as has_mail/is_rfc query params to /api/corpora/freshness
+// -- same reset-to-page-1-and-refetch pattern as the text filter (see
+// fetchSources()'s own comment above).
+const activeFilterToggles = new Set();
 // This endpoint can take anywhere from a couple seconds to ~90s depending
 // on how many not-yet-resolved local sources land on the page (see
 // api_corpora_freshness's own docstring) -- confirmed live that typing a
@@ -3770,6 +3843,9 @@ function loadSourcesChunk() {
   const q = document.getElementById('poSourceFilterText').value.trim();
   const params = new URLSearchParams({ page_size: String(SOURCE_PAGE_SIZE), offset: String(sourceOffset) });
   if (q) params.set('q', q);
+  if (activeFilterToggles.has('mail')) params.set('has_mail', 'true');
+  if (activeFilterToggles.has('rfc')) params.set('is_rfc', 'true');
+  if (activeFilterToggles.has('draft')) params.set('is_rfc', 'false');
   const mySeq = ++sourceFetchSeq;
   fetch(`${PRISM_PREFIX}/api/corpora/freshness?${params}`).then((r) => r.json()).then((data) => {
     if (mySeq !== sourceFetchSeq) return; // superseded by a newer filter/load-more call
@@ -4295,6 +4371,15 @@ let sourceFilterDebounce = null;
 document.getElementById('poSourceFilterText').addEventListener('input', () => {
   clearTimeout(sourceFilterDebounce);
   sourceFilterDebounce = setTimeout(fetchSources, 300);
+});
+document.getElementById('poSourceFilterToggles').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-filter]');
+  if (!btn) return;
+  const key = btn.dataset.filter;
+  if (activeFilterToggles.has(key)) activeFilterToggles.delete(key);
+  else activeFilterToggles.add(key);
+  btn.classList.toggle('active', activeFilterToggles.has(key));
+  fetchSources();
 });
 
 // -- Add-source dialog -- a real <dialog> with two tabs, matching classic's

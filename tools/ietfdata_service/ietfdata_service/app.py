@@ -753,6 +753,20 @@ def _query_message_headers(
     from_addr, when provided, is pushed into SQL as a case-insensitive substring
     filter against both the address and display-name columns, avoiding a full
     Python-side scan of every row in the date range.
+
+    Filters on COALESCE(h.date, m.date_received), not m.date_received alone --
+    m.date_received is IMAP's INTERNALDATE (mailarchive3's MailingList.update()
+    sets it from the server's own INTERNALDATE field), which is when a message
+    was appended to the IMAP mailbox, not when it was actually sent. For a
+    list whose whole historical archive was bulk-imported into IMAP in one
+    go, every message's INTERNALDATE clusters around that one import event
+    regardless of the real decades-old send dates -- confirmed live against
+    ospf (4,416 messages, only ~100 distinct date_received values, all within
+    one window) vs. its real header dates, once indexed, spanning its actual
+    history. h.date is the real parsed "Date:" header (see _parse_hdr_date),
+    only present once reindex() has run for that list -- COALESCE falls back
+    to date_received for any message reindex() still couldn't parse a date
+    out of, rather than dropping it from every query.
     """
     params: list[object] = [ml_name, uidvalidity, rx_after, rx_before]
     from_clause = ""
@@ -769,8 +783,8 @@ def _query_message_headers(
         LEFT JOIN ietf_ma_hdr h ON h.message_num = m.message_num
         WHERE  m.mailing_list  = ?
           AND  m.uidvalidity   = ?
-          AND  m.date_received > ?
-          AND  m.date_received < ?{from_clause}
+          AND  COALESCE(h.date, m.date_received) > ?
+          AND  COALESCE(h.date, m.date_received) < ?{from_clause}
         GROUP BY COALESCE(h.message_id, CAST(m.message_num AS TEXT))
     """
     return archive._db.cursor().execute(sql, params).fetchall()

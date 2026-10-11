@@ -917,6 +917,31 @@ def main() -> None:
             return jsonify({"error": f"Couldn't find or fetch a document for {hint!r}."}), 404
         return jsonify(result)
 
+    @app.route(f"{_URL_PREFIX}/api/corpora/stats", methods=["GET"])
+    def api_corpora_stats():
+        """Aggregate corpus-wide statistics for the Sources tab's stats
+        panel -- RFC/draft counts, revisions per draft, WG mail coverage.
+
+        Reads a small cache file (storage/ietf-downloads/index/_corpus_stats.json)
+        rather than computing live: some per-WG mail index files are
+        100MB+, and scanning all of them on every Sources page load would
+        make this the slowest thing on the page for no benefit, since the
+        corpus only changes when a bulk pull/index run happens, not on
+        every request. Re-built by scripts/agentic_rag/build_corpus_stats.py,
+        run manually after a bulk pull -- not on any automatic schedule.
+        """
+        import json
+        from pathlib import Path
+
+        cache_path = Path("/app/api/storage/ietf-downloads/index/_corpus_stats.json")
+        if not cache_path.is_file():
+            return jsonify({"available": False})
+        try:
+            stats = json.loads(cache_path.read_text())
+        except (json.JSONDecodeError, OSError) as exc:
+            return jsonify({"available": False, "error": str(exc)})
+        return jsonify({"available": True, **stats})
+
     @app.route(f"{_URL_PREFIX}/api/corpora/freshness", methods=["GET"])
     def api_corpora_freshness():
         """Per-corpus live state for the Corpora tab -- what the sidecar/
@@ -992,8 +1017,49 @@ def main() -> None:
                 }
             )
 
+        # has_wg_mail/wg_email_count/is_rfc from the cheap offline cache (see
+        # build_corpus_stats.py), not the live per-entry resolution
+        # _enrich() below does -- merged in here, before paging, so the
+        # has_mail/is_rfc filter params below can act on the FULL list
+        # rather than whatever one page _enrich() happens to touch, and so
+        # the frontend's badges never have to wait on _enrich()'s live
+        # calls. Missing cache (never built yet) just leaves every entry
+        # unlabeled rather than erroring the whole route. Dataset entries
+        # already carry a real rfc_number from the catalog (see this
+        # route's own docstring) -- setdefault leaves that alone and only
+        # fills it in for local-only entries, which don't.
+        import json as _json
+
+        draft_status_cache: dict[str, dict] = {}
+        try:
+            draft_status_cache = _json.loads(
+                Path("/app/api/storage/ietf-downloads/index/_draft_status.json").read_text()
+            )
+        except (FileNotFoundError, _json.JSONDecodeError, OSError):
+            pass
+        for entry in identities:
+            cached = draft_status_cache.get(entry["draft_name"])
+            if cached:
+                entry["has_wg_mail"] = cached["has_wg_mail"]
+                entry["wg_email_count"] = cached["email_count"]
+                entry.setdefault("wg", cached.get("wg"))
+                entry.setdefault("rfc_number", cached.get("rfc_number"))
+            else:
+                entry["has_wg_mail"] = None
+                entry["wg_email_count"] = None
+                entry.setdefault("rfc_number", None)
+            entry["is_rfc"] = bool(entry.get("rfc_number"))
+
         query = (request.args.get("q") or "").strip().lower()
         kind = (request.args.get("kind") or "").strip().lower()
+        has_mail_param = (request.args.get("has_mail") or "").strip().lower()
+        if has_mail_param in ("true", "false"):
+            wanted = has_mail_param == "true"
+            identities = [e for e in identities if e.get("has_wg_mail") == wanted]
+        is_rfc_param = (request.args.get("is_rfc") or "").strip().lower()
+        if is_rfc_param in ("true", "false"):
+            wanted = is_rfc_param == "true"
+            identities = [e for e in identities if e.get("is_rfc") == wanted]
         if query:
             unfiltered_identities = identities
             identities = [
