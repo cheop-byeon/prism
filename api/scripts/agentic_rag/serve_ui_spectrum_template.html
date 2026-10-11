@@ -269,12 +269,28 @@
   .po-primary:hover { filter: brightness(1.08); }
   .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
   .filter-toggle-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+  /* A labeled Material-style switch, not a plain active/inactive button --
+     the track itself (not the button chrome) carries the on/off color
+     signal, using Prism's own accent token rather than stock green, and
+     the knob slides via transform rather than swapping images. */
   .filter-toggle {
-    background: var(--po-paper); color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px;
-    padding: 8px 14px; font-size: 12px; font-weight: 600; width: auto;
+    display: inline-flex; align-items: center; gap: 9px;
+    background: var(--po-paper); color: var(--po-ink); border: 1px solid var(--po-line); border-radius: 999px;
+    padding: 7px 14px 7px 16px; font-size: 12px; font-weight: 600; width: auto; cursor: pointer;
+    transition: border-color 0.2s ease;
   }
   .filter-toggle:hover { border-color: var(--po-accent); }
-  .filter-toggle.active { background: var(--po-accent); color: #fff; border-color: var(--po-accent); }
+  .filter-toggle.active { border-color: var(--po-accent); }
+  .filter-toggle .switch-track {
+    position: relative; flex-shrink: 0; width: 34px; height: 18px; border-radius: 999px;
+    background: var(--po-line); transition: background 0.2s ease;
+  }
+  .filter-toggle .switch-knob {
+    position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.2s ease;
+  }
+  .filter-toggle.active .switch-track { background: var(--po-accent); }
+  .filter-toggle.active .switch-knob { transform: translateX(16px); }
   .po-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .po-linkbutton { background: transparent; color: var(--po-accent); font-size: 12px; padding: 0; text-align: left; }
   .po-linkbutton:hover { text-decoration: underline; }
@@ -1121,9 +1137,18 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
         <input id="poSourceFilterText" class="ps-librarysearch" placeholder="Filter by RFC, draft, or working group…" aria-label="Filter sources">
       </div>
       <div class="filter-toggle-row" id="poSourceFilterToggles">
-        <button type="button" class="filter-toggle" data-filter="mail" title="Only sources with WG mail indexed">Has email</button>
-        <button type="button" class="filter-toggle" data-filter="rfc" title="Only drafts already published as an RFC">Published as RFC</button>
-        <button type="button" class="filter-toggle" data-filter="draft" title="Only drafts not yet published as an RFC">Draft only (not RFC)</button>
+        <button type="button" class="filter-toggle" data-filter="mail" role="switch" aria-checked="false" title="Only sources with WG mail indexed">
+          <span class="switch-label">Has email</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        </button>
+        <button type="button" class="filter-toggle" data-filter="rfc" role="switch" aria-checked="false" title="Only drafts already published as an RFC">
+          <span class="switch-label">Published as RFC</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        </button>
+        <button type="button" class="filter-toggle" data-filter="draft" role="switch" aria-checked="false" title="Only drafts not yet published as an RFC">
+          <span class="switch-label">Draft only (not RFC)</span>
+          <span class="switch-track" aria-hidden="true"><span class="switch-knob"></span></span>
+        </button>
       </div>
       <!-- Right under the filters, not after the source list -- that list
            can run to 40+ cards, and a status message appended after it
@@ -4378,7 +4403,9 @@ document.getElementById('poSourceFilterToggles').addEventListener('click', (e) =
   const key = btn.dataset.filter;
   if (activeFilterToggles.has(key)) activeFilterToggles.delete(key);
   else activeFilterToggles.add(key);
-  btn.classList.toggle('active', activeFilterToggles.has(key));
+  const isActive = activeFilterToggles.has(key);
+  btn.classList.toggle('active', isActive);
+  btn.setAttribute('aria-checked', String(isActive));
   fetchSources();
 });
 
