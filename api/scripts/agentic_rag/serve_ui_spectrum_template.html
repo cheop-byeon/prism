@@ -844,7 +844,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 <div class="po-shell">
   <aside class="po-rail">
     <div class="po-brand">prism</div>
-    <button id="poNewBtn" class="po-new" type="button">+ New investigation</button>
+    <button id="poNewBtn" class="po-new" type="button">New investigation</button>
     <nav class="po-railnav" aria-label="Workspace">
       <div class="pm-navlabel">Research</div>
       <button data-goto="workspace"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path d="M15 9l-2 6-6 2 2-6 6-2z" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"/></svg>Workspace</button>
@@ -1130,7 +1130,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <div class="po-eyebrow">Library / Sources</div>
       <div class="ps-head">
         <div><h1 class="po-title">From archive to evidence.</h1><p>Manage downloaded content and the indexes that make it searchable.</p></div>
-        <button class="po-primary" type="button" id="poSourceAddOpenBtn"><span>+</span>Add source</button>
+        <button class="po-primary" type="button" id="poSourceAddOpenBtn">Add source</button>
       </div>
       <div id="poSourceStatsRow"></div>
       <div class="ps-filters">
@@ -2472,10 +2472,10 @@ let activeAskStop = null;
 // a still-streaming background run's SSE events keep overwriting them
 // even after the user has navigated to a completely different, already-
 // finished session (confirmed live: its route map kept redrawing itself
-// over a past session's activity panel). openSession()/"+ New
+// over a past session's activity panel). openSession()/"New
 // investigation" bump this so a stale run's later events become no-ops
 // for shared UI; the actual server-side run isn't cancelled by this (see
-// the pre-existing gap on "+ New investigation" not cancelling either).
+// the pre-existing gap on "New investigation" not cancelling either).
 let activeAskToken = 0;
 
 // poComposerBar (the entry form, above the conversation) and poFollowupForm
@@ -2568,7 +2568,7 @@ function runAsk() {
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
     // Stale once the user has navigated to a different investigation
-    // (openSession/"+ New investigation" bump activeAskToken) -- the
+    // (openSession/"New investigation" bump activeAskToken) -- the
     // conversation turn this closure renders into may be long gone, and
     // poInvestPills/poUsageBar/the Research-activity panel now belong to
     // whatever's actually on screen, not this backgrounded run.
@@ -3896,7 +3896,7 @@ function loadSourcesChunk() {
     }
     if (!sourceCorpora.length) {
       listEl.innerHTML = sourceOffset === corpora.length && !q
-        ? '<p class="corpora-hint">No sources yet -- use "+ Add source" above to add one.</p>'
+        ? '<p class="corpora-hint">No sources yet -- use "Add source" above to add one.</p>'
         : '<p class="corpora-hint">No sources match this filter.</p>';
     }
   }).catch((err) => {
