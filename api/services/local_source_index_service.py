@@ -152,7 +152,18 @@ class LocalSourceIndexService:
                     documents.append(
                         {
                             "kind": "mail_thread",
-                            "id": record.get("url") or record.get("id") or entry.stem,
+                            # record["id"] first, not url -- build_thread_records
+                            # sets id to f"{thread_id}#part{N}" for a thread long
+                            # enough to need splitting (see _split_into_parts),
+                            # specifically to disambiguate that part from its
+                            # siblings; url is just the first message's own url
+                            # (see build_thread_records: "url": part[0]["url"]),
+                            # which carries no part info at all. Preferring url
+                            # happened to mostly work by accident (each part's
+                            # first message usually has a distinct url of its
+                            # own), but silently discarded the real
+                            # disambiguator -- id -- whenever it was present.
+                            "id": record.get("id") or record.get("url") or entry.stem,
                             "text": text,
                         }
                     )
@@ -222,35 +233,96 @@ class LocalSourceIndexService:
     def _build_embedding_index(
         documents: list[dict], matrix_path: Path, ids_path: Path, on_event=None, batch_size: int = 20
     ) -> dict:
+        """One Ollama /api/embed call per document, not a batch of
+        `batch_size` -- confirmed live on this deployment's CPU-only 7B
+        model that a single real draft/mail document already takes
+        20-30s+ (compute-bound, not request-overhead-bound), so the old
+        behavior of sending `batch_size` (default 20) documents in ONE
+        HTTP call could need 400s+ against a hardcoded 120s client
+        timeout. `batch_size` now only controls how often on_event fires,
+        not how many documents share one request.
+
+        Resumable and crash-tolerant, unlike a from-scratch rebuild (the
+        module docstring's "cheap enough to rebuild from scratch" applies
+        to the sparse/BM25 tier, never true of this one at this model's
+        real speed): an existing matrix/ids pair at these paths is treated
+        as a checkpoint -- already-embedded ids are skipped, and progress
+        is re-saved to the same paths every `_CHECKPOINT_EVERY` documents,
+        so a timeout, an OOM, or this process simply being killed loses at
+        most that many documents' work, not the whole run. One document's
+        embedding call failing (confirmed live: happens) is logged and
+        skipped rather than aborting every other document's already-done
+        work.
+        """
         if not documents:
             return {"error": "Nothing to embed yet -- sync and build the sparse index first."}
 
-        ids = [doc["id"] for doc in documents]
-        texts = [doc["text"] for doc in documents]
+        _CHECKPOINT_EVERY = 20
 
-        vectors: list[list[float]] = []
-        with httpx.Client(timeout=120.0) as client:
-            for i in range(0, len(texts), batch_size):
-                batch = texts[i : i + batch_size]
-                resp = client.post(_OLLAMA_EMBED_URL, json={"model": _EMBED_MODEL, "input": batch})
-                resp.raise_for_status()
-                vectors.extend(resp.json()["embeddings"])
-                if on_event:
-                    done = min(i + batch_size, len(texts))
+        vectors_by_id: dict[str, list[float]] = {}
+        if matrix_path.is_file() and ids_path.is_file():
+            try:
+                existing_ids = json.loads(ids_path.read_text())
+                existing_matrix = np.load(matrix_path)
+                for idx, doc_id in enumerate(existing_ids):
+                    vectors_by_id[doc_id] = existing_matrix[idx].tolist()
+            except (json.JSONDecodeError, OSError, ValueError, IndexError):
+                vectors_by_id = {}
+
+        # Later documents with the same id win -- matches how every other
+        # tier in this file treats id collisions (dict keyed by id), and
+        # means a source re-synced with revised content gets re-embedded
+        # for that id rather than permanently keeping a stale checkpoint.
+        remaining = [doc for doc in documents if doc["id"] not in vectors_by_id]
+        already_done = len(documents) - len(remaining)
+
+        def _save_checkpoint() -> None:
+            out_ids = [doc["id"] for doc in documents if doc["id"] in vectors_by_id]
+            out_matrix = np.array([vectors_by_id[i] for i in out_ids], dtype=np.float32)
+            _INDEX_DIR.mkdir(parents=True, exist_ok=True)
+            np.save(matrix_path, out_matrix)
+            ids_path.write_text(json.dumps(out_ids))
+
+        failed_ids: list[str] = []
+        with httpx.Client(timeout=300.0) as client:
+            for i, doc in enumerate(remaining, start=1):
+                try:
+                    resp = client.post(_OLLAMA_EMBED_URL, json={"model": _EMBED_MODEL, "input": [doc["text"]]})
+                    resp.raise_for_status()
+                    vectors_by_id[doc["id"]] = resp.json()["embeddings"][0]
+                except Exception as exc:
+                    failed_ids.append(doc["id"])
+                    if on_event:
+                        on_event(
+                            {
+                                "stage": "indexing",
+                                "current": already_done + i,
+                                "total": len(documents),
+                                "message": f"Failed on {doc['id']}: {exc}",
+                            }
+                        )
+                    continue
+                done = already_done + i
+                if on_event and i % batch_size == 0:
                     on_event(
                         {
                             "stage": "indexing",
                             "current": done,
-                            "total": len(texts),
-                            "message": f"Embedding… ({done}/{len(texts)})",
+                            "total": len(documents),
+                            "message": f"Embedding… ({done}/{len(documents)})",
                         }
                     )
+                if i % _CHECKPOINT_EVERY == 0:
+                    _save_checkpoint()
 
-        matrix = np.array(vectors, dtype=np.float32)
-        _INDEX_DIR.mkdir(parents=True, exist_ok=True)
-        np.save(matrix_path, matrix)
-        ids_path.write_text(json.dumps(ids))
-        return {"total_documents": len(ids), "dims": matrix.shape[1] if matrix.size else 0}
+        _save_checkpoint()
+        dims = next(iter(vectors_by_id.values()), [])
+        return {
+            "total_documents": len(vectors_by_id),
+            "failed": len(failed_ids),
+            "failed_ids": failed_ids,
+            "dims": len(dims),
+        }
 
     @staticmethod
     def build_content_embedding_index(
