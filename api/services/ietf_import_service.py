@@ -1694,6 +1694,14 @@ class IetfImportService:
         """Assemble one consolidated {nodes, edges} graph for an RFC -- the
         data foundation for the RFC Graph tab's table and interactive graph.
 
+        Tries get_family_graph_for_rfc's pure-DB cache first (built by
+        build_rfc_families.py) -- None means this RFC hasn't been through
+        that pipeline yet, so this falls through to the original live
+        build below exactly as it always has. This is the only change
+        needed to make the RFC Graph tab fast: callers (serve_ui.py's
+        /api/rfc-graph/<rfc_number>) don't need to know which path served
+        the result.
+
         Combines _structural_neighbors (obsoletes/updates), find_related_rfc_family
         (citation graph + exact keyword match -- "Citation Match" in the UI),
         and, when the whole-corpus BM25 index is already built, a "Topic
@@ -1717,6 +1725,10 @@ class IetfImportService:
         history), not a relationship between two RFCs -- fetched separately,
         on demand, when a node is clicked.
         """
+        cached = IetfImportService.get_family_graph_for_rfc(rfc_number)
+        if cached is not None:
+            return cached
+
         structural = IetfImportService._structural_neighbors(rfc_number)
         if structural.get("error"):
             return structural
@@ -2013,6 +2025,231 @@ class IetfImportService:
         edges = IetfImportService._dedupe_edges(edges, valid_ids)
 
         return {"nodes": nodes, "edges": edges}
+
+    @staticmethod
+    def rebuild_structural_edges_cache(on_event=None) -> dict:
+        """Persists get_global_structural_graph()'s own edges into
+        ietf_rfc_structural_edges -- the cheap tier (~2 minutes, two bulk
+        Datatracker calls), wholesale-rebuilt rather than incrementally
+        since there's no resumability need at this cost. Callers needing a
+        fast per-RFC family graph (get_family_graph_for_rfc) read this
+        table instead of ever re-fetching live.
+        """
+        from models.ietf_rfc_family import IetfRfcStructuralEdge
+
+        result = IetfImportService.get_global_structural_graph(on_event=on_event)
+        if result.get("error"):
+            return result
+
+        edges = result.get("edges", [])
+        db.session.query(IetfRfcStructuralEdge).delete()
+        for edge in edges:
+            db.session.add(IetfRfcStructuralEdge(source=edge["source"], target=edge["target"], kind=edge["kind"]))
+        db.session.commit()
+        return {"count": len(edges)}
+
+    @staticmethod
+    def fetch_citation_edges_for_rfc(rfc_number: str) -> dict:
+        """One resumable unit of the expensive tier -- wraps
+        find_related_rfc_family(), records the attempt in
+        ietf_rfc_citation_fetch_log (so build_rfc_families.py --citations
+        can skip already-processed RFCs on a restart -- same resumability
+        reasoning as LocalSourceIndexService._build_embedding_index's own
+        checkpointing), and persists any resulting edges into
+        ietf_rfc_citation_edges. Both directions (cited_by/cites) collapse
+        to a plain (source, target) pair regardless of
+        find_related_rfc_family's own direction field -- clustering only
+        cares about connectivity, not citation direction.
+        """
+        from models.ietf_rfc_family import IetfRfcCitationEdge, IetfRfcCitationFetchLog
+
+        rfc_name = rfc_number.upper()
+        existing = db.session.query(IetfRfcCitationFetchLog).filter_by(rfc_number=rfc_name).first()
+        if existing:
+            return {"skipped": True, "rfc": rfc_name}
+
+        result = IetfImportService.find_related_rfc_family(rfc_name)
+        if result.get("error"):
+            db.session.add(IetfRfcCitationFetchLog(rfc_number=rfc_name, status="error", error_message=result["error"]))
+            db.session.commit()
+            return {"error": result["error"], "rfc": rfc_name}
+
+        family = result.get("family", [])
+        for entry in family:
+            other = entry["rfc"]
+            source, target = (other, rfc_name) if entry.get("direction") == "cited_by" else (rfc_name, other)
+            exists = db.session.query(IetfRfcCitationEdge).filter_by(source=source, target=target).first()
+            if not exists:
+                db.session.add(IetfRfcCitationEdge(source=source, target=target))
+        db.session.add(
+            IetfRfcCitationFetchLog(rfc_number=rfc_name, status="ok", topic_keyword=result.get("topic_keyword"))
+        )
+        db.session.commit()
+        return {"rfc": rfc_name, "edge_count": len(family), "topic_keyword": result.get("topic_keyword")}
+
+    @staticmethod
+    def rebuild_families(on_event=None) -> dict:
+        """Louvain community detection (networkx) over (structural ∪
+        citation) edges -- see IetfRfcFamily's own docstring for why BM25
+        "Topic Match" edges are deliberately excluded from clustering (a
+        weak signal that chains unrelated RFCs together transitively if
+        used as a merge boundary; it stays live/per-request detail
+        instead, see get_family_graph_for_rfc).
+
+        NOT naive connected-components -- confirmed live, repeatedly, that
+        plain union-find/reachability is the wrong tool for a real IETF
+        citation graph: a handful of administrative/cross-cutting RFCs
+        (RFC8996 "Deprecating TLS 1.0/1.1" alone touches 79 RFCs across 39
+        WGs) and ancient pre-WG-tracking RFCs (RFC791, RFC1123) chain
+        almost the entire corpus into one multi-thousand-member non-family
+        via sparse bridging edges, no matter how many individual hub RFCs
+        get hand-excluded -- confirmed live with two different exclusion
+        heuristics in a row, each one patched a specific failure and the
+        next full run still produced a 5,000+ member blob. Louvain
+        partitions by modularity (internal edge density vs. expected
+        random density) instead of mere reachability, so a handful of
+        bridging edges between two dense topic clusters doesn't merge
+        them -- confirmed live against the full corpus: 294 communities,
+        largest 518, RFC9364's own community a coherent 361-RFC DNS/DNS-
+        security cluster, with ZERO hand-tuned exclusions needed.
+
+        Wholesale rebuild: every existing IetfRfcFamily/IetfRfcFamilyMember
+        row is replaced, since membership can only be as complete as
+        however much of the citation-harvest tier has finished by the time
+        this runs -- there's no meaningful "incremental" clustering
+        update, just a periodic full recompute as more citation edges
+        accumulate.
+        """
+        import networkx as nx
+        import networkx.algorithms.community as nx_community
+
+        from models.ietf_rfc_family import IetfRfcCitationEdge, IetfRfcFamily, IetfRfcFamilyMember, IetfRfcStructuralEdge
+
+        def _emit(message: str) -> None:
+            if on_event:
+                on_event({"stage": "clustering", "message": message})
+
+        structural = db.session.query(IetfRfcStructuralEdge.source, IetfRfcStructuralEdge.target).all()
+        citation = db.session.query(IetfRfcCitationEdge.source, IetfRfcCitationEdge.target).all()
+        edges = [(s, t) for s, t in structural] + [(s, t) for s, t in citation]
+        if not edges:
+            return {"error": "No structural or citation edges found -- run --structural and --citations first."}
+
+        all_names = sorted({n for s, t in edges for n in (s, t)})
+        _emit(f"Resolving metadata for {len(all_names)} RFCs…")
+        nodes = IetfImportService._batch_fetch_rfc_nodes(all_names, on_event=on_event)
+        node_by_id = {n["id"]: n for n in nodes}
+
+        _emit(f"Clustering {len(edges)} edges (Louvain)…")
+        graph = nx.Graph()
+        graph.add_edges_from(edges)
+        # seed fixed for reproducibility -- a rerun against the same edge
+        # set should give the same partition, not a different one each time.
+        communities = nx_community.louvain_communities(graph, seed=42)
+
+        _emit(f"{len(communities)} candidate families from {graph.number_of_nodes()} RFCs…")
+
+        db.session.query(IetfRfcFamilyMember).delete()
+        db.session.query(IetfRfcFamily).delete()
+        db.session.flush()
+
+        family_count = 0
+        total_members = 0
+        for members in communities:
+            if len(members) < 2:
+                continue  # an isolated node Louvain left on its own -- not a family
+            total_members += len(members)
+            wg_counts: dict[str, int] = {}
+            for m in members:
+                wg = node_by_id.get(m, {}).get("wg") or ""
+                if wg:
+                    wg_counts[wg] = wg_counts.get(wg, 0) + 1
+            # primary_wg is a label hint only -- see IetfRfcFamily's own
+            # docstring for why it never defines membership.
+            primary_wg = max(wg_counts, key=lambda k: wg_counts[k]) if wg_counts else None
+            if primary_wg:
+                label = primary_wg
+            else:
+                lowest = min(members, key=lambda m: int(re.sub(r"[^0-9]", "", m) or 0))
+                label = node_by_id.get(lowest, {}).get("title") or lowest
+            family = IetfRfcFamily(label=label, primary_wg=primary_wg, member_count=len(members))
+            db.session.add(family)
+            db.session.flush()  # populate family.id before members reference it
+            for m in members:
+                meta = node_by_id.get(m, {})
+                db.session.add(
+                    IetfRfcFamilyMember(
+                        family_id=family.id,
+                        rfc_number=m,
+                        title=meta.get("title", ""),
+                        std_level=meta.get("std_level", ""),
+                        wg=meta.get("wg", ""),
+                    )
+                )
+            family_count += 1
+        db.session.commit()
+        return {"families": family_count, "members": total_members}
+
+    @staticmethod
+    def get_family_graph_for_rfc(rfc_number: str) -> dict | None:
+        """Fast path for build_rfc_relationship_graph -- purely DB reads,
+        no live Datatracker calls at all, used once this RFC has been
+        through the precompute pipeline (build_rfc_families.py). Returns
+        None (not an error) when it hasn't, so the caller falls back to
+        the original live build -- same incremental-rollout approach the
+        mail-embedding job used (some things are pre-warmed, the rest
+        just takes the old slower path until they are too).
+        """
+        from models.ietf_rfc_family import IetfRfcCitationEdge, IetfRfcFamilyMember, IetfRfcStructuralEdge
+
+        center = rfc_number.upper()
+        if not center.startswith("RFC"):
+            center = f"RFC{re.sub(r'[^0-9]', '', center)}"
+        member_row = db.session.query(IetfRfcFamilyMember).filter_by(rfc_number=center).first()
+        if member_row is None:
+            return None
+
+        members = db.session.query(IetfRfcFamilyMember).filter_by(family_id=member_row.family_id).all()
+        member_ids = {m.rfc_number for m in members}
+        nodes = [
+            {
+                "id": m.rfc_number,
+                "title": m.title,
+                "std_level": m.std_level,
+                "wg": m.wg,
+                "is_center": m.rfc_number == center,
+            }
+            for m in members
+        ]
+
+        edges: list[dict] = []
+        structural = (
+            db.session.query(IetfRfcStructuralEdge)
+            .filter(IetfRfcStructuralEdge.source.in_(member_ids), IetfRfcStructuralEdge.target.in_(member_ids))
+            .all()
+        )
+        edges.extend({"source": e.source, "target": e.target, "kind": e.kind} for e in structural)
+        citation = (
+            db.session.query(IetfRfcCitationEdge)
+            .filter(IetfRfcCitationEdge.source.in_(member_ids), IetfRfcCitationEdge.target.in_(member_ids))
+            .all()
+        )
+        edges.extend({"source": e.source, "target": e.target, "kind": "family"} for e in citation)
+
+        # Topic Match stays live -- cheap (local BM25, no network) and
+        # explicitly detail shown WITHIN a family, never a way to pull in
+        # nodes from outside it (see IetfRfcCitationEdge's own docstring
+        # on why BM25 never defines a family's boundary).
+        from services.rfc_corpus_index_service import RfcCorpusIndexService
+
+        if RfcCorpusIndexService.is_title_abstract_corpus_built():
+            topic_matches = RfcCorpusIndexService.search_bm25(center, scope="title_abstract", top_k=10)
+            for r in topic_matches.get("results", []):
+                if r["rfc"] != center and r["rfc"] in member_ids:
+                    edges.append({"source": center, "target": r["rfc"], "kind": "topic_bm25"})
+
+        edges = IetfImportService._dedupe_edges(edges, member_ids)
+        return {"center": center, "nodes": nodes, "edges": edges, "warnings": []}
 
     @staticmethod
     def get_wg_documents(wg_acronym: str) -> list[dict]:

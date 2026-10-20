@@ -771,7 +771,7 @@ name = "brotlicffi"
 version = "1.2.0.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cffi" },
+    { name = "cffi", marker = "platform_python_implementation == 'PyPy'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/84/85/57c314a6b35336efbbdc13e5fc9ae13f6b60a0647cfa7c1221178ac6d8ae/brotlicffi-1.2.0.0.tar.gz", hash = "sha256:34345d8d1f9d534fcac2249e57a4c3c8801a33c9942ff9f8574f67a175e17adb", size = 476682, upload-time = "2025-11-21T18:17:57.334Z" }
 wheels = [
@@ -1545,6 +1545,7 @@ dependencies = [
     { name = "llama-index-readers-github" },
     { name = "markdown" },
     { name = "mlflow-skinny" },
+    { name = "networkx" },
     { name = "numpy" },
     { name = "openpyxl" },
     { name = "opentelemetry-api" },
@@ -1757,6 +1758,7 @@ requires-dist = [
     { name = "llama-index-readers-github", specifier = ">=0.3.0" },
     { name = "markdown", specifier = "~=3.10.2" },
     { name = "mlflow-skinny", specifier = ">=3.0.0" },
+    { name = "networkx", specifier = "~=3.6.0" },
     { name = "numpy", specifier = "~=1.26.4" },
     { name = "openpyxl", specifier = "~=3.1.5" },
     { name = "opentelemetry-api", specifier = "==1.28.0" },
