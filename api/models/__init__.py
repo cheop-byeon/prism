@@ -37,6 +37,14 @@ from .execution_extra_content import ExecutionExtraContent, HumanInputContent
 from .human_input import HumanInputForm
 from .ietf_agentic_session_share import IetfAgenticSessionShare
 from .ietf_local_source import IetfLocalSource
+from .ietf_rfc_family import (
+    IetfRfcCitationEdge,
+    IetfRfcCitationFetchLog,
+    IetfRfcFamily,
+    IetfRfcFamilyMember,
+    IetfRfcStructuralEdge,
+)
+from .ietf_session_decision_thread import IetfSessionDecisionThread
 from .model import (
     AccountTrialAppRecord,
     ApiRequest,
@@ -167,6 +175,12 @@ __all__ = [
     "IconType",
     "IetfAgenticSessionShare",
     "IetfLocalSource",
+    "IetfRfcCitationEdge",
+    "IetfRfcCitationFetchLog",
+    "IetfRfcFamily",
+    "IetfRfcFamilyMember",
+    "IetfRfcStructuralEdge",
+    "IetfSessionDecisionThread",
     "InstalledApp",
     "InvitationCode",
     "LoadBalancingModelConfig",

@@ -568,17 +568,21 @@ def _authenticate_console_request(request):
 # see IetfImportService.register_local_source and
 # ask_decision_agent._discover_evolution_corpora): any logged-in account may
 # now pull its own sources, own what it pulls, and choose whether to share
-# it, the same way Sessions/Research already worked. Only /api/observability
-# remains gated here -- it's org-wide cost/usage across every account, not
-# one account's own data, so it stays restricted rather than opened to every
-# self-service sign-up.
+# it, the same way Sessions/Research already worked. /api/observability and
+# everything under /api/admin/ (user list, ban/unban) remain gated here --
+# org-wide visibility/control over every account, not one account's own
+# data, so they stay restricted rather than opened to every self-service
+# sign-up. /api/admin/ is a prefix, not an exact path, since its own
+# sub-routes take a dynamic account_id segment (e.g. /api/admin/users/
+# <id>/status) that can't be enumerated as fixed strings up front.
 _DATA_ADMIN_ONLY_EXACT_PATHS = {
     "/api/observability",
 }
+_DATA_ADMIN_ONLY_PREFIXES = ("/api/admin/",)
 
 
 def _is_data_admin_route(path: str) -> bool:
-    return path in _DATA_ADMIN_ONLY_EXACT_PATHS
+    return path in _DATA_ADMIN_ONLY_EXACT_PATHS or path.startswith(_DATA_ADMIN_ONLY_PREFIXES)
 
 
 def _is_data_admin(account) -> bool:
@@ -805,6 +809,7 @@ def main() -> None:
         entries: dict[tuple[str, str], dict] = {
             (m.provider.provider, m.model): {
                 "provider": m.provider.provider,
+                "provider_label": m.provider.label.en_US,
                 "model": m.model,
                 "label": m.label.en_US,
                 "byok": False,
@@ -824,6 +829,7 @@ def main() -> None:
                 else:
                     entries[key] = {
                         "provider": m.provider.provider,
+                        "provider_label": m.provider.label.en_US,
                         "model": m.model,
                         "label": m.label.en_US,
                         "byok": True,
@@ -1944,6 +1950,7 @@ def main() -> None:
                     model_name=model_name,
                     claim_labels=claim_labels,
                     evidence=evidence,
+                    draft=draft,
                 )
                 # _summarize_usage's total_price is a Decimal -- fine for the
                 # DB column above, but the SSE payload below goes through a
@@ -2041,7 +2048,274 @@ def main() -> None:
         except ValueError:
             days = 30
         days = max(1, min(90, days))
-        return jsonify(AgenticRagSessionService.get_observability_stats(days=days))
+        stats = AgenticRagSessionService.get_observability_stats(days=days)
+        stats["by_account"] = AgenticRagSessionService.get_per_account_observability_stats(days=days)
+        return jsonify(stats)
+
+    @app.route(f"{_URL_PREFIX}/api/admin/users", methods=["GET"])
+    def api_admin_users():
+        """Every registered account -- read-only visibility into who has
+        signed up, for the data admin only (see _is_data_admin). Gated via
+        _DATA_ADMIN_ONLY_EXACT_PATHS/_require_console_login, the exact same
+        mechanism /api/observability already uses; this isn't a new admin
+        concept, just a second thing the existing one tenant-membership
+        check is allowed to see.
+
+        is_data_admin per account reuses that same check (membership in
+        the original/first tenant) rather than inventing a separate
+        "admin" flag anywhere -- there's deliberately only one admin
+        concept in this app, not two that could drift apart.
+        """
+        from extensions.ext_database import db
+        from models.account import Account, Tenant, TenantAccountJoin
+
+        admin_tenant_id = db.session.query(Tenant).first().id
+
+        accounts = db.session.query(Account).order_by(Account.created_at.desc()).all()
+        account_ids = [a.id for a in accounts]
+
+        joins = (
+            db.session.query(TenantAccountJoin, Tenant.name)
+            .join(Tenant, Tenant.id == TenantAccountJoin.tenant_id)
+            .filter(TenantAccountJoin.account_id.in_(account_ids))
+            .all()
+            if account_ids
+            else []
+        )
+        memberships_by_account: dict[str, list[dict]] = {}
+        for join, tenant_name in joins:
+            memberships_by_account.setdefault(join.account_id, []).append(
+                {
+                    "tenant_id": join.tenant_id,
+                    "tenant_name": tenant_name,
+                    "role": join.role,
+                    "is_admin_tenant": join.tenant_id == admin_tenant_id,
+                }
+            )
+
+        def _iso(dt):
+            return dt.isoformat() + "Z" if dt else None
+
+        users = []
+        for a in accounts:
+            memberships = memberships_by_account.get(a.id, [])
+            users.append(
+                {
+                    "id": a.id,
+                    "email": a.email,
+                    "name": a.name,
+                    "status": a.status,
+                    "created_at": _iso(a.created_at),
+                    "last_login_at": _iso(a.last_login_at),
+                    "last_active_at": _iso(a.last_active_at),
+                    "is_data_admin": any(m["is_admin_tenant"] for m in memberships),
+                    "is_self": a.id == g.account.id,
+                    "tenants": memberships,
+                }
+            )
+        return jsonify({"users": users, "total": len(users)})
+
+    @app.route(f"{_URL_PREFIX}/api/admin/users/<account_id>/status", methods=["POST"])
+    def api_admin_user_status(account_id):
+        """Ban or unban one account -- the one real lever this gives a data
+        admin beyond read-only visibility. AccountStatus.BANNED is Dify's
+        own real enum value, already checked on every authenticated request
+        by AccountService.load_user (account_service.py) -- Prism's own
+        auth (_authenticate_console_request above) goes through that exact
+        same function, so flipping this status is immediately,
+        infrastructure-wide effective with no new enforcement code needed.
+        Confirmed live: nothing in Dify's own shipped product ever sets
+        this value outside its test suite, so this route is the actual
+        first real place it gets used.
+
+        Only "active"/"banned" are accepted here -- not the full
+        AccountStatus enum (pending/uninitialized/closed have different
+        meanings this action was never meant to touch). Self-ban is
+        refused outright: locking out the one data-admin account with no
+        other way back in would be a real, hard-to-reverse mistake, not a
+        hypothetical one.
+        """
+        from extensions.ext_database import db
+        from models.account import Account, AccountStatus
+
+        payload = request.get_json(silent=True) or {}
+        new_status = (payload.get("status") or "").strip().lower()
+        if new_status not in ("active", "banned"):
+            return jsonify({"error": "status must be 'active' or 'banned'"}), 400
+
+        target = db.session.query(Account).filter_by(id=account_id).first()
+        if not target:
+            return jsonify({"error": "Account not found"}), 404
+        if target.id == g.account.id and new_status == "banned":
+            return jsonify({"error": "You can't ban your own account."}), 400
+
+        target.status = AccountStatus.BANNED if new_status == "banned" else AccountStatus.ACTIVE
+        db.session.commit()
+        return jsonify({"result": "success", "id": target.id, "status": target.status})
+
+    @app.route(f"{_URL_PREFIX}/api/admin/users/<account_id>/revoke-shares", methods=["POST"])
+    def api_admin_revoke_shares(account_id):
+        """Un-share every session and local source this account owns --
+        sharing is cross-tenant/global by design (see IetfLocalSource/
+        IetfAgenticSessionShare's own docstrings), so banning someone's
+        login doesn't retract whatever they'd already made visible to
+        everyone else. This revokes that visibility directly rather than
+        going through AgenticRagSessionService.set_session_shared/
+        IetfImportService.set_local_source_shared, both of which require
+        the CALLER to be the owner -- correct for a user managing their
+        own sharing, wrong for an admin acting on someone else's.
+        """
+        from extensions.ext_database import db
+        from models.account import Account
+        from models.ietf_agentic_session_share import IetfAgenticSessionShare
+        from models.ietf_local_source import IetfLocalSource
+        from models.model import Conversation
+        from services.agentic_rag_session_service import _PRISM_APP_ID
+
+        target = db.session.query(Account).filter_by(id=account_id).first()
+        if not target:
+            return jsonify({"error": "Account not found"}), 404
+
+        owned_conversation_ids = [
+            row[0]
+            for row in db.session.query(Conversation.id)
+            .filter(Conversation.app_id == _PRISM_APP_ID, Conversation.from_account_id == account_id)
+            .all()
+        ]
+        sessions_unshared = 0
+        if owned_conversation_ids:
+            sessions_unshared = (
+                db.session.query(IetfAgenticSessionShare)
+                .filter(
+                    IetfAgenticSessionShare.conversation_id.in_(owned_conversation_ids),
+                    IetfAgenticSessionShare.shared.is_(True),
+                )
+                .update({"shared": False}, synchronize_session=False)
+            )
+
+        sources_unshared = (
+            db.session.query(IetfLocalSource)
+            .filter(IetfLocalSource.owner_account_id == account_id, IetfLocalSource.shared.is_(True))
+            .update({"shared": False}, synchronize_session=False)
+        )
+        db.session.commit()
+        return jsonify({"result": "success", "sessions_unshared": sessions_unshared, "sources_unshared": sources_unshared})
+
+    @app.route(f"{_URL_PREFIX}/api/admin/users/<account_id>/admin", methods=["POST"])
+    def api_admin_set_admin(account_id):
+        """Grant or revoke data-admin status for an account -- deliberately
+        reuses _is_data_admin's own existing definition (membership in the
+        original/first tenant) rather than adding a second "is_admin" flag
+        anywhere that could drift out of sync with it. Granting just adds
+        a TenantAccountJoin row into that tenant (role is irrelevant here,
+        _is_data_admin checks membership only, not role); revoking removes
+        it. Neither touches the account's own personal tenant or its
+        membership there -- this is purely an additional join, so revoking
+        it can never leave an account with zero tenants (the one real
+        break AccountService.login's own tenant check guards against).
+        """
+        from extensions.ext_database import db
+        from models.account import Account, Tenant, TenantAccountJoin
+
+        payload = request.get_json(silent=True) or {}
+        make_admin = payload.get("admin")
+        if not isinstance(make_admin, bool):
+            return jsonify({"error": "admin must be true or false"}), 400
+
+        target = db.session.query(Account).filter_by(id=account_id).first()
+        if not target:
+            return jsonify({"error": "Account not found"}), 404
+        if target.id == g.account.id and not make_admin:
+            return jsonify({"error": "You can't revoke your own admin access."}), 400
+
+        admin_tenant_id = db.session.query(Tenant).first().id
+        existing = (
+            db.session.query(TenantAccountJoin)
+            .filter_by(tenant_id=admin_tenant_id, account_id=account_id)
+            .first()
+        )
+        if make_admin:
+            if not existing:
+                db.session.add(TenantAccountJoin(tenant_id=admin_tenant_id, account_id=account_id, current=False))
+                db.session.commit()
+        else:
+            if existing:
+                db.session.delete(existing)
+                db.session.commit()
+        return jsonify({"result": "success", "id": target.id, "is_data_admin": make_admin})
+
+    @app.route(f"{_URL_PREFIX}/api/admin/users/<account_id>", methods=["DELETE"])
+    def api_admin_delete_user(account_id):
+        """Remove an account entirely -- harder and less reversible than
+        banning (which just blocks login and leaves everything else
+        intact). Deliberately does NOT delete the account's local sources
+        (IetfLocalSource rows): those point at downloaded drafts/RFCs/mail
+        that are now a shared corpus other accounts' research depends on
+        (see bulk_pull_all_rfcs.py et al.) -- destroying a person's account
+        shouldn't also destroy data everyone else is using. Ownership is
+        reassigned to this admin account instead, same "someone has to be
+        the steward" reasoning as the rest of this file's ownership model;
+        `shared` is left exactly as it was.
+
+        Sessions are different -- those really are personal, so each is
+        removed via AgenticRagSessionService.delete_session, the exact
+        same proven path a user deleting their own session takes (real
+        Conversation row delete + Celery cleanup of its Messages, plus
+        this project's own IetfAgenticSessionShare row).
+        """
+        from extensions.ext_database import db
+        from models.account import Account, Tenant, TenantAccountJoin
+        from models.ietf_local_source import IetfLocalSource
+        from models.model import Conversation
+        from services.agentic_rag_session_service import _PRISM_APP_ID, AgenticRagSessionService
+
+        target = db.session.query(Account).filter_by(id=account_id).first()
+        if not target:
+            return jsonify({"error": "Account not found"}), 404
+        if target.id == g.account.id:
+            return jsonify({"error": "You can't delete your own account."}), 400
+
+        owned_conversation_ids = [
+            row[0]
+            for row in db.session.query(Conversation.id)
+            .filter(Conversation.app_id == _PRISM_APP_ID, Conversation.from_account_id == account_id)
+            .all()
+        ]
+        sessions_deleted = 0
+        for conversation_id in owned_conversation_ids:
+            if AgenticRagSessionService.delete_session(conversation_id, account=target):
+                sessions_deleted += 1
+
+        sources_reassigned = (
+            db.session.query(IetfLocalSource)
+            .filter(IetfLocalSource.owner_account_id == account_id)
+            .update({"owner_account_id": g.account.id}, synchronize_session=False)
+        )
+
+        joins = db.session.query(TenantAccountJoin).filter_by(account_id=account_id).all()
+        tenant_ids = {j.tenant_id for j in joins}
+        for j in joins:
+            db.session.delete(j)
+        db.session.flush()
+        tenants_deleted = 0
+        for tenant_id in tenant_ids:
+            remaining_members = db.session.query(TenantAccountJoin).filter_by(tenant_id=tenant_id).count()
+            if remaining_members == 0:
+                tenant = db.session.query(Tenant).filter_by(id=tenant_id).first()
+                if tenant:
+                    db.session.delete(tenant)
+                    tenants_deleted += 1
+
+        db.session.delete(target)
+        db.session.commit()
+        return jsonify(
+            {
+                "result": "success",
+                "sessions_deleted": sessions_deleted,
+                "sources_reassigned": sources_reassigned,
+                "tenants_deleted": tenants_deleted,
+            }
+        )
 
     @app.route(f"{_URL_PREFIX}/api/sessions/<session_id>", methods=["GET"])
     def api_sessions_get(session_id):
@@ -2074,6 +2348,10 @@ def main() -> None:
                 # +"Z": naive datetime that's actually UTC -- see
                 # AgenticRagSessionService.list_sessions' own note on why.
                 "updated_at": session.updated_at.isoformat() + "Z",
+                # None when this session has never had a Track phrase run
+                # saved against it -- see IetfSessionDecisionThread's own
+                # docstring for why it's one slot, not a history.
+                "decision_thread": AgenticRagSessionService.get_decision_thread(session_id),
             }
         )
 
@@ -2222,12 +2500,66 @@ def main() -> None:
 
         draft = (request.args.get("draft") or "").strip() or None
         query = (request.args.get("query") or "").strip()
-        if not query:
-            return jsonify({"error": "query is required"}), 400
+        # Comma-separated alternative to query -- used by the automatic
+        # post-answer tracking (runAsk's own extracted keyword candidates),
+        # never by the manual Track phrase box (which still sends one
+        # free-text phrase via query). decision_thread() AND-matches every
+        # keyword in the list instead of one exact phrase -- see its own
+        # docstring for why ("backoff" + "ECN" together, not either alone).
+        keywords = [k.strip() for k in (request.args.get("keywords") or "").split(",") if k.strip()]
+        if not query and not keywords:
+            return jsonify({"error": "query or keywords is required"}), 400
+        query_arg = keywords if keywords else query
         account_id = g.account.id
+        session_id = request.args.get("session_id") or None
+        # Same model the user already picked for the main composer -- without
+        # this, every Track phrase run silently fell back to decision_thread's
+        # own hardcoded default (empty provider/model -> this tenant's system
+        # default), ignoring whatever stronger/different model the outside
+        # question actually used.
+        model_provider = request.args.get("model_provider") or None
+        model_name = request.args.get("model_name") or None
+        model_kwargs = {"model_provider": model_provider, "model_name": model_name} if model_provider and model_name else {}
 
         def work(on_event):
-            return decision_thread(draft, query, on_event=on_event, viewer_account_id=account_id)
+            nonlocal session_id
+            result = decision_thread(draft, query_arg, on_event=on_event, viewer_account_id=account_id, **model_kwargs)
+            # Creates its own session if none was given -- confirmed live
+            # this gap was real: a user who opens Decision history and runs
+            # Track phrase WITHOUT first asking a main question in that
+            # investigation (or whose main question's session_id never
+            # made it back to the browser, e.g. they navigated away while
+            # it was still streaming) had nothing for this to save against,
+            # so it silently stayed unsaved every time. Mirrors
+            # _make_research_work's own lazy session creation exactly, so
+            # Track phrase is no longer dependent on the main Ask flow
+            # having run first.
+            from extensions.ext_database import db
+            from models.account import Account
+            from services.agentic_rag_session_service import AgenticRagSessionService
+
+            account = db.session.query(Account).filter_by(id=account_id).first()
+            if account is not None:
+                # result["query"] (decision_thread's own display_query) is
+                # always a plain string regardless of which input mode was
+                # used -- query_arg itself may be the keywords list.
+                display_query = result.get("query") or query
+                if not session_id:
+                    session = AgenticRagSessionService.create_session(
+                        title_seed=f"Within: {display_query}", account=account
+                    )
+                    session_id = session.id
+                AgenticRagSessionService.save_decision_thread(
+                    session_id,
+                    account=account,
+                    draft_hint=draft or "",
+                    query=display_query,
+                    model_provider=model_provider or "",
+                    model_name=model_name or "",
+                    data=result,
+                )
+            result["session_id"] = session_id
+            return result
 
         return _sse_stream(app, work)
 

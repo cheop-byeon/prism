@@ -930,7 +930,11 @@ def _judge_lane_discussion(
             # top_p omitted: some model providers (e.g. Anthropic's newer
             # Claude models) reject a request that sets both temperature
             # and top_p, and top_p=1 was a no-op default anyway.
-            model_parameters={"temperature": 0.1},
+            # max_tokens caps generation explicitly -- a provider's credential-level
+            # max_tokens is only a UI default/bound, not an enforced per-call limit,
+            # so slow local models (e.g. Ollama) can otherwise run until the context
+            # window fills and blow past the plugin's hardcoded 300s read timeout.
+            model_parameters={"temperature": 0.1, "max_tokens": 1500},
             tools=[],
             stop=[],
             stream=False,
@@ -974,21 +978,44 @@ def _parse_evolution_body(body: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def _drafts_with_matches(query: str, catalog: list[dict]) -> list[str]:
+def _normalize_needles(query: str | list[str]) -> tuple[list[str], str]:
+    """Returns (needles, display_query). needles is always a list, used
+    for AND-matching (a segment must contain every needle) -- a single
+    string degenerates to today's exact-phrase behavior (one needle),
+    unchanged for every existing caller (the manual Track phrase box still
+    sends one free-text phrase). A list requests the newer "all of these
+    keywords" matching, used by the automatic post-answer tracking (see
+    api_decision_thread's own "keywords" param) -- the real motivating
+    case: "Why is the backoff with ECN similar to loss?" extracts two
+    keywords (ECN, backoff) neither of which alone pins down the specific
+    decision as precisely as both together. display_query is what callers
+    show/store in the result's own "query" field and in progress messages.
+    """
+    if isinstance(query, str):
+        needles = [query.strip().lower()] if query.strip() else []
+        display = query.strip()
+    else:
+        cleaned = [q.strip() for q in query if q.strip()]
+        needles = [q.lower() for q in cleaned]
+        display = " + ".join(cleaned)
+    return needles, display
+
+
+def _drafts_with_matches(query: str | list[str], catalog: list[dict]) -> list[str]:
     """Which draft names have at least one evolution-dataset segment whose
-    header+body contains *query* (case-insensitive) -- used to auto-resolve
-    "no specific draft given" deterministically, via the same content
-    search decision_thread() itself uses, rather than guessing or requiring
-    an LLM call just to pick a draft.
+    header+body contains every needle in *query* (case-insensitive) -- used
+    to auto-resolve "no specific draft given" deterministically, via the
+    same content search decision_thread() itself uses, rather than
+    guessing or requiring an LLM call just to pick a draft.
     """
     from extensions.ext_database import db
     from models.dataset import DocumentSegment
 
-    needle = query.strip().lower()
+    needles, _ = _normalize_needles(query)
     matches = []
     for entry in catalog:
         segments = db.session.query(DocumentSegment).filter_by(dataset_id=entry["evolution_dataset_id"]).all()
-        if any(s.content and needle in s.content.lower() for s in segments):
+        if any(s.content and all(n in s.content.lower() for n in needles) for s in segments):
             matches.append(entry["draft_name"])
     return matches
 
@@ -1093,7 +1120,7 @@ def _resolve_fallback_tenant_id(viewer_account_id: str | None) -> str:
 
 def _local_decision_thread(
     draft_name: str,
-    query: str,
+    query: str | list[str],
     model_provider: str = _DEFAULT_MODEL_PROVIDER,
     model_name: str = _DEFAULT_MODEL_NAME,
     on_event=None,
@@ -1120,12 +1147,14 @@ def _local_decision_thread(
         if on_event:
             on_event({"stage": stage, "message": message})
 
+    needles, display_query = _normalize_needles(query)
+
     _emit("resolving", f"{draft_name} is a local-only source -- computing its revision diffs live…")
     sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
     parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
     spans = {rev: IetfImportService._section_line_spans(version_texts[rev]) for rev in sorted_revs}
 
-    _emit("searching", f"Diffing {len(sorted_revs)} revisions for {query!r}…")
+    _emit("searching", f"Diffing {len(sorted_revs)} revisions for {display_query!r}…")
     all_changes: list[dict] = []
     for from_rev, to_rev in zip(sorted_revs, sorted_revs[1:]):
         all_changes.extend(
@@ -1143,11 +1172,10 @@ def _local_decision_thread(
     # Same header+body string shape generate_draft_evolution writes into a
     # real DocumentSegment's content, so the exact same parsing regexes
     # decision_thread() uses on that content work unchanged here.
-    needle = query.strip().lower()
     raw_matches = []
     for change in all_changes:
         content = change.get("content", "")
-        if not content or needle not in content.lower():
+        if not content or not all(n in content.lower() for n in needles):
             continue
         match = _EVOLUTION_ENTRY_RE.match(content)
         if not match:
@@ -1197,14 +1225,14 @@ def _local_decision_thread(
     return {
         "draft_name": draft_name,
         "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
-        "query": query,
+        "query": display_query,
         "lanes": lanes,
     }
 
 
 def decision_thread(
     draft_hint: str | None,
-    query: str,
+    query: str | list[str],
     model_provider: str = _DEFAULT_MODEL_PROVIDER,
     model_name: str = _DEFAULT_MODEL_NAME,
     on_event=None,
@@ -1223,6 +1251,14 @@ def decision_thread(
     change (same from_rev/to_rev pair -- see _split_modified_paragraphs in
     ietf_import_service.py) are collapsed to the first match, same spirit as
     evolution_timeline()'s per-edge dedup.
+
+    *query* may also be a list of keywords instead of one phrase (see
+    _normalize_needles) -- a segment then has to contain EVERY keyword
+    (AND, not OR) to match. This is what the automatic post-answer
+    tracking uses: a question like "Why is the backoff with ECN similar
+    to loss?" extracts two keywords (ECN, backoff), and requiring both
+    together pins down the specific decision far more precisely than
+    either term alone would.
 
     draft_hint may be empty/None -- unlike ask(), which can lean on the
     model's own reasoning to disambiguate an unspecified draft from the
@@ -1243,6 +1279,8 @@ def decision_thread(
     """
     from extensions.ext_database import db
     from models.dataset import Dataset, DocumentSegment
+
+    needles, display_query = _normalize_needles(query)
 
     def _emit(stage: str, message: str) -> None:
         if on_event:
@@ -1291,24 +1329,25 @@ def decision_thread(
                 f"source has that exact name either. Registered drafts: {known}"
             )
     else:
-        _emit("resolving", f"No draft given -- searching every known draft for {query!r}…")
+        _emit("resolving", f"No draft given -- searching every known draft for {display_query!r}…")
         matching_drafts = _drafts_with_matches(query, catalog)
         if not matching_drafts:
             known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
             raise ValueError(
-                f"No draft registered as a Dify dataset has any revision mentioning {query!r}. "
+                f"No draft registered as a Dify dataset has any revision mentioning {display_query!r}. "
                 f"Track a Decision only searches drafts imported that way, not locally-downloaded-only "
                 f"sources -- see the Sources page for which is which. Registered drafts: {known}"
             )
         if len(matching_drafts) > 1:
             raise ValueError(
-                f"{query!r} matches more than one draft ({', '.join(matching_drafts)}) -- pick one specific draft."
+                f"{display_query!r} matches more than one draft ({', '.join(matching_drafts)}) -- "
+                f"pick one specific draft."
             )
         resolved = next(entry for entry in catalog if entry["draft_name"] == matching_drafts[0])
-        _emit("resolving", f"Auto-resolved to {resolved['draft_name']} (only draft mentioning {query!r})")
+        _emit("resolving", f"Auto-resolved to {resolved['draft_name']} (only draft mentioning {display_query!r})")
 
     draft_name = resolved["draft_name"]
-    _emit("searching", f"Searching evolution dataset for {query!r}…")
+    _emit("searching", f"Searching evolution dataset for {display_query!r}…")
     segments = (
         db.session.query(DocumentSegment)
         .filter_by(dataset_id=resolved["evolution_dataset_id"])
@@ -1319,11 +1358,9 @@ def decision_thread(
     if resolved.get("mailarchive_dataset_id"):
         mailarchive_dataset = db.session.query(Dataset).filter_by(id=resolved["mailarchive_dataset_id"]).first()
 
-    needle = query.strip().lower()
-
     raw_matches = []
     for segment in segments:
-        if not segment.content or needle not in segment.content.lower():
+        if not segment.content or not all(n in segment.content.lower() for n in needles):
             continue
         match = _EVOLUTION_ENTRY_RE.match(segment.content)
         if not match:
@@ -1390,7 +1427,7 @@ def decision_thread(
     return {
         "draft_name": draft_name,
         "rfc_number": resolved.get("rfc_number"),
-        "query": query,
+        "query": display_query,
         "lanes": lanes,
     }
 
@@ -2158,7 +2195,9 @@ def _verify_answer(
         # top_p omitted: some model providers (e.g. Anthropic's newer Claude
         # models) reject a request that sets both temperature and top_p,
         # and top_p=1 was a no-op default anyway.
-        model_parameters={"temperature": 0.1},
+        # max_tokens caps generation explicitly -- see the lane-discussion call
+        # above for why a credential-level max_tokens alone isn't enough.
+        model_parameters={"temperature": 0.1, "max_tokens": 1500},
         tools=[],
         stop=[],
         stream=False,
@@ -3503,7 +3542,9 @@ def ask(
             # top_p omitted: some model providers (e.g. Anthropic's newer
             # Claude models) reject a request that sets both temperature
             # and top_p, and top_p=1 was a no-op default anyway.
-            model_parameters={"temperature": 0.3},
+            # max_tokens caps generation explicitly -- see the lane-discussion call
+            # above for why a credential-level max_tokens alone isn't enough.
+            model_parameters={"temperature": 0.3, "max_tokens": 1500},
             tools=[] if is_last else tools,
             stop=[],
             stream=False,

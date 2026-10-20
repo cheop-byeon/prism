@@ -189,6 +189,61 @@ class AgenticRagSessionService:
         return {"session_id": session_id, "shared": shared}
 
     @staticmethod
+    def save_decision_thread(
+        session_id: str,
+        *,
+        account: Account,
+        draft_hint: str,
+        query: str,
+        model_provider: str,
+        model_name: str,
+        data: dict,
+    ) -> None:
+        """Upserts this session's one Decision history slot (see
+        IetfSessionDecisionThread's own docstring for why it's a single
+        slot, not a history). Owner-only, same convention as
+        set_session_shared -- a no-op (not an error) for anyone else, so a
+        non-owner running Track phrase on a shared session still sees
+        their own live result without silently overwriting the owner's
+        saved one.
+        """
+        from models.ietf_session_decision_thread import IetfSessionDecisionThread
+
+        conversation = AgenticRagSessionService.get_session(session_id, account=account)
+        if conversation is None:
+            return
+        row = db.session.query(IetfSessionDecisionThread).filter_by(conversation_id=session_id).first()
+        if row is None:
+            row = IetfSessionDecisionThread(conversation_id=session_id)
+            db.session.add(row)
+        row.draft_hint = draft_hint or ""
+        row.query = query
+        row.model_provider = model_provider or ""
+        row.model_name = model_name or ""
+        row.data = json.dumps(data)
+        db.session.commit()
+
+    @staticmethod
+    def get_decision_thread(session_id: str) -> dict | None:
+        """Read-only -- no ownership check here, same reasoning as
+        get_turns: callers already resolved session_id through
+        get_session_for_view, so a shared session's tracked phrase is
+        visible read-only to whoever it was shared with too.
+        """
+        from models.ietf_session_decision_thread import IetfSessionDecisionThread
+
+        row = db.session.query(IetfSessionDecisionThread).filter_by(conversation_id=session_id).first()
+        if row is None:
+            return None
+        return {
+            "draft_hint": row.draft_hint,
+            "query": row.query,
+            "model_provider": row.model_provider,
+            "model_name": row.model_name,
+            "data": json.loads(row.data),
+        }
+
+    @staticmethod
     def list_sessions(*, account: Account, last_id: str | None = None, limit: int = 30) -> dict:
         """Real cursor pagination via ConversationService.pagination_by_last_id
         (the same method a normal Dify app's conversation list uses) instead
@@ -393,6 +448,7 @@ class AgenticRagSessionService:
                     "trace": trace,
                     "claim_labels": meta.get("claim_labels", {}),
                     "evidence": meta.get("evidence", []),
+                    "draft": meta.get("draft"),
                     "created_at": row.created_at.isoformat() + "Z",  # see list_sessions' own note
                     "feedback": feedback_row.rating.value if feedback_row else None,
                     "usage": {
@@ -425,6 +481,7 @@ class AgenticRagSessionService:
         model_name: str | None = None,
         claim_labels: dict | None = None,
         evidence: list | None = None,
+        draft: str | None = None,
     ) -> str:
         usage = usage or {}
         message = Message(
@@ -455,7 +512,9 @@ class AgenticRagSessionService:
             # {citation_number: status} round-trips as string keys after
             # this -- already true of the live (non-reloaded) SSE path too,
             # via jsonify, so both paths hand the frontend the same shape.
-            message_metadata=json.dumps({"tier": tier, "claim_labels": claim_labels or {}, "evidence": evidence or []}),
+            message_metadata=json.dumps(
+                {"tier": tier, "claim_labels": claim_labels or {}, "evidence": evidence or [], "draft": draft}
+            ),
         )
         db.session.add(message)
         db.session.flush()  # populate message.id before the thoughts below reference it
@@ -661,3 +720,43 @@ class AgenticRagSessionService:
                 "satisfaction_pct": round(totals_satisfaction_pct, 1),
             },
         }
+
+    @staticmethod
+    def get_per_account_observability_stats(*, days: int = 30) -> list[dict]:
+        """Same window/cost/token fields as get_observability_stats' own
+        totals, just grouped by from_account_id instead of collapsed into
+        one org-wide row -- lets a data admin spot one account running up
+        unusual usage rather than only ever seeing the aggregate. Messages.
+        from_account_id is already the real author (set once per turn by
+        append_turn), so this needs no join through Conversation at all.
+        """
+        since = naive_utc_now() - timedelta(days=days)
+
+        rows = db.session.execute(
+            sa_text("""
+                SELECT
+                    m.from_account_id AS account_id,
+                    a.email AS email,
+                    COUNT(*) AS turns,
+                    COALESCE(SUM(m.message_tokens) + SUM(m.answer_tokens), 0) AS tokens,
+                    COALESCE(SUM(m.total_price), 0) AS cost,
+                    COUNT(DISTINCT m.conversation_id) AS sessions
+                FROM messages m
+                JOIN accounts a ON a.id = m.from_account_id
+                WHERE m.app_id = :app_id AND m.created_at >= :since
+                GROUP BY m.from_account_id, a.email
+                ORDER BY cost DESC
+            """),
+            {"app_id": _PRISM_APP_ID, "since": since},
+        ).mappings().all()
+        return [
+            {
+                "account_id": row["account_id"],
+                "email": row["email"],
+                "turns": row["turns"],
+                "tokens": row["tokens"],
+                "cost": float(row["cost"]),
+                "sessions": row["sessions"],
+            }
+            for row in rows
+        ]

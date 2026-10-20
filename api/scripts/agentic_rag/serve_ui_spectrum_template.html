@@ -77,7 +77,8 @@
     width: 320px; flex-shrink: 0; display: flex; flex-direction: column;
     background: var(--po-shell); border-right: 1px solid var(--po-line); padding: 18px 18px;
   }
-  .po-brand { font-size: 15px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 18px; padding: 0 4px; }
+  .po-brand { display: flex; align-items: center; gap: 8px; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; margin-bottom: 18px; padding: 0 4px; }
+  .po-brand-mark { width: 22px; height: 16px; flex-shrink: 0; color: var(--po-muted); }
   .po-new {
     display: flex; align-items: center; gap: 8px; width: 100%; margin-bottom: 16px;
     background: var(--po-tint); color: var(--po-accent); border: 1px solid var(--po-tint);
@@ -170,7 +171,6 @@
     display: flex; align-items: center; justify-content: space-between;
     font-size: 11px; color: var(--po-muted);
   }
-  .po-preview { font-size: 10px; letter-spacing: 0.04em; }
 
   /* Capped-width column, centered -- but a wider cap than before, so the
      centering gutter next to the 320px-wide .po-rail stays narrow instead
@@ -227,7 +227,33 @@
     display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 5px;
     background: var(--po-tint); color: var(--po-accent); font-size: 10px; margin-right: 6px;
   }
+  /* Without this, the hidden attribute on poModelBadge/poShareBadge does
+     nothing -- .po-pill's own display: inline-flex beats the browser's
+     default [hidden] UA rule, so "hidden" pills still rendered as empty
+     purple boxes (confirmed live: exactly what showed up beside a brand
+     new investigation with nothing to say yet). Same pattern already
+     used elsewhere in this file for .po-page/.po-composer-bar/
+     .po-selectionbar's own [hidden] overrides. */
+  .po-pill[hidden] { display: none; }
   .po-pill.po-warn { background: transparent; color: var(--po-warn); padding-left: 0; }
+  /* Persistent, page-independent indicator that a research run is still
+     going -- shown in .po-top so it's visible no matter which page the
+     user has switched to (go() only toggles [data-page] visibility, it
+     never touches the running EventSource -- a run already keeps going in
+     the background regardless; this just makes that fact visible). */
+  .po-research-status { cursor: pointer; border: none; font: inherit; }
+  .po-research-status.po-research-done { background: var(--po-added-bg); color: var(--po-added); }
+  /* A brief, self-dismissing notice -- not a persistent banner, since the
+     status pill above already covers "is it still going". Bottom-right,
+     same inverted-ink treatment as a typical snackbar. */
+  .po-toast {
+    position: fixed; bottom: 20px; right: 20px; max-width: 320px; z-index: 1000;
+    background: var(--po-ink); color: var(--po-bg); padding: 10px 14px; border-radius: 8px;
+    font-size: 12px; line-height: 1.4; box-shadow: 0 4px 16px rgba(0,0,0,.25);
+    opacity: 0; transform: translateY(8px); transition: opacity .2s ease, transform .2s ease;
+  }
+  .po-toast[hidden] { display: none; }
+  .po-toast.po-toast-show { opacity: 1; transform: translateY(0); }
   .po-viewtabs { display: flex; gap: 22px; border-bottom: 1px solid var(--po-line); margin: 10px 0 14px; flex-wrap: wrap; }
   .po-viewtabs button { background: transparent; border: none; padding: 0 0 10px; font-size: 12px; color: var(--po-muted); border-bottom: 2px solid transparent; }
   .po-viewtabs button[aria-pressed="true"] { border-color: var(--po-accent); color: var(--po-accent); }
@@ -268,6 +294,12 @@
   }
   .po-primary:hover { filter: brightness(1.08); }
   .po-secondary { background: transparent; color: var(--po-muted); border: 1px solid var(--po-line); border-radius: 7px; padding: 8px 14px; font-size: 12px; }
+  .po-danger {
+    background: transparent; color: var(--po-warn); border: 1px solid var(--po-warn); border-radius: 7px;
+    padding: 4px 10px; font-size: 11px; width: auto;
+  }
+  .po-danger:hover { background: var(--po-warn); color: #fff; }
+  .user-actions { display: flex; gap: 6px; flex-wrap: wrap; }
   .filter-toggle-row { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
   /* A labeled Material-style switch, not a plain active/inactive button --
      the track itself (not the button chrome) carries the on/off color
@@ -841,9 +873,23 @@
 <body>
 <script>const CONSOLE_API_BASE = "__API_BASE__";
 const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
+<div id="poToast" class="po-toast" hidden></div>
 <div class="po-shell">
   <aside class="po-rail">
-    <div class="po-brand">prism</div>
+    <div class="po-brand">
+      <svg class="po-brand-mark" viewBox="0 0 44 32" role="img" aria-label="Prism logo: a beam entering a prism and splitting into a spectrum">
+        <line x1="2" y1="16" x2="15" y2="16" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+        <polygon points="14,3 14,29 30,16" fill="var(--po-soft)" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+        <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+      </svg>
+      <span>Prism</span>
+    </div>
     <button id="poNewBtn" class="po-new" type="button">New investigation</button>
     <nav class="po-railnav" aria-label="Workspace">
       <div class="pm-navlabel">Research</div>
@@ -856,6 +902,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Archive coverage</button>
       <div class="pm-navlabel">Operations</div>
       <button data-goto="usage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 20V10M11 20V4M18 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Usage</button>
+      <button data-goto="users"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c0-3.3 2.7-5.8 6-5.8s6 2.5 6 5.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M15.5 5.3a3.2 3.2 0 0 1 0 6.3M18.3 19c0-2.6-1.6-4.7-3.9-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Users</button>
       <button data-goto="tools"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>How it works</button>
     </nav>
     <div class="po-railcaption">Recent investigations</div>
@@ -878,12 +925,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
     <header class="po-top">
       <span id="poBreadcrumb">Investigations</span>
       <div style="display:flex; align-items:center; gap:14px;">
+        <button type="button" id="poResearchStatusPill" class="po-pill po-research-status" hidden></button>
         <div class="po-theme-toggle" role="group" aria-label="Theme">
           <button type="button" data-theme="light" aria-pressed="false">Light</button>
           <button type="button" data-theme="dark" aria-pressed="false">Dark</button>
           <button type="button" data-theme="auto" aria-pressed="true">Auto</button>
         </div>
-        <span class="po-preview">Prism</span>
       </div>
     </header>
 
@@ -951,6 +998,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
             role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="poDraftListbox" autocomplete="off">
           <ul id="poDraftListbox" class="po-draftcombo-list" role="listbox" hidden></ul>
         </div>
+        <select id="poProvider"><option value="">(default provider)</option></select>
         <select id="poModel"><option value="">(default model)</option></select>
         <input id="poQuery" type="text" placeholder="Why was INIT_CWND set to 4?">
         <button id="poAskBtn" class="po-primary" type="button">Ask</button>
@@ -1193,6 +1241,12 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <div id="poUsageBody"><p class="corpora-hint">Loading…</p></div>
     </section>
 
+    <section class="po-page" data-page="users" hidden>
+      <div class="po-eyebrow">Operations / Users</div>
+      <div class="pm-pagehead"><div><h1 class="po-title">Who has access.</h1><p>Every registered account -- data maintainers only.</p></div></div>
+      <div id="poUsersBody"><p class="corpora-hint">Loading…</p></div>
+    </section>
+
     <section class="po-page" data-page="tools" hidden>
       <div class="po-eyebrow">Operations / How it works</div>
       <div class="pm-pagehead"><div><h1 class="po-title">Behind every finding,<br>a traceable process.</h1><p>The agent's real tools and the instructions that combine them into an answer.</p></div></div>
@@ -1261,7 +1315,7 @@ const BREADCRUMBS = {
   workspace: 'Workspace / Overview', document: 'Documents',
   investigation: 'Investigations', coverage: 'Library / Coverage',
   graph: 'Research / RFC Graph', sources: 'Library / Sources',
-  usage: 'Operations / Usage', tools: 'Operations / How it works',
+  usage: 'Operations / Usage', users: 'Operations / Users', tools: 'Operations / How it works',
 };
 // Each of these fetches real data the first time its page is opened, not
 // on initial load -- same lazy-load reasoning as the mockup's own
@@ -1285,6 +1339,7 @@ function go(name) {
     _pageOpened[name] = true;
     if (name === 'tools') loadToolsPage();
     if (name === 'usage') loadUsagePage();
+    if (name === 'users') loadUsersPage();
     if (name === 'sources') loadSourcesPage();
     if (name === 'graph') loadGraphPage();
   }
@@ -1294,7 +1349,10 @@ document.querySelectorAll('[data-goto]').forEach((b) => b.addEventListener('clic
 function view(name) {
   document.querySelectorAll('[data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
   document.querySelectorAll('[data-view]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.view === name)));
-  if (name === 'timeline') evApplyDefaultScale();
+  if (name === 'timeline') {
+    evApplyDefaultScale();
+    updateThreadQueryPlaceholder();
+  }
 }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
 
@@ -1360,15 +1418,34 @@ document.getElementById('poNewBtn').addEventListener('click', () => {
   go('investigation');
   currentSessionId = null;
   currentSessionIsOwner = true;
-  document.getElementById('poShareBadge').hidden = true;
-  document.getElementById('poModelBadge').hidden = true;
+  const poShareBadgeEl = document.getElementById('poShareBadge');
+  poShareBadgeEl.hidden = true;
+  poShareBadgeEl.textContent = '';
+  const poModelBadgeEl = document.getElementById('poModelBadge');
+  poModelBadgeEl.hidden = true;
+  poModelBadgeEl.textContent = '';
   lastInvestigation = null;
   activeAskToken++;
+  activeThreadToken++;
+  lastAskedQuery = '';
+  document.getElementById('poThreadQuery').value = '';
+  poThreadDraftEl.value = '';
+  poThreadStatusEl.textContent = '';
+  poThreadBodyEl.innerHTML = '';
   document.getElementById('poConversation').innerHTML = '';
   setActivityData([], true, false);
   document.getElementById('poInvestPills').innerHTML = '';
   document.getElementById('poUsageBar').textContent = '';
   document.getElementById('poInvestTitle').textContent = 'Ask a question about an RFC or draft';
+  // A genuinely fresh composer -- confirmed live this previously carried
+  // the prior investigation's draft AND provider/model selection straight
+  // into "New investigation" (looked like stale caching: open a session
+  // that used a specific draft+model, hit New investigation, and both
+  // were still sitting there, pre-selected, from the session just left).
+  poDraftEl.value = '';
+  poProviderEl.value = '';
+  poPopulateModelOptionsForProvider('');
+  document.getElementById('poDraftBadge').textContent = '(let the agent discover)';
   updateInvestigationComposerVisibility();
   poSessionSearchEl.value = '';
   loadSessionList({ q: '' });
@@ -1400,15 +1477,57 @@ fetch(`${PRISM_PREFIX}/api/tools`).then((r) => r.json()).then((tools) => {
 }).catch(() => {});
 function toolLabel(name) { return toolDisplayNames[name] || name; }
 
-// -- Model picker ----------------------------------------------------------
+// -- Model picker ------------------------------------------------------------
+// Split into two <select>s (provider, then that provider's models) instead
+// of one long list mixing every provider's models together.
+const poProviderEl = document.getElementById('poProvider');
 const poModelEl = document.getElementById('poModel');
-fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
-  (data.models || []).forEach((m) => {
+let poModelsByProvider = {};
+
+function poPopulateModelOptionsForProvider(providerId) {
+  while (poModelEl.options.length > 1) poModelEl.remove(1);
+  const group = poModelsByProvider[providerId];
+  if (!group) return;
+  for (const m of group.models) {
     const opt = document.createElement('option');
     opt.value = `${m.provider}|||${m.model}`;
     opt.textContent = m.byok ? `${m.label} (your key)` : m.label;
     poModelEl.appendChild(opt);
+  }
+}
+
+poProviderEl.addEventListener('change', () => {
+  poPopulateModelOptionsForProvider(poProviderEl.value);
+});
+
+// Selects a provider+model pair across both <select>s -- used when
+// reopening a past session to restore whichever model it last actually
+// used. Silently does nothing if that provider/model isn't among the
+// currently-configured options.
+function poSelectModelPair(providerId, modelId) {
+  if (!providerId || !modelId) return;
+  if (!Array.from(poProviderEl.options).some((o) => o.value === providerId)) return;
+  poProviderEl.value = providerId;
+  poPopulateModelOptionsForProvider(providerId);
+  const pairValue = `${providerId}|||${modelId}`;
+  if (Array.from(poModelEl.options).some((o) => o.value === pairValue)) {
+    poModelEl.value = pairValue;
+  }
+}
+
+fetch(`${PRISM_PREFIX}/api/models`).then((r) => r.json()).then((data) => {
+  (data.models || []).forEach((m) => {
+    if (!poModelsByProvider[m.provider]) {
+      poModelsByProvider[m.provider] = { label: m.provider_label || m.provider, models: [] };
+    }
+    poModelsByProvider[m.provider].models.push(m);
   });
+  for (const [providerId, group] of Object.entries(poModelsByProvider)) {
+    const opt = document.createElement('option');
+    opt.value = providerId;
+    opt.textContent = group.label;
+    poProviderEl.appendChild(opt);
+  }
 }).catch(() => {});
 
 // -- Draft pickers (Investigations' own + Decision history's separate
@@ -1661,7 +1780,7 @@ poSessionListEl.addEventListener('click', (e) => {
       if (shareBtn.dataset.shareId === currentSessionId) {
         const badgeEl = document.getElementById('poShareBadge');
         badgeEl.hidden = !nextShared;
-        if (nextShared) badgeEl.textContent = 'Shared by you';
+        badgeEl.textContent = nextShared ? 'Shared by you' : '';
       }
     }).catch(() => {});
     return;
@@ -1752,6 +1871,7 @@ function openSession(id) {
       shareBadgeEl.textContent = 'Shared by you';
     } else {
       shareBadgeEl.hidden = true;
+      shareBadgeEl.textContent = '';
     }
     // Which LLM actually answered, and when -- same reasoning as the rail
     // row's own subtitle (see renderSessionRow/shortModelLabel): two runs
@@ -1765,10 +1885,25 @@ function openSession(id) {
       modelBadgeEl.textContent = [modelLabel, timeLabel].filter(Boolean).join(' · ');
     } else {
       modelBadgeEl.hidden = true;
+      modelBadgeEl.textContent = '';
     }
     activeAskToken++;
+    activeThreadToken++;
+    document.getElementById('poThreadQuery').value = '';
+    poThreadDraftEl.value = '';
+    poThreadStatusEl.textContent = '';
+    poThreadBodyEl.innerHTML = '';
+    // Restores this session's own last Track phrase run, if it has one --
+    // without this, reopening a past "within one document" session always
+    // showed Decision history as empty, even after a real (and possibly
+    // costly) multi-lane LLM run had already produced a result for it.
+    if (data.decision_thread) {
+      poThreadDraftEl.value = data.decision_thread.draft_hint || '';
+      document.getElementById('poThreadQuery').value = data.decision_thread.query || '';
+      renderThread(data.decision_thread.data);
+    }
     if (data.model_provider && data.model_id) {
-      poModelEl.value = `${data.model_provider}|||${data.model_id}`;
+      poSelectModelPair(data.model_provider, data.model_id);
     }
     const convEl = document.getElementById('poConversation');
     convEl.innerHTML = '';
@@ -1777,11 +1912,29 @@ function openSession(id) {
     updateSessionUsageBar();
     const lastTurn = (data.turns || [])[(data.turns || []).length - 1];
     if (lastTurn) {
-      lastInvestigation = { query: lastTurn.query, draft: '', trace: lastTurn.trace || [] };
+      lastInvestigation = { query: lastTurn.query, draft: lastTurn.draft || '', trace: lastTurn.trace || [] };
+      // Restores the composer's own state to match this session's last
+      // turn, same reasoning as poSelectModelPair above -- without this,
+      // reopening a past "within one document" session left the draft
+      // field (and Decision history's own defaulting/placeholder, which
+      // both read off this) looking just like a fresh "let the agent
+      // discover" one, even though a specific document was actually used.
+      poDraftEl.value = lastTurn.draft || '';
+      lastAskedQuery = lastTurn.query || '';
+      // poDraftEl itself lives inside poComposerBar, which
+      // updateInvestigationComposerVisibility() just hid (a reopened
+      // session always "hasConversation") -- so it's set correctly above
+      // for Decision history/follow-ups to read, but invisible. This badge
+      // is the one draft indicator still on screen either way, and before
+      // this it was only ever written by a live runAsk(), so reopening a
+      // past "within one document" session showed the generic placeholder
+      // even though a specific document was actually used.
+      document.getElementById('poDraftBadge').textContent = lastTurn.draft || '(let the agent discover)';
       document.getElementById('poInvestTitle').textContent = lastTurn.query;
       document.getElementById('poInvestPills').innerHTML = deriveStatusPills(lastTurn.answer);
       setActivityData(lastTurn.trace || [], false, true);
     } else {
+      document.getElementById('poDraftBadge').textContent = '(let the agent discover)';
       setActivityData([], true, false);
     }
     go('investigation');
@@ -2477,6 +2630,78 @@ let activeAskStop = null;
 // for shared UI; the actual server-side run isn't cancelled by this (see
 // the pre-existing gap on "New investigation" not cancelling either).
 let activeAskToken = 0;
+// The last question actually asked in this investigation -- poQuery itself
+// gets cleared back to empty once a run finishes (see stop() below), so
+// Decision history's phrase-tracking placeholder (updateThreadQueryPlaceholder)
+// needs its own copy to suggest keywords from, long after the input is empty.
+let lastAskedQuery = '';
+// Same staleness guard as activeAskToken, for Track phrase runs -- without
+// it, starting a trace in one investigation and then switching to a
+// different one (new or reopened) before it finishes let the first run's
+// result paint into whichever investigation happened to be on screen when
+// it arrived, looking like one Track phrase had fired across two sessions.
+// Bumped everywhere activeAskToken is (New investigation, openSession).
+let activeThreadToken = 0;
+
+// -- Background-run awareness: a brief toast on start, plus a persistent
+// status pill in .po-top (visible on every page, not just Investigation) --
+// switching pages never actually stops a running /api/research request
+// (go() only toggles [data-page] visibility), but there was previously no
+// indication anywhere outside Findings that a run was still going. -------
+let _toastHideTimer = null;
+function showToast(message, ms = 6000) {
+  const el = document.getElementById('poToast');
+  if (_toastHideTimer) clearTimeout(_toastHideTimer);
+  el.textContent = message;
+  el.hidden = false;
+  // Forces a style recalc so the opacity/transform transition actually
+  // plays -- toggling the class in the same tick as removing [hidden]
+  // would otherwise just skip straight to the end state.
+  void el.offsetWidth;
+  el.classList.add('po-toast-show');
+  _toastHideTimer = setTimeout(() => {
+    el.classList.remove('po-toast-show');
+    setTimeout(() => { el.hidden = true; }, 200);
+  }, ms);
+}
+
+let _researchStatusTimer = null;
+let _researchStatusStartedAt = 0;
+function startResearchStatusPill() {
+  const pill = document.getElementById('poResearchStatusPill');
+  pill.onclick = null;
+  pill.classList.remove('po-research-done');
+  _researchStatusStartedAt = Date.now();
+  const tick = () => {
+    const elapsed = Math.round((Date.now() - _researchStatusStartedAt) / 1000);
+    pill.textContent = `⏳ Researching… ${elapsed}s`;
+  };
+  tick();
+  pill.hidden = false;
+  if (_researchStatusTimer) clearInterval(_researchStatusTimer);
+  _researchStatusTimer = setInterval(tick, 1000);
+}
+// outcome: 'done' or 'error'. turn: the conversation-turn DOM node this run
+// rendered into (may already be detached if the user since started a new
+// investigation or reopened a different session -- turn.isConnected covers
+// that instead of assuming it's still reachable).
+function finishResearchStatusPill(outcome, turn) {
+  if (_researchStatusTimer) { clearInterval(_researchStatusTimer); _researchStatusTimer = null; }
+  const pill = document.getElementById('poResearchStatusPill');
+  if (outcome !== 'done') {
+    pill.hidden = true;
+    return;
+  }
+  pill.textContent = '✓ Answer ready';
+  pill.classList.add('po-research-done');
+  pill.hidden = false;
+  pill.onclick = () => {
+    go('investigation');
+    view('findings');
+    if (turn.isConnected) turn.scrollIntoView({ behavior: 'smooth' });
+    pill.hidden = true;
+  };
+}
 
 // poComposerBar (the entry form, above the conversation) and poFollowupForm
 // (below it) both just write into poQuery and call runAsk() -- identical
@@ -2505,7 +2730,10 @@ function runAsk() {
   const query = queryEl.value.trim();
   if (!query) return;
   if (activeAskStop) { activeAskStop(); return; }
+  lastAskedQuery = query;
   const askToken = ++activeAskToken;
+  showToast('This may take a few minutes. Feel free to switch pages — your answer will be waiting when it’s done.');
+  startResearchStatusPill();
 
   const convEl = document.getElementById('poConversation');
   const btnEl = document.getElementById('poAskBtn');
@@ -2567,6 +2795,13 @@ function runAsk() {
 
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    // Updates the background-run status pill regardless of staleness --
+    // unlike the turn-rendering below, this is the one piece of feedback
+    // that's supposed to still reach the user even after they've switched
+    // to a different investigation while this run kept going in the
+    // background.
+    if (msg.type === 'result') finishResearchStatusPill('done', turn);
+    else if (msg.type === 'error') finishResearchStatusPill('error', turn);
     // Stale once the user has navigated to a different investigation
     // (openSession/"New investigation" bump activeAskToken) -- the
     // conversation turn this closure renders into may be long gone, and
@@ -2611,6 +2846,10 @@ function runAsk() {
         currentSessionId = msg.data.session_id;
         loadSessionList();
       }
+      // After session_id adoption above, so this attaches to the very
+      // same investigation the main answer just saved to, instead of
+      // creating a second one of its own.
+      autoTrackDecisionHistory(query, draftVal);
       stop();
     } else if (msg.type === 'error') {
       if (steps.length) steps[steps.length - 1].status = 'errored';
@@ -2625,6 +2864,7 @@ function runAsk() {
   };
   source.onerror = () => {
     if (finished) return;
+    finishResearchStatusPill('error', turn);
     if (steps.length) steps[steps.length - 1].status = 'errored';
     if (askToken === activeAskToken) setActivityData(steps, true, true);
     render(`<div class="po-error">Connection lost.</div>${retryButtonHtml}`);
@@ -2731,6 +2971,7 @@ let dtTab = 'passage';
 let dtOcc = 0;
 const poThreadStatusEl = document.getElementById('poThreadStatus');
 const poThreadBodyEl = document.getElementById('poThreadBody');
+const poThreadBtn = document.getElementById('poThreadBtn');
 
 // Union of every revision any track actually has a captured excerpt at --
 // real, not a fabricated "every revision this draft ever had" range, since
@@ -2915,13 +3156,29 @@ function evSelectScale(scale) {
   document.getElementById('poEvWithin').hidden = scale !== 'within';
   document.getElementById('poEvAcross').hidden = scale !== 'across';
   if (scale === 'across') buildEvolutionAcross();
+  // Mirrors the main composer's own document choice into this panel's
+  // combobox -- the user already told us which document this is about by
+  // picking it up there, so asking again here would just be redundant.
+  // Only when still empty, so it never clobbers a document picked by hand
+  // directly in this panel.
+  if (scale === 'within' && !poThreadDraftEl.value && poDraftEl.value) {
+    poThreadDraftEl.value = poDraftEl.value;
+  }
 }
 document.querySelectorAll('[data-evscale]').forEach((b) => b.addEventListener('click', () => evSelectScale(b.dataset.evscale)));
-// Picks the default sub-tab each time Decision history is opened: a
-// "panorama"-style investigation that actually touched two or more
-// published RFCs opens straight on Across specifications (nothing to
-// manually set up), everything else opens on Within a document as before.
+// Picks the default sub-tab each time Decision history is opened. A single
+// document already explicitly chosen in the main composer is a much
+// stronger "this is a within-one-document question" signal than counting
+// how many RFCs this investigation's tool calls happened to touch, so it
+// wins first; otherwise, a "panorama"-style investigation that actually
+// touched two or more published RFCs opens straight on Across
+// specifications (nothing to manually set up), everything else opens on
+// Within a document as before.
 function evApplyDefaultScale() {
+  if (poDraftEl.value) {
+    evSelectScale('within');
+    return;
+  }
   evSelectScale(evUniqueRfcDigits().length >= 2 ? 'across' : 'within');
 }
 let evRfcData = [];
@@ -3027,44 +3284,158 @@ document.getElementById('poEvStages').addEventListener('click', (e) => {
   if (edgeBtn) evSelectEdge(Number(edgeBtn.dataset.evedge));
 });
 
+// Suggests likely "exact phrase" candidates to track, pulled from the
+// investigation's own last question -- quoted phrases first (the user
+// already told us exactly what to track), then protocol-style identifiers
+// and RFC numbers, since those are what single-draft decision questions
+// actually turn on ("Why was INIT_CWND set to 4?" -> INIT_CWND). Only ever
+// surfaced as the input's placeholder text below -- never written into
+// .value or auto-submitted, so the user still decides what to type and
+// still has to click Track phrase themselves.
+function extractPhraseCandidates(text) {
+  if (!text) return [];
+  const candidates = [];
+  const seen = new Set();
+  const add = (raw) => {
+    const t = raw.trim();
+    if (t.length < 2) return;
+    const key = t.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(t);
+  };
+  (text.match(/"([^"]+)"/g) || []).forEach((q) => add(q.slice(1, -1)));
+  (text.match(/\bRFC\s?\d{3,5}\b/gi) || []).forEach(add);
+  (text.match(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/g) || []).forEach(add);
+  // Excludes a bare "RFC" -- already covered above as part of "RFC 2581",
+  // so matching it again here would just be redundant noise.
+  (text.match(/\b[A-Z]{2,}\b/g) || []).filter((w) => w !== 'RFC').forEach(add);
+  return candidates.slice(0, 3);
+}
+function buildThreadQueryPlaceholder(query) {
+  const candidates = extractPhraseCandidates(query);
+  if (!candidates.length) return 'e.g. "An INIT_CWND of"';
+  return 'e.g. ' + candidates.map((c) => `"${c}"`).join(' or ');
+}
+function updateThreadQueryPlaceholder() {
+  document.getElementById('poThreadQuery').placeholder = buildThreadQueryPlaceholder(lastAskedQuery);
+}
+
+// Automatically runs Decision history right after a main answer, when the
+// question was scoped to one specific draft -- no manual keyword typing
+// or Track phrase click needed, per explicit direction: "right after the
+// main session finished... extract keyword combinations and search
+// decisions that appear to have all keywords." Reuses the exact same
+// keyword extraction as the placeholder hint (extractPhraseCandidates),
+// AND-combining every candidate found via trackDecision's own
+// comma-splitting convention (see decision_thread's own docstring for why
+// "ECN, backoff" together beats either alone for a question that names
+// both). A no-op if the question had no draft (no single document to
+// scope the search to), no extractable keyword, or a Track phrase run is
+// already active (trackDecision's own disabled-button guard).
+function autoTrackDecisionHistory(query, draftHint) {
+  if (!draftHint) return;
+  const candidates = extractPhraseCandidates(query);
+  if (!candidates.length) return;
+  poThreadDraftEl.value = draftHint;
+  document.getElementById('poThreadQuery').value = candidates.join(', ');
+  trackDecision();
+}
+
 document.getElementById('poThreadForm').addEventListener('submit', (e) => {
   e.preventDefault();
   trackDecision();
 });
 
 function trackDecision() {
+  // Refuses to start a second, overlapping Track phrase run (this endpoint
+  // has no cancel route the way /api/research does) -- without this, a
+  // second click while one was still in flight fired two concurrent runs
+  // that both eventually wrote into the same poThreadBody/poThreadStatus,
+  // racing each other and doubling the real LLM cost.
+  if (poThreadBtn.disabled) return;
   const draft = poThreadDraftEl.value;
   const query = document.getElementById('poThreadQuery').value.trim();
   if (!query) return;
 
+  // Captured once, checked on every SSE event below -- if the user
+  // switches to a different investigation (new or reopened; see
+  // activeThreadToken's own bumps) before this run finishes, its result is
+  // silently dropped instead of painting into whatever investigation
+  // happens to be on screen when it arrives.
+  const threadToken = ++activeThreadToken;
+  poThreadBtn.disabled = true;
+  const originalBtnText = poThreadBtn.textContent;
+  poThreadBtn.textContent = 'Tracking…';
   poThreadStatusEl.textContent = 'Starting…';
   poThreadBodyEl.innerHTML = '';
 
-  const params = new URLSearchParams({ query });
+  // A comma splits the box into several AND-matched keywords instead of
+  // one exact phrase -- same convention the automatic post-answer
+  // tracking uses (autoTrackDecisionHistory), now also typeable by hand:
+  // "ECN, backoff" finds decisions mentioning both, not either alone (see
+  // decision_thread's own docstring for why that's the more useful
+  // default for more-than-one-word questions).
+  const keywordParts = query.split(',').map((k) => k.trim()).filter(Boolean);
+  const params = new URLSearchParams();
+  if (keywordParts.length > 1) {
+    params.set('keywords', keywordParts.join(','));
+  } else {
+    params.set('query', query);
+  }
   if (draft) params.set('draft', draft);
+  // Lets the backend save this run against the real investigation it
+  // belongs to (see IetfSessionDecisionThread) -- omitted (not an error)
+  // if no session exists yet, same as /api/research's own session_id.
+  if (currentSessionId) params.set('session_id', currentSessionId);
+  if (poModelEl.value) {
+    const [modelProvider, modelName] = poModelEl.value.split('|||');
+    params.set('model_provider', modelProvider);
+    params.set('model_name', modelName);
+  }
   const source = new EventSource(`${PRISM_PREFIX}/api/decision-thread?${params}`);
   let finished = false;
+  const stop = () => {
+    finished = true;
+    source.close();
+    if (threadToken === activeThreadToken) {
+      poThreadBtn.disabled = false;
+      poThreadBtn.textContent = originalBtnText;
+    }
+  };
 
   source.onmessage = (ev) => {
     const msg = JSON.parse(ev.data);
+    if (threadToken !== activeThreadToken) {
+      if (msg.type !== 'progress') stop();
+      return;
+    }
     if (msg.type === 'progress') {
       poThreadStatusEl.textContent = msg.message || 'Working…';
     } else if (msg.type === 'result') {
-      finished = true;
-      source.close();
+      stop();
       poThreadStatusEl.textContent = '';
       renderThread(msg.data);
+      // Adopts whatever session this run was saved against -- the route
+      // creates one itself if none existed yet (see api_decision_thread),
+      // same reasoning as runAsk()'s own session_id adoption: without
+      // this, Track phrase run before any main question had nowhere
+      // visible to be restored from on reopen, even though it was really
+      // saved.
+      if (msg.data.session_id && msg.data.session_id !== currentSessionId) {
+        currentSessionId = msg.data.session_id;
+        loadSessionList();
+      }
     } else if (msg.type === 'error') {
-      finished = true;
-      source.close();
+      stop();
       poThreadStatusEl.textContent = '';
       poThreadBodyEl.innerHTML = `<div class="po-error">${escapeHtml(msg.message)}</div>`;
     }
   };
   source.onerror = () => {
     if (finished) return;
-    finished = true;
-    source.close();
+    if (threadToken !== activeThreadToken) { stop(); return; }
+    stop();
     poThreadStatusEl.textContent = '';
     poThreadBodyEl.innerHTML = '<div class="po-error">Connection lost.</div>';
   };
@@ -3735,11 +4106,123 @@ function runUsage() {
       <div class="pm-tablewrap"><table class="pm-table"><thead><tr><th>Tool</th><th>Calls</th></tr></thead><tbody>
         ${toolUsage.length ? toolUsage.map((t) => `<tr><td>${escapeHtml(toolLabel(t.tool))}</td><td>${t.calls.toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="2" class="corpora-hint">No tool calls in this range.</td></tr>'}
       </tbody></table></div>
+      <div class="po-sectionhead"><h2>By account</h2><small>Who's actually driving usage/cost this period</small></div>
+      <div class="pm-tablewrap"><table class="pm-table"><thead><tr><th>Account</th><th>Turns</th><th>Tokens</th><th>Cost</th><th>Sessions</th></tr></thead><tbody>
+        ${(data.by_account || []).length ? data.by_account.map((a) => `<tr><td>${escapeHtml(a.email)}</td><td>${a.turns.toLocaleString()}</td><td>${formatCompactNumber(a.tokens)}</td><td>$${a.cost.toFixed(4)}</td><td>${a.sessions.toLocaleString()}</td></tr>`).join('') : '<tr><td colspan="5" class="corpora-hint">No activity in this range.</td></tr>'}
+      </tbody></table></div>
     `;
   }).catch((err) => {
     bodyEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load usage data.')}</div>`;
   });
 }
+
+// -- Users -- real /api/admin/users (data-admin gated server-side, same
+// _is_data_admin check /api/observability already uses -- a non-admin
+// just sees the resulting {error} rendered inline, same handling as
+// every other gated fetch in this app).
+function loadUsersPage() {
+  const bodyEl = document.getElementById('poUsersBody');
+  bodyEl.innerHTML = '<p class="po-loading">Loading…</p>';
+  fetch(`${PRISM_PREFIX}/api/admin/users`).then((r) => r.json()).then((data) => {
+    if (data.error) throw new Error(data.error);
+    const users = data.users || [];
+    if (!users.length) {
+      bodyEl.innerHTML = '<p class="corpora-hint">No registered accounts.</p>';
+      return;
+    }
+    const rows = users.map((u) => {
+      const tenantNames = (u.tenants || []).map((t) => escapeHtml(t.tenant_name || t.tenant_id)).join(', ') || '&mdash;';
+      const adminBadge = u.is_data_admin ? ' <span class="po-pill">Admin</span>' : '';
+      const createdSecs = u.created_at ? new Date(u.created_at).getTime() / 1000 : null;
+      const loginSecs = u.last_login_at ? new Date(u.last_login_at).getTime() / 1000 : null;
+      const signedUp = createdSecs
+        ? `<span title="${escapeHtml(new Date(u.created_at).toLocaleString())}">${formatRelativeTime(createdSecs)}</span>`
+        : '&mdash;';
+      const lastLogin = loginSecs
+        ? `<span title="${escapeHtml(new Date(u.last_login_at).toLocaleString())}">${formatRelativeTime(loginSecs)}</span>`
+        : 'never';
+      const isBanned = u.status === 'banned';
+      let actions = '&mdash;';
+      if (!u.is_self) {
+        const banBtn = `<button type="button" class="${isBanned ? 'po-secondary' : 'po-danger'}" data-toggle-ban="${escapeHtml(u.id)}" data-next-status="${isBanned ? 'active' : 'banned'}">${isBanned ? 'Unban' : 'Ban'}</button>`;
+        const revokeBtn = `<button type="button" class="po-secondary" data-revoke-shares="${escapeHtml(u.id)}">Revoke shares</button>`;
+        const adminBtn = `<button type="button" class="po-secondary" data-toggle-admin="${escapeHtml(u.id)}" data-make-admin="${u.is_data_admin ? 'false' : 'true'}">${u.is_data_admin ? 'Revoke admin' : 'Make admin'}</button>`;
+        const deleteBtn = `<button type="button" class="po-danger" data-delete-user="${escapeHtml(u.id)}">Delete</button>`;
+        actions = `<div class="user-actions">${banBtn}${revokeBtn}${adminBtn}${deleteBtn}</div>`;
+      }
+      return `<tr><td>${escapeHtml(u.email)}${adminBadge}</td><td>${escapeHtml(u.status)}</td><td>${signedUp}</td><td>${lastLogin}</td><td>${tenantNames}</td><td>${actions}</td></tr>`;
+    }).join('');
+    bodyEl.innerHTML = `<div class="pm-tablewrap"><table class="pm-table"><thead><tr>
+        <th>Email</th><th>Status</th><th>Signed up</th><th>Last login</th><th>Tenant</th><th></th>
+      </tr></thead><tbody>${rows}</tbody></table></div>`;
+  }).catch((err) => {
+    bodyEl.innerHTML = `<div class="po-error">${escapeHtml(err.message || 'Could not load users.')}</div>`;
+  });
+}
+document.getElementById('poUsersBody').addEventListener('click', (e) => {
+  const banBtn = e.target.closest('button[data-toggle-ban]');
+  if (banBtn) {
+    banBtn.disabled = true;
+    fetch(`${PRISM_PREFIX}/api/admin/users/${banBtn.dataset.toggleBan}/status`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: banBtn.dataset.nextStatus }),
+    }).then((r) => r.json()).then((data) => {
+      if (data.error) throw new Error(data.error);
+      loadUsersPage();
+    }).catch((err) => {
+      banBtn.disabled = false;
+      alert(err.message || 'Could not update this account.');
+    });
+    return;
+  }
+  const revokeBtn = e.target.closest('button[data-revoke-shares]');
+  if (revokeBtn) {
+    if (!confirm("Unshare all of this account's shared sessions and sources? This can't be undone from here -- only the account owner can re-share them.")) return;
+    revokeBtn.disabled = true;
+    fetch(`${PRISM_PREFIX}/api/admin/users/${revokeBtn.dataset.revokeShares}/revoke-shares`, { method: 'POST' })
+      .then((r) => r.json()).then((data) => {
+        if (data.error) throw new Error(data.error);
+        alert(`Revoked ${data.sessions_unshared} session(s) and ${data.sources_unshared} source(s).`);
+        revokeBtn.disabled = false;
+      }).catch((err) => {
+        revokeBtn.disabled = false;
+        alert(err.message || 'Could not revoke shares.');
+      });
+    return;
+  }
+  const adminBtn = e.target.closest('button[data-toggle-admin]');
+  if (adminBtn) {
+    const grantingAdmin = adminBtn.dataset.makeAdmin === 'true';
+    if (grantingAdmin && !confirm('Grant this account full admin rights? They will be able to manage, ban, and delete other users.')) return;
+    adminBtn.disabled = true;
+    fetch(`${PRISM_PREFIX}/api/admin/users/${adminBtn.dataset.toggleAdmin}/admin`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin: adminBtn.dataset.makeAdmin === 'true' }),
+    }).then((r) => r.json()).then((data) => {
+      if (data.error) throw new Error(data.error);
+      loadUsersPage();
+    }).catch((err) => {
+      adminBtn.disabled = false;
+      alert(err.message || 'Could not update admin status.');
+    });
+    return;
+  }
+  const deleteBtn = e.target.closest('button[data-delete-user]');
+  if (deleteBtn) {
+    if (!confirm('Permanently delete this account? Their sessions will be deleted; any local sources they own will be reassigned to you. This cannot be undone.')) return;
+    deleteBtn.disabled = true;
+    fetch(`${PRISM_PREFIX}/api/admin/users/${deleteBtn.dataset.deleteUser}`, { method: 'DELETE' })
+      .then((r) => r.json()).then((data) => {
+        if (data.error) throw new Error(data.error);
+        loadUsersPage();
+      }).catch((err) => {
+        deleteBtn.disabled = false;
+        alert(err.message || 'Could not delete this account.');
+      });
+  }
+});
 
 // -- Sources -- real /api/corpora/freshness (real Dify-dataset corpora +
 // locally-tracked-only sources, same merged list classic's Sources tab
