@@ -1,0 +1,30 @@
+name: Deploy Prism
+
+# Runs the production deploy on prism.uiocloud.no whenever this branch
+# changes, by invoking this repo's own deploy/rebuild script (pulls,
+# rebuilds, force-recreates, restarts nginx, runs migrations via the api
+# container's own entrypoint, waits for health). A dedicated, restricted
+# SSH key forces that exact command server-side (see authorized_keys) --
+# `script` below is only a label for the Actions log; the server ignores
+# whatever is actually sent and always runs that one fixed command.
+on:
+  push:
+    branches:
+      - "feature/ietf-mailarchive-import"
+
+concurrency:
+  group: deploy-prism
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to prism.uiocloud.no
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.PRISM_SSH_HOST }}
+          username: ${{ secrets.PRISM_SSH_USER }}
+          key: ${{ secrets.PRISM_SSH_PRIVATE_KEY }}
+          command_timeout: 30m
+          script: deploy

@@ -2,9 +2,9 @@ name: Main CI Pipeline
 
 on:
   pull_request:
-    branches: ["main"]
+    branches: ["main", "feature/ietf-mailarchive-import"]
   push:
-    branches: ["main"]
+    branches: ["main", "feature/ietf-mailarchive-import"]
 
 permissions:
   contents: write
