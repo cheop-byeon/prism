@@ -104,13 +104,19 @@ class ForgotPasswordSendEmailApi(Resource):
 
         with sessionmaker(db.engine).begin() as session:
             account = AccountService.get_account_by_email_with_case_fallback(args.email, session=session)
-
-        token = AccountService.send_reset_password_email(
-            account=account,
-            email=normalized_email,
-            language=language,
-            is_allow_register=FeatureService.get_system_features().is_allow_register,
-        )
+            # Must run inside this session scope -- send_reset_password_email reads
+            # account.email, and sessionmaker(...).begin() expires every attribute
+            # on commit (its default expire_on_commit=True), so account becomes a
+            # detached instance the moment this `with` block exits. Reading
+            # account.email after that re-triggers a lazy load with no session to
+            # do it in, raising sqlalchemy.orm.exc.DetachedInstanceError -- confirmed
+            # live, every real "forgot password" send failed with exactly that.
+            token = AccountService.send_reset_password_email(
+                account=account,
+                email=normalized_email,
+                language=language,
+                is_allow_register=FeatureService.get_system_features().is_allow_register,
+            )
 
         return {"result": "success", "data": token}
 
