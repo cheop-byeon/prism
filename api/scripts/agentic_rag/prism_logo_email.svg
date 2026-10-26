@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 32" role="img" aria-label="Prism logo">
+  <line x1="2" y1="16" x2="15" y2="16" stroke="#101828" stroke-width="2.5" stroke-linecap="round"/>
+  <polygon points="14,3 14,29 30,16" fill="#f2f4f7" stroke="#101828" stroke-width="2" stroke-linejoin="round"/>
+  <line x1="29" y1="14" x2="42" y2="4" stroke="#e0645a" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="29" y1="15" x2="42" y2="9" stroke="#e0a94a" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="29" y1="15.5" x2="42" y2="13" stroke="#e6d35a" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="29" y1="16" x2="42" y2="17" stroke="#5fd6a3" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="29" y1="16.5" x2="42" y2="21" stroke="#4fd1c5" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="29" y1="17" x2="42" y2="25" stroke="#7c9eff" stroke-width="2.2" stroke-linecap="round"/>
+  <line x1="29" y1="17.5" x2="42" y2="29" stroke="#b98cf0" stroke-width="2.2" stroke-linecap="round"/>
+</svg>

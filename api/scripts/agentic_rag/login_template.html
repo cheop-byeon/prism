@@ -76,6 +76,15 @@
     border-radius: var(--radius-sm); padding: 9px 10px; font-size: var(--text-md); font-family: var(--sans);
   }
   input:focus-visible { outline: none; border-color: var(--accent); box-shadow: var(--focus-ring); }
+  .password-wrap { position: relative; }
+  .password-wrap input[type=password], .password-wrap input[type=text] { padding-right: 36px; }
+  .toggle-pw {
+    position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+    width: 28px; height: 28px; padding: 0; margin: 0; background: transparent; border: none;
+    color: var(--text-tertiary); cursor: pointer;
+  }
+  .toggle-pw:hover { color: var(--text); }
+  .toggle-pw svg { width: 18px; height: 18px; display: block; margin: 0 auto; }
   button {
     width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
     border-radius: var(--radius-sm); padding: 10px; font-size: var(--text-md); font-weight: 600;
@@ -99,6 +108,11 @@
     border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); margin-top: 14px;
   }
   .error-box.visible { display: block; }
+  .success-box {
+    display: none; background: #1d3a30; border: 1px solid #4fd1a5; color: #4fd1a5;
+    border-radius: var(--radius-sm); padding: 8px 10px; font-size: var(--text-sm); margin-top: 14px;
+  }
+  .success-box.visible { display: block; }
   .form-footnote { text-align: center; font-size: var(--text-xs); color: var(--text-tertiary); margin-top: 18px; }
   .form-footnote a {
     color: var(--accent); text-decoration: none;
@@ -172,24 +186,105 @@
         <label for="email">Email</label>
         <input id="email" type="email" autocomplete="email" required>
         <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" required>
+        <div class="password-wrap">
+          <input id="password" type="password" autocomplete="current-password" required>
+          <button type="button" class="toggle-pw" data-target="password" aria-label="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+              <line class="slash" x1="3" y1="3" x2="21" y2="21" style="display:none"/>
+            </svg>
+          </button>
+        </div>
         <button type="submit" class="btn-primary" id="submitBtn">Sign in</button>
+        <p class="form-hint" style="text-align:right;"><a href="#" id="toggleForgot">Forgot password?</a></p>
       </form>
 
-      <form id="signupForm" hidden>
+      <!-- Sign up, 3 steps: send code -> verify code -> set password. Each
+           step's token comes from the previous step's own response (see
+           the script below) -- never typed/guessed by the client. -->
+      <form id="signupStep1" hidden>
         <label for="suEmail">Email</label>
         <input id="suEmail" type="email" autocomplete="email" required>
+        <button type="submit" class="btn-primary" id="suStep1Btn">Send verification code</button>
+      </form>
+      <form id="signupStep2" hidden>
+        <p class="form-hint">We emailed a 6-digit code to <strong id="suStep2Email"></strong>.</p>
+        <label for="suCode">Verification code</label>
+        <input id="suCode" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+        <button type="submit" class="btn-primary" id="suStep2Btn">Verify code</button>
+        <p class="form-hint"><a href="#" id="suResend">Resend code</a></p>
+      </form>
+      <form id="signupStep3" hidden>
         <label for="suPassword">Create a password</label>
-        <input id="suPassword" type="password" autocomplete="new-password" required>
+        <div class="password-wrap">
+          <input id="suPassword" type="password" autocomplete="new-password" required>
+          <button type="button" class="toggle-pw" data-target="suPassword" aria-label="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+              <line class="slash" x1="3" y1="3" x2="21" y2="21" style="display:none"/>
+            </svg>
+          </button>
+        </div>
         <label for="suPasswordConfirm">Confirm password</label>
-        <input id="suPasswordConfirm" type="password" autocomplete="new-password" required>
+        <div class="password-wrap">
+          <input id="suPasswordConfirm" type="password" autocomplete="new-password" required>
+          <button type="button" class="toggle-pw" data-target="suPasswordConfirm" aria-label="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+              <line class="slash" x1="3" y1="3" x2="21" y2="21" style="display:none"/>
+            </svg>
+          </button>
+        </div>
         <p class="form-hint">At least 8 characters, with letters and numbers.</p>
-        <button type="submit" class="btn-primary" id="signupSubmitBtn">Create account</button>
+        <button type="submit" class="btn-primary" id="suStep3Btn">Create account</button>
+      </form>
+
+      <!-- Forgot password, same 3-step shape, against Dify's real
+           /console/api/forgot-password* endpoints directly (no Prism
+           backend involved at all -- unlike signup, the final step here
+           only changes a password, it doesn't need to end in cookies). -->
+      <form id="forgotStep1" hidden>
+        <label for="fpEmail">Email</label>
+        <input id="fpEmail" type="email" autocomplete="email" required>
+        <button type="submit" class="btn-primary" id="fpStep1Btn">Send reset code</button>
+      </form>
+      <form id="forgotStep2" hidden>
+        <p class="form-hint">We emailed a 6-digit code to <strong id="fpStep2Email"></strong>.</p>
+        <label for="fpCode">Verification code</label>
+        <input id="fpCode" type="text" inputmode="numeric" autocomplete="one-time-code" required>
+        <button type="submit" class="btn-primary" id="fpStep2Btn">Verify code</button>
+        <p class="form-hint"><a href="#" id="fpResend">Resend code</a></p>
+      </form>
+      <form id="forgotStep3" hidden>
+        <label for="fpPassword">New password</label>
+        <div class="password-wrap">
+          <input id="fpPassword" type="password" autocomplete="new-password" required>
+          <button type="button" class="toggle-pw" data-target="fpPassword" aria-label="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+              <line class="slash" x1="3" y1="3" x2="21" y2="21" style="display:none"/>
+            </svg>
+          </button>
+        </div>
+        <label for="fpPasswordConfirm">Confirm new password</label>
+        <div class="password-wrap">
+          <input id="fpPasswordConfirm" type="password" autocomplete="new-password" required>
+          <button type="button" class="toggle-pw" data-target="fpPasswordConfirm" aria-label="Show password">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/><circle cx="12" cy="12" r="3"/>
+              <line class="slash" x1="3" y1="3" x2="21" y2="21" style="display:none"/>
+            </svg>
+          </button>
+        </div>
+        <p class="form-hint">At least 8 characters, with letters and numbers.</p>
+        <button type="submit" class="btn-primary" id="fpStep3Btn">Reset password</button>
       </form>
 
       <div class="error-box" id="errorBox"></div>
+      <div class="success-box" id="successBox"></div>
       <p class="form-footnote" id="footnoteLogin">First time here? <a href="#" id="toggleSignup">Create an account</a>.</p>
       <p class="form-footnote" id="footnoteSignup" hidden>Already have an account? <a href="#" id="toggleLogin">Sign in</a>.</p>
+      <p class="form-footnote" id="footnoteForgot" hidden>Remembered it? <a href="#" id="toggleLoginFromForgot">Sign in</a>.</p>
     </div>
   </div>
 </div>
@@ -215,6 +310,19 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";
 const form = document.getElementById('loginForm');
 const errorBox = document.getElementById('errorBox');
 const submitBtn = document.getElementById('submitBtn');
+
+// Eye-icon toggles on every password field -- one listener per button,
+// each one only ever touches its own data-target input.
+document.querySelectorAll('.toggle-pw').forEach((btn) => {
+  const input = document.getElementById(btn.dataset.target);
+  const slash = btn.querySelector('.slash');
+  btn.addEventListener('click', () => {
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    slash.style.display = show ? '' : 'none';
+    btn.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+  });
+});
 
 function showError(message) {
   errorBox.textContent = message;
@@ -272,96 +380,221 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-// ---- Sign up: no email-verification step -- this deployment's mail
-// provider was never fully configured (MAIL_DEFAULT_SEND_FROM unset), so
-// the real send-code-by-email flow can't reach anyone yet. Per explicit
-// direction this skips verification entirely: an email + a self-chosen
-// password is enough. POSTs to this standalone page's OWN /api/signup
-// route (serve_ui.py), not the real Dify api service -- that route still
-// calls Dify's real AccountService.create_account_and_tenant/login
-// directly (see its own docstring), it's just not reachable through
-// Dify's console-auth HTTP endpoints, which require a verified code.
+// ---- Sign up (3 steps: send code -> verify code -> set password) and
+// Forgot password (same 3-step shape) both now go through real email
+// verification -- Resend is configured as this deployment's mail
+// provider, so /console/api/email-register/* and /console/api/forgot-
+// password* (the exact endpoints Dify's own web console uses) can
+// actually deliver the code. Steps 1 and 2 of both flows call that real
+// console API directly, from this page's own JS, exactly the way
+// doLogin() above already calls /console/api/login directly -- no new
+// Prism backend needed for those. Only signup's FINAL step goes through
+// Prism's own /api/signup (serve_ui.py): that's the one step that has to
+// end in Prism's own HttpOnly cookies, which only a server-side
+// Set-Cookie can create (see that route's own docstring). Forgot
+// password's final step has no such requirement -- it just changes a
+// password -- so all three of ITS steps call the real console API
+// directly, with zero Prism backend code at all.
 const cardTitle = document.getElementById('cardTitle');
 const cardSub = document.getElementById('cardSub');
 const footnoteLogin = document.getElementById('footnoteLogin');
 const footnoteSignup = document.getElementById('footnoteSignup');
-const signupForm = document.getElementById('signupForm');
-const signupSubmitBtn = document.getElementById('signupSubmitBtn');
-const suEmailInput = document.getElementById('suEmail');
-const suPasswordInput = document.getElementById('suPassword');
-const suPasswordConfirmInput = document.getElementById('suPasswordConfirm');
+const footnoteForgot = document.getElementById('footnoteForgot');
+const successBox = document.getElementById('successBox');
 
-function resetSignup() {
-  suEmailInput.value = '';
-  suPasswordInput.value = '';
-  suPasswordConfirmInput.value = '';
-  signupSubmitBtn.textContent = 'Create account';
+const VIEWS = {
+  login: { form, footnote: footnoteLogin, title: 'Welcome back', sub: 'Sign in to continue to Prism' },
+  signup1: { form: document.getElementById('signupStep1'), footnote: footnoteSignup, title: 'Create your account', sub: 'Sign up with your email to get started' },
+  signup2: { form: document.getElementById('signupStep2'), footnote: footnoteSignup, title: 'Check your email', sub: 'Enter the code we just sent you' },
+  signup3: { form: document.getElementById('signupStep3'), footnote: footnoteSignup, title: 'Almost there', sub: 'Choose a password for your account' },
+  forgot1: { form: document.getElementById('forgotStep1'), footnote: footnoteForgot, title: 'Reset your password', sub: "We'll email you a code" },
+  forgot2: { form: document.getElementById('forgotStep2'), footnote: footnoteForgot, title: 'Check your email', sub: 'Enter the code we just sent you' },
+  forgot3: { form: document.getElementById('forgotStep3'), footnote: footnoteForgot, title: 'Choose a new password', sub: 'This replaces your old one immediately' },
+};
+
+function showView(name) {
+  clearError();
+  successBox.classList.remove('visible');
+  for (const v of Object.values(VIEWS)) {
+    v.form.hidden = true;
+    v.footnote.hidden = true;
+  }
+  const view = VIEWS[name];
+  view.form.hidden = false;
+  view.footnote.hidden = false;
+  cardTitle.textContent = view.title;
+  cardSub.textContent = view.sub;
 }
 
-function showSignup() {
-  clearError();
-  resetSignup();
-  form.hidden = true;
-  signupForm.hidden = false;
-  footnoteLogin.hidden = true;
-  footnoteSignup.hidden = false;
-  cardTitle.textContent = 'Create your account';
-  cardSub.textContent = 'Sign up with your email to get started';
+async function postJson(url, body) {
+  const res = await fetch(url, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  return { ok: res.ok, data };
 }
 
-function showLogin() {
-  clearError();
-  signupForm.hidden = true;
-  form.hidden = false;
-  footnoteSignup.hidden = true;
-  footnoteLogin.hidden = false;
-  cardTitle.textContent = 'Welcome back';
-  cardSub.textContent = 'Sign in to continue to Prism';
+function withButtonBusy(btn, busyText, fn) {
+  return async (e) => {
+    e.preventDefault();
+    clearError();
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = busyText;
+    try {
+      await fn();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  };
 }
 
 document.getElementById('toggleSignup').addEventListener('click', (e) => {
   e.preventDefault();
-  showSignup();
+  document.getElementById('suEmail').value = '';
+  showView('signup1');
 });
 document.getElementById('toggleLogin').addEventListener('click', (e) => {
   e.preventDefault();
-  showLogin();
+  showView('login');
+});
+document.getElementById('toggleForgot').addEventListener('click', (e) => {
+  e.preventDefault();
+  document.getElementById('fpEmail').value = '';
+  showView('forgot1');
+});
+document.getElementById('toggleLoginFromForgot').addEventListener('click', (e) => {
+  e.preventDefault();
+  showView('login');
 });
 
-signupForm.addEventListener('submit', async (e) => {
+// ---- Sign up ----
+let suEmail = '';
+let suToken = '';
+
+async function sendSignupCode() {
+  const email = document.getElementById('suEmail').value.trim();
+  const { ok, data } = await postJson(`${API_BASE}/console/api/email-register/send-email`, { email });
+  if (!ok) {
+    showError(errorMessage(data, 'Could not send a verification code -- is this email already registered?'));
+    return;
+  }
+  suEmail = email;
+  suToken = data.data;
+  document.getElementById('suStep2Email').textContent = email;
+  document.getElementById('suCode').value = '';
+  showView('signup2');
+}
+
+document.getElementById('signupStep1').addEventListener('submit',
+  withButtonBusy(document.getElementById('suStep1Btn'), 'Sending…', sendSignupCode));
+
+document.getElementById('suResend').addEventListener('click', (e) => {
   e.preventDefault();
-  clearError();
-  signupSubmitBtn.disabled = true;
-  signupSubmitBtn.textContent = 'Creating account…';
+  showView('signup1');
+  document.getElementById('suEmail').value = suEmail;
+});
 
-  const email = suEmailInput.value.trim();
-  const password = suPasswordInput.value;
-  const confirm = suPasswordConfirmInput.value;
+document.getElementById('signupStep2').addEventListener('submit',
+  withButtonBusy(document.getElementById('suStep2Btn'), 'Verifying…', async () => {
+    const code = document.getElementById('suCode').value.trim();
+    const { ok, data } = await postJson(`${API_BASE}/console/api/email-register/validity`, {
+      email: suEmail, code, token: suToken,
+    });
+    if (!ok || !data.is_valid) {
+      showError(errorMessage(data, 'That code is wrong or has expired.'));
+      return;
+    }
+    suToken = data.token;
+    document.getElementById('suPassword').value = '';
+    document.getElementById('suPasswordConfirm').value = '';
+    showView('signup3');
+  }));
 
-  try {
+document.getElementById('signupStep3').addEventListener('submit',
+  withButtonBusy(document.getElementById('suStep3Btn'), 'Creating account…', async () => {
+    const password = document.getElementById('suPassword').value;
+    const confirm = document.getElementById('suPasswordConfirm').value;
     if (password !== confirm) {
       showError('Passwords do not match.');
       return;
     }
-    const res = await fetch(`${PRISM_PREFIX}/api/signup`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, password_confirm: confirm }),
+    const { ok, data } = await postJson(`${PRISM_PREFIX}/api/signup`, {
+      token: suToken, password, password_confirm: confirm,
     });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.result === 'success') {
+    if (ok && data.result === 'success') {
       window.location.href = `${PRISM_PREFIX}/`;
       return;
     }
     showError(errorMessage(data, 'Could not create the account.'));
-  } catch {
-    showError(`Couldn't reach the login service. Is the ietf_decision_agent_ui container running?`);
-  } finally {
-    signupSubmitBtn.disabled = false;
-    signupSubmitBtn.textContent = 'Create account';
+  }));
+
+// ---- Forgot password ----
+let fpEmail = '';
+let fpToken = '';
+
+async function sendResetCode() {
+  const email = document.getElementById('fpEmail').value.trim();
+  const { ok, data } = await postJson(`${API_BASE}/console/api/forgot-password`, { email });
+  if (!ok) {
+    showError(errorMessage(data, "Could not send a reset code -- is this email registered?"));
+    return;
   }
+  fpEmail = email;
+  fpToken = data.data;
+  document.getElementById('fpStep2Email').textContent = email;
+  document.getElementById('fpCode').value = '';
+  showView('forgot2');
+}
+
+document.getElementById('forgotStep1').addEventListener('submit',
+  withButtonBusy(document.getElementById('fpStep1Btn'), 'Sending…', sendResetCode));
+
+document.getElementById('fpResend').addEventListener('click', (e) => {
+  e.preventDefault();
+  showView('forgot1');
+  document.getElementById('fpEmail').value = fpEmail;
 });
+
+document.getElementById('forgotStep2').addEventListener('submit',
+  withButtonBusy(document.getElementById('fpStep2Btn'), 'Verifying…', async () => {
+    const code = document.getElementById('fpCode').value.trim();
+    const { ok, data } = await postJson(`${API_BASE}/console/api/forgot-password/validity`, {
+      email: fpEmail, code, token: fpToken,
+    });
+    if (!ok || !data.is_valid) {
+      showError(errorMessage(data, 'That code is wrong or has expired.'));
+      return;
+    }
+    fpToken = data.token;
+    document.getElementById('fpPassword').value = '';
+    document.getElementById('fpPasswordConfirm').value = '';
+    showView('forgot3');
+  }));
+
+document.getElementById('forgotStep3').addEventListener('submit',
+  withButtonBusy(document.getElementById('fpStep3Btn'), 'Resetting…', async () => {
+    const password = document.getElementById('fpPassword').value;
+    const confirm = document.getElementById('fpPasswordConfirm').value;
+    if (password !== confirm) {
+      showError('Passwords do not match.');
+      return;
+    }
+    const { ok, data } = await postJson(`${API_BASE}/console/api/forgot-password/resets`, {
+      token: fpToken, new_password: password, password_confirm: confirm,
+    });
+    if (!ok || data.result !== 'success') {
+      showError(errorMessage(data, 'Could not reset the password.'));
+      return;
+    }
+    showView('login');
+    successBox.textContent = 'Password reset -- sign in with your new password.';
+    successBox.classList.add('visible');
+  }));
 </script>
 </body>
 </html>

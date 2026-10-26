@@ -343,6 +343,15 @@ _LOGIN_HERO_JPEG = (Path(__file__).parent / "prism_hero.jpg").read_bytes()
 # --po-purple -> --po-cyan) reads as "a prism" even at 16x16.
 _FAVICON_SVG = (Path(__file__).parent / "prism_favicon.svg").read_bytes()
 
+# The richer "light through a prism" mark (same one used in login_template.html's
+# hero/form-logo and serve_ui_template.html's nav) rendered as a standalone,
+# portable SVG for transactional emails -- those templates (reset_password_mail_
+# template_en-US.html et al.) need a real public <img src> URL, which can't use
+# currentColor/CSS variables (there's no page CSS context for an email client to
+# resolve them against), so the triangle's fill/stroke are hardcoded here for a
+# light (not this app's own dark theme) background instead.
+_PRISM_LOGO_EMAIL_SVG = (Path(__file__).parent / "prism_logo_email.svg").read_bytes()
+
 # Standard 4-color Google "G" mark -- used on the login page's OAuth button.
 _GOOGLE_ICON_SVG = (
     '<svg viewBox="0 0 24 24">'
@@ -644,7 +653,7 @@ def main() -> None:
         # the form that logs them in (or the hero image it displays) --
         # everything else in this app is gated, these two routes are the
         # deliberate exception.
-        if path in ("/login", "/login-hero.jpg", "/favicon.svg", "/api/signup"):
+        if path in ("/login", "/login-hero.jpg", "/favicon.svg", "/prism-logo-email.svg", "/api/signup"):
             return None
         account = _authenticate_console_request(request)
         if account is None:
@@ -667,34 +676,47 @@ def main() -> None:
     def favicon():
         return _FAVICON_SVG, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400"}
 
+    @app.route(f"{_URL_PREFIX}/prism-logo-email.svg", methods=["GET"])
+    def prism_logo_email():
+        return _PRISM_LOGO_EMAIL_SVG, 200, {"Content-Type": "image/svg+xml", "Cache-Control": "public, max-age=86400"}
+
     @app.route(f"{_URL_PREFIX}/api/signup", methods=["POST"])
     def signup():
-        """Self-service account creation with no email-verification step --
-        the real /console/api/email-register/* flow (send-email -> validity
-        -> email-register) needs a working mail provider to deliver the
-        code, and this deployment's MAIL_DEFAULT_SEND_FROM was never set
-        (confirmed live: every send attempt fails with "mail from is not
-        set" in the worker logs), so that flow can't actually reach anyone
-        right now. Per explicit direction, this skips verification entirely
-        rather than wait on mail setup: an email + a self-chosen password is
-        enough to get an account.
+        """Finishes self-service account creation, gated on a verified
+        email-register token -- the real send-code/verify-code steps
+        (/console/api/email-register/send-email -> /validity) now have a
+        working mail provider (Resend) and run directly from the login
+        page's own JS against that real console API, exactly the same way
+        this page's login form already calls /console/api/login directly.
+        Only this final "actually create the account" step lives here,
+        because it needs to end in Prism's own cookies, not a raw JSON
+        token pair -- which is also why it isn't just a proxy to the real
+        /console/api/email-register endpoint: that one returns
+        token_pair.model_dump() as plain JSON with no Set-Cookie at all,
+        and HttpOnly cookies (what set_access_token_to_cookie etc. actually
+        set) can only ever be set by a Set-Cookie response header, never by
+        client-side JS -- so finishing the login step server-side, in the
+        same request that creates the account, is the only way to end up
+        with real HttpOnly auth cookies rather than a weaker JS-writable
+        substitute.
 
-        Still "replicates Dify's business logic, not reimplementing it" the
-        same way the task asked for the real flow: every step below calls
-        Dify's own AccountService/libs functions directly (the exact same
-        ones /console/api/email-register's own final step calls), never a
-        hand-rolled account-creation path. The one real difference from
-        that endpoint is the last step -- it returns a raw token pair as
-        JSON with no cookies set; this sets the real access/refresh/csrf
-        cookies itself via the same set_*_token_to_cookie helpers
-        /console/api/login uses, so the new account is actually logged in
-        on return, with no second request needed.
+        `token` must be a reset_password-shaped... no -- an
+        email_register-token whose stored phase is "register", i.e. one
+        that has ALREADY passed /console/api/email-register/validity's own
+        code check (that endpoint only mints a phase=register token after
+        verifying the emailed code matches). This route re-validates that
+        phase itself rather than trusting the client's say-so, exactly the
+        same check /console/api/email-register's own final step makes.
+
+        Still "replicates Dify's business logic, not reimplementing it":
+        every step below calls Dify's own AccountService functions
+        directly (the exact same ones /console/api/email-register's own
+        final step calls), never a hand-rolled account-creation path.
         """
         from sqlalchemy.orm import sessionmaker
 
         from constants.languages import languages
         from extensions.ext_database import db
-        from libs.helper import email as validate_email_format
         from libs.helper import extract_remote_ip
         from libs.password import valid_password
         from libs.token import set_access_token_to_cookie, set_csrf_token_to_cookie, set_refresh_token_to_cookie
@@ -702,21 +724,26 @@ def main() -> None:
         from services.errors.account import AccountRegisterError
 
         payload = request.get_json(silent=True) or {}
-        raw_email = (payload.get("email") or "").strip()
+        token = (payload.get("token") or "").strip()
         password = payload.get("password") or ""
         password_confirm = payload.get("password_confirm") or ""
 
-        try:
-            normalized_email = validate_email_format(raw_email).lower()
-        except ValueError as exc:
-            return jsonify({"message": str(exc)}), 400
-
+        if not token:
+            return jsonify({"message": "Verify your email first."}), 400
         if password != password_confirm:
             return jsonify({"message": "The passwords do not match."}), 400
         try:
             valid_password(password)
         except ValueError as exc:
             return jsonify({"message": str(exc)}), 400
+
+        register_data = AccountService.get_email_register_data(token)
+        if not register_data or register_data.get("phase") != "register":
+            return jsonify({"message": "That verification code has expired -- request a new one."}), 400
+        AccountService.revoke_email_register_token(token)
+        normalized_email = (register_data.get("email") or "").lower()
+        if not normalized_email:
+            return jsonify({"message": "That verification code has expired -- request a new one."}), 400
 
         with sessionmaker(db.engine).begin() as session:
             existing = AccountService.get_account_by_email_with_case_fallback(normalized_email, session=session)
@@ -771,30 +798,33 @@ def main() -> None:
 
     @app.route(f"{_URL_PREFIX}/api/models", methods=["GET"])
     def api_models():
-        """Lists this deployment's actually-configured, active LLMs via the
-        same ProviderManager ask() itself uses -- so the Research controls
-        can offer a real choice instead of every request being silently
-        pinned to ask()'s hardcoded default, with no way to try a stronger
-        model on a hard question.
+        """Lists the VIEWING ACCOUNT's OWN actually-configured, active LLMs
+        -- Dify is used here as a BYOK backend: every account is expected to
+        configure its own models/API keys via Dify's real Settings/Model
+        Provider service (/api/my-llm-credentials below), not to ride on the
+        admin's own credentials. This was confirmed live as a real production
+        bug: this route used to always list the admin tenant's own models to
+        EVERY account regardless of who was asking, so a different account
+        could see (and pick) a model it had no working credential for at
+        all -- picking one then crashed deep in ask() with a confusing
+        "Provider ... does not exist" once ModelManager tried to actually
+        resolve that account's own (unconfigured) tenant. That crash wasn't
+        the bug -- it was ask()'s tenant-scoping working exactly as intended
+        (a non-admin account's query already never falls back to the admin's
+        tenant/credentials, by design, via _resolve_fallback_tenant_id and
+        the model_tenant_id BYOK check in _make_research_work). The actual
+        bug was always in THIS listing, showing an account models it could
+        never use. Sourcing the whole list from the viewer's own tenant
+        fixes that: the admin's own account still sees exactly its own
+        configured models (its own tenant IS admin_tenant_id), and every
+        other account sees only what it has configured for itself -- an
+        empty list until it configures something, never someone else's.
 
-        Also includes every active model in this account's OWN tenant (their
-        real, personal Dify workspace -- see get_owned_tenant_id), tagged
-        "byok" -- covers any provider they've configured a personal
-        credential for via Dify's real Settings/Model Provider service
-        (/api/my-llm-credentials below), including ones the shared admin
-        tenant has never configured at all.
-
-        "default" names ask()/decision_thread()'s actual fallback -- which
-        is this tenant's own Settings -> Model Provider -> System Model
-        default (ask() passes an empty provider/model down to
-        ModelManager.get_model_instance(), which resolves it to exactly
-        this same TenantDefaultModel row -- see _DEFAULT_MODEL_PROVIDER/
-        _DEFAULT_MODEL_NAME's own comment). Looked up live here, not a
-        hardcoded literal, so the picker always shows and pre-selects
-        whatever model actually runs right now, even after that Settings
-        page changes -- there's no real "no model chosen" state once a
-        request reaches the agent, so a vague "(default model)" placeholder
-        would hide which concrete model is actually about to run.
+        "default" names ask()/decision_thread()'s actual fallback for THIS
+        account -- its own tenant's Settings -> Model Provider -> System
+        Model default. Looked up live here, not a hardcoded literal, so the
+        picker always shows and pre-selects whatever model would actually
+        run right now for this specific viewer.
         """
         from core.provider_manager import ProviderManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
@@ -803,7 +833,13 @@ def main() -> None:
         from services.agentic_rag_session_service import get_owned_tenant_id
 
         admin_tenant_id = db.session.query(Tenant).first().id
-        active_models = ProviderManager().get_configurations(admin_tenant_id).get_models(
+        # Every real account has exactly one owned tenant (its own workspace,
+        # created alongside the account -- see create_account_and_tenant);
+        # the admin_tenant_id fallback below only matters for the
+        # theoretical case of an account with no tenant join row at all.
+        owned_tenant_id = get_owned_tenant_id(g.account) or admin_tenant_id
+
+        active_models = ProviderManager().get_configurations(owned_tenant_id).get_models(
             model_type=ModelType.LLM, only_active=True
         )
         entries: dict[tuple[str, str], dict] = {
@@ -812,30 +848,12 @@ def main() -> None:
                 "provider_label": m.provider.label.en_US,
                 "model": m.model,
                 "label": m.label.en_US,
-                "byok": False,
+                "byok": owned_tenant_id != admin_tenant_id,
             }
             for m in active_models
         }
 
-        owned_tenant_id = get_owned_tenant_id(g.account)
-        if owned_tenant_id and owned_tenant_id != admin_tenant_id:
-            personal_models = ProviderManager().get_configurations(owned_tenant_id).get_models(
-                model_type=ModelType.LLM, only_active=True
-            )
-            for m in personal_models:
-                key = (m.provider.provider, m.model)
-                if key in entries:
-                    entries[key]["byok"] = True
-                else:
-                    entries[key] = {
-                        "provider": m.provider.provider,
-                        "provider_label": m.provider.label.en_US,
-                        "model": m.model,
-                        "label": m.label.en_US,
-                        "byok": True,
-                    }
-
-        default_model_entity = ProviderManager().get_default_model(tenant_id=admin_tenant_id, model_type=ModelType.LLM)
+        default_model_entity = ProviderManager().get_default_model(tenant_id=owned_tenant_id, model_type=ModelType.LLM)
         default_entry = (
             {"provider": default_model_entity.provider.provider, "model": default_model_entity.model}
             if default_model_entity

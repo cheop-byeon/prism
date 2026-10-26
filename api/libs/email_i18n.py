@@ -272,7 +272,16 @@ class EmailI18nService:
         full_context = {
             **template_context,
             "branding_enabled": branding.enabled,
-            "application_title": branding.application_title if branding.enabled else "Dify",
+            # "Dify" was the real default here -- this fork's own
+            # deployment (Prism) has no Enterprise Edition license, so
+            # branding.enabled is always False and every email subject
+            # (Set Your {application_title} Password, etc.) rendered
+            # "Dify" regardless of what this app is actually branded as.
+            # Enabling Dify's own branding.enabled path isn't an option
+            # without a real enterprise license (_fulfill_params_from_enterprise
+            # calls out to an Enterprise API this deployment doesn't have),
+            # so this is the one place that name is overridden directly.
+            "application_title": branding.application_title if branding.enabled else "Prism",
         }
 
         # Render template
