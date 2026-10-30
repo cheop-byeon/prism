@@ -1263,6 +1263,67 @@ def main() -> None:
             traceback.print_exc()
             return jsonify({"error": str(exc)}), 500
 
+    @app.route(f"{_URL_PREFIX}/api/corpora/guess-document", methods=["GET"])
+    def api_corpora_guess_document():
+        """Best-effort "which document is this free-text question about"
+        guess for Workspace's "Ask a question" composer -- lets it pre-fill
+        Investigations' draft field before the agent even starts, rather
+        than leaving it blank until the agent's own discovery tools figure
+        scope out mid-run (which still happens regardless; this is purely a
+        head start / UI nicety, never a hard requirement for the agent to
+        actually find the right document).
+
+        Reuses RfcCorpusIndexService.search_bm25 (scope="title_abstract"),
+        the exact same free-text-to-RFC ranker the agent's own
+        search_rfc_corpus_bm25 tool calls -- not a new search mechanism.
+        "Confident" gates on an absolute score floor alone, not a margin
+        over the runner-up -- confirmed live against 5 real questions that
+        a margin/ratio check actively backfires here: a well-covered topic
+        (e.g. "DNSSEC key rollover") correctly returns several genuinely
+        relevant RFCs clustered close in score (RFC7583 23.8, RFC6781
+        19.5, ratio ~1.2), which a margin check would wrongly read as
+        "ambiguous" and reject, while an actually bad match ("INIT_CWND",
+        which BM25 over title+abstract has no real signal for) still
+        scored 14.05 -- not dramatically lower. The floor (15.0) is picked
+        from that same small sample (genuinely on-topic queries scored
+        19-32; "INIT_CWND" and a bare "What is DNS?" scored 10-14) --
+        revisit it if real usage shows false positives/negatives; this is
+        explicitly a best-effort head start, not a hard requirement, so an
+        occasional wrong guess is an acceptable cost, not a correctness bug.
+        Only covers published RFCs, not drafts still in progress -- the
+        corpus this is built on (RfcCorpusIndexService) is RFC-only; an
+        explicit "draft-xxx-yyy" or "RFC 1234" already named in the
+        question is handled client-side instead (see the new draft-name/
+        RFC-number regexes in the template), which covers drafts too since
+        it's just reading what the user already typed, not searching
+        anything.
+        """
+        from services.rfc_corpus_index_service import RfcCorpusIndexService
+
+        query = (request.args.get("query") or "").strip()
+        if not query:
+            return jsonify({"confident": False})
+
+        try:
+            data = RfcCorpusIndexService.search_bm25(query, scope="title_abstract", top_k=3)
+        except Exception as exc:
+            traceback.print_exc()
+            return jsonify({"error": str(exc)}), 500
+
+        results = data.get("results") or []
+        if not results:
+            return jsonify({"confident": False})
+
+        top = results[0]
+        confident = top["score"] >= 15.0
+        return jsonify(
+            {
+                "confident": confident,
+                "rfc_number": top["rfc"] if confident else None,
+                "title": top["title"] if confident else None,
+            }
+        )
+
     @app.route(f"{_URL_PREFIX}/api/corpora/mailing-lists", methods=["GET"])
     def api_corpora_mailing_lists():
         """Every known IETF mailing list name -- the exact same
@@ -1908,6 +1969,14 @@ def main() -> None:
                 if session is None:
                     session = AgenticRagSessionService.create_session(title_seed=query, account=account)
                     session_id = session.id
+                # Lets the rail's "Recent investigations" list pick this up
+                # right away instead of only learning the session_id once
+                # the whole run finishes (the "result" event, which can be
+                # many minutes away) -- confirmed live that a brand-new
+                # investigation was invisible in the rail the entire time it
+                # was running, which reads as "my question vanished" rather
+                # than "it's still working".
+                on_event({"stage": "session_created", "session_id": session_id})
                 history = AgenticRagSessionService.get_history_for_prompt(session_id, account=account)
 
                 # Only overrides ask()'s own hardcoded default (google/gemini-2.5-flash

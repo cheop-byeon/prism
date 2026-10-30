@@ -1374,13 +1374,49 @@ document.querySelectorAll('[data-entry]').forEach((b) => {
 // Matches the mockup's own submit behavior: new investigations land on
 // Research activity, not Findings, since that's the "the agent is
 // currently working" view.
-document.getElementById('poWorkspaceForm').addEventListener('submit', (e) => {
+//
+// Before handing off, tries to guess which document the question is about
+// and pre-fill Investigations' draft field with it -- purely a head start/
+// UI nicety, never required: the agent already discovers scope on its own
+// regardless (see the composer's own "No manual scope selector" note
+// above), so a wrong or missing guess here costs nothing but that head
+// start. Two tiers, cheapest first:
+//   1. An explicit "RFC 1234" or "draft-ietf-..." already typed in the
+//      question -- zero cost, just reading text the user already wrote
+//      (covers drafts too, unlike tier 2's RFC-only corpus).
+//   2. A BM25 topic-match guess from the server (/api/corpora/guess-
+//      document), only when tier 1 found nothing -- same free-text ranker
+//      the agent's own search_rfc_corpus_bm25 tool uses, gated on a real
+//      confidence margin so an ambiguous question comes back empty rather
+//      than handing the agent a wrong hint it would have resolved more
+//      accurately itself.
+const _DRAFT_NAME_RE = /\bdraft-[a-z0-9]+(?:-[a-z0-9]+)+\b/i;
+const _RFC_NUMBER_RE = /\bRFC\s?\d{3,5}\b/i;
+function guessDocumentHintFromText(text) {
+  const draftMatch = text.match(_DRAFT_NAME_RE);
+  if (draftMatch) return draftMatch[0];
+  const rfcMatch = text.match(_RFC_NUMBER_RE);
+  if (rfcMatch) return rfcMatch[0];
+  return null;
+}
+async function guessDocumentHintFromServer(query) {
+  try {
+    const res = await fetch(`${PRISM_PREFIX}/api/corpora/guess-document?query=${encodeURIComponent(query)}`);
+    const data = await res.json();
+    return data.confident ? data.rfc_number : null;
+  } catch {
+    return null;
+  }
+}
+document.getElementById('poWorkspaceForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const workspaceQueryEl = document.getElementById('poWorkspaceQuery');
   const query = workspaceQueryEl.value.trim();
   if (!query) return;
   document.getElementById('poQuery').value = query;
   workspaceQueryEl.value = '';
+  const hint = guessDocumentHintFromText(query) || await guessDocumentHintFromServer(query);
+  if (hint) poDraftEl.value = hint;
   go('investigation');
   view('activity');
   runAsk();
@@ -1788,6 +1824,13 @@ poSessionListEl.addEventListener('click', (e) => {
   const delBtn = e.target.closest('.po-saved-delete');
   if (delBtn) {
     e.stopPropagation();
+    const deleteId = delBtn.dataset.deleteId;
+    const titleEl = poSessionListEl.querySelector(`.po-saved-title[data-session-id="${deleteId}"]`);
+    const sessionTitle = titleEl ? titleEl.textContent.trim() : null;
+    const confirmMsg = sessionTitle
+      ? `Delete "${sessionTitle}"? This can't be undone.`
+      : "Delete this session? This can't be undone.";
+    if (!window.confirm(confirmMsg)) return;
     fetch(`${PRISM_PREFIX}/api/sessions/${delBtn.dataset.deleteId}`, { method: 'DELETE' })
       .catch(() => {})
       .finally(() => {
@@ -1934,6 +1977,15 @@ function openSession(id) {
       document.getElementById('poInvestPills').innerHTML = deriveStatusPills(lastTurn.answer);
       setActivityData(lastTurn.trace || [], false, true);
     } else {
+      // No turns yet (session created but still running, or the run
+      // failed before ever saving one) -- without this, poInvestTitle
+      // kept showing whatever the PREVIOUSLY opened session's query was,
+      // since it's otherwise only ever written from lastTurn.query above.
+      // data.title is this session's own name (set from title_seed at
+      // creation, see AgenticRagSessionService.create_session), so it's
+      // always this session's real query even with zero turns.
+      document.getElementById('poInvestTitle').textContent = data.title || '';
+      document.getElementById('poInvestPills').innerHTML = '';
       document.getElementById('poDraftBadge').textContent = '(let the agent discover)';
       setActivityData([], true, false);
     }
@@ -2811,6 +2863,13 @@ function runAsk() {
     if (msg.type === 'progress') {
       if (msg.stage === 'started' && msg.request_id) {
         requestId = msg.request_id;
+      } else if (msg.stage === 'session_created' && msg.session_id) {
+        // Without this, a brand-new investigation was invisible in
+        // "Recent investigations" for the entire run (the rail only ever
+        // learned the session_id from the final 'result' event) -- looked
+        // like the question had vanished rather than just still working.
+        currentSessionId = msg.session_id;
+        loadSessionList();
       } else if (msg.stage === 'reasoning' && msg.message) {
         pendingReason = msg.message;
       } else if (msg.stage === 'tool_call') {
@@ -2849,7 +2908,7 @@ function runAsk() {
       // After session_id adoption above, so this attaches to the very
       // same investigation the main answer just saved to, instead of
       // creating a second one of its own.
-      autoTrackDecisionHistory(query, draftVal);
+      autoTrackDecisionHistory(query, draftVal, msg.data.evidence);
       stop();
     } else if (msg.type === 'error') {
       if (steps.length) steps[steps.length - 1].status = 'errored';
@@ -3312,6 +3371,45 @@ function extractPhraseCandidates(text) {
   (text.match(/\b[A-Z]{2,}\b/g) || []).filter((w) => w !== 'RFC').forEach(add);
   return candidates.slice(0, 3);
 }
+// Common words that would otherwise pass the 4+-letter filter below but
+// carry no decision-tracking signal on their own.
+const _KEYWORD_STOPWORDS = new Set([
+  'this', 'that', 'with', 'from', 'what', 'when', 'where', 'which', 'their',
+  'about', 'into', 'does', 'made', 'were', 'they', 'there', 'would', 'could',
+  'should', 'have', 'been', 'also', 'such', 'than', 'then', 'only', 'more',
+  'most', 'some', 'both', 'each', 'even', 'just', 'like', 'same', 'very',
+  'these', 'those', 'being', 'during', 'between', 'because', 'decision',
+  'decisions',
+]);
+// decision_thread()'s own matching is a literal, case-insensitive substring
+// search over the evolution dataset's diff text (see its docstring) -- it
+// needs a word that's actually IN the document, not just how the user
+// happened to phrase the question. extractPhraseCandidates alone misses
+// anything that isn't quoted/numbered/shouted in caps (confirmed live:
+// "What decisions were made about cwnd, and why?" found nothing, since
+// "cwnd" is lowercase). Falling back to the question's own significant
+// words, filtered down to only the ones that literally appear in the
+// evidence the agent actually retrieved to answer THIS question, fixes
+// that: "cwnd" does appear verbatim in the real RFC/draft text the agent
+// found, so confirming against evidence (rather than guessing from the
+// question alone) both catches this case and guarantees the chosen term
+// is real document vocabulary, not a dead end for the substring search.
+function extractTrackingKeywords(query, evidence) {
+  const direct = extractPhraseCandidates(query);
+  if (direct.length) return direct;
+  if (!evidence || !evidence.length) return [];
+  const haystack = evidence.slice(0, 12).map((e) => e.text || '').join('\n').toLowerCase();
+  const seen = new Set();
+  const confirmed = [];
+  for (const w of (query.match(/[A-Za-z][A-Za-z0-9_-]{3,}/g) || [])) {
+    const lw = w.toLowerCase();
+    if (_KEYWORD_STOPWORDS.has(lw) || seen.has(lw)) continue;
+    seen.add(lw);
+    if (haystack.includes(lw)) confirmed.push(w);
+    if (confirmed.length >= 3) break;
+  }
+  return confirmed;
+}
 function buildThreadQueryPlaceholder(query) {
   const candidates = extractPhraseCandidates(query);
   if (!candidates.length) return 'e.g. "An INIT_CWND of"';
@@ -3325,17 +3423,19 @@ function updateThreadQueryPlaceholder() {
 // question was scoped to one specific draft -- no manual keyword typing
 // or Track phrase click needed, per explicit direction: "right after the
 // main session finished... extract keyword combinations and search
-// decisions that appear to have all keywords." Reuses the exact same
-// keyword extraction as the placeholder hint (extractPhraseCandidates),
-// AND-combining every candidate found via trackDecision's own
-// comma-splitting convention (see decision_thread's own docstring for why
-// "ECN, backoff" together beats either alone for a question that names
-// both). A no-op if the question had no draft (no single document to
-// scope the search to), no extractable keyword, or a Track phrase run is
-// already active (trackDecision's own disabled-button guard).
-function autoTrackDecisionHistory(query, draftHint) {
+// decisions that appear to have all keywords." Uses extractTrackingKeywords
+// (question-phrased candidates first, falling back to the question's own
+// significant words confirmed present in the evidence actually retrieved
+// for this answer -- see its own docstring for why), AND-combining every
+// candidate found via trackDecision's own comma-splitting convention (see
+// decision_thread's own docstring for why "ECN, backoff" together beats
+// either alone for a question that names both). A no-op if the question
+// had no draft (no single document to scope the search to), no extractable
+// keyword, or a Track phrase run is already active (trackDecision's own
+// disabled-button guard).
+function autoTrackDecisionHistory(query, draftHint, evidence) {
   if (!draftHint) return;
-  const candidates = extractPhraseCandidates(query);
+  const candidates = extractTrackingKeywords(query, evidence);
   if (!candidates.length) return;
   poThreadDraftEl.value = draftHint;
   document.getElementById('poThreadQuery').value = candidates.join(', ');

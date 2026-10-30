@@ -234,9 +234,29 @@ def _strip_reasoning_tags(text: str) -> str:
         text = new_text
 
 
+_OLLAMA_PROVIDER = "langgenius/ollama/ollama"
+# Only Ollama's own plugin has a hardcoded, non-configurable 300s read
+# timeout on the generation call itself (confirmed live: a slow local model
+# left to run until its context window filled blew well past that and
+# failed every real query with no usable error). Capping max_tokens there
+# is the fix for THAT specific problem -- it is not a general "keep every
+# model's answers short" policy, and applying it unconditionally to every
+# provider was a real bug, confirmed live for a completely different one
+# (an OpenAI-API-compatible gateway with no such timeout at all): a
+# reasoning model's own <think> block spent the whole 1500-token budget on
+# a large accumulated context, closed the tag exactly as the cap hit, and
+# left zero characters for the actual answer -- a real "nothing shows up"
+# production failure for a provider this cap was never meant to touch.
+
+
 def _invoke_llm_with_retry(model_instance, usage_sink: list | None = None, **kwargs):
     from core.plugin.impl.exc import PluginInvokeError
     from dify_graph.model_runtime.errors.invoke import InvokeError
+
+    if model_instance.provider == _OLLAMA_PROVIDER:
+        model_parameters = dict(kwargs.get("model_parameters") or {})
+        model_parameters.setdefault("max_tokens", 1500)
+        kwargs["model_parameters"] = model_parameters
 
     for attempt in range(_LLM_RETRIES + 1):
         try:
@@ -462,30 +482,47 @@ def _discover_evolution_corpora(viewer_account_id: str | None = None) -> list[di
 
 def _resolve_wg_for_draft(draft_name: str) -> str | None:
     """Live lookup of a draft's owning WG acronym via IETF Datatracker
-    (draft -> group -> acronym) -- not cached, matching the pattern used by
-    the other fetch tools. Returns None on any lookup failure."""
+    (draft -> group -> acronym) -- Redis-cached (see
+    ietf_import_service.cached_datatracker_resolution).
+
+    Confirmed live that leaving this (and _resolve_rfc_number_for_draft)
+    uncached made _list_available_corpora's registered-corpora loop re-hit
+    Datatracker for every draft on every single /api/research call --
+    harmless at a handful of drafts, but at the ~300 local sources one
+    deployment accumulated, a single research question took 10+ minutes
+    with no error and nothing saved, because the client gave up waiting
+    long before the sweep finished.
+    """
     import httpx
 
-    try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            doc_resp = client.get(
-                f"{_DATATRACKER_BASE}/api/v1/doc/document/{draft_name}/", params={"format": "json"}
-            )
-            if doc_resp.status_code != 200:
-                return None
-            group_url = doc_resp.json().get("group")
-            if not group_url:
-                return None
-            group_resp = client.get(f"{_DATATRACKER_BASE}{group_url}", params={"format": "json"})
-            if group_resp.status_code != 200:
-                return None
-            return group_resp.json().get("acronym")
-    except httpx.HTTPError:
-        return None
+    from services.ietf_import_service import cached_datatracker_resolution
+
+    def _fetch() -> str | None:
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                doc_resp = client.get(
+                    f"{_DATATRACKER_BASE}/api/v1/doc/document/{draft_name}/", params={"format": "json"}
+                )
+                if doc_resp.status_code != 200:
+                    return None
+                group_url = doc_resp.json().get("group")
+                if not group_url:
+                    return None
+                group_resp = client.get(f"{_DATATRACKER_BASE}{group_url}", params={"format": "json"})
+                if group_resp.status_code != 200:
+                    return None
+                return group_resp.json().get("acronym")
+        except httpx.HTTPError:
+            return None
+
+    return cached_datatracker_resolution(f"ietf_wg_acronym_for_draft:{draft_name}", _fetch)
 
 
 def _resolve_rfc_number_for_draft(draft_name: str) -> str | None:
-    """Live lookup of the RFC number a draft was published as, if any.
+    """Live lookup of the RFC number a draft was published as, if any --
+    Redis-cached (see ietf_import_service.cached_datatracker_resolution)
+    under the same key namespace as IetfImportService.resolve_rfc_number_for_draft,
+    since both compute the identical value from the identical lookup.
 
     Datatracker's draft-keyed document record always has rfc/rfc_number set
     to null (checked directly -- confirmed even for long-published drafts),
@@ -497,15 +534,20 @@ def _resolve_rfc_number_for_draft(draft_name: str) -> str | None:
     """
     import httpx
 
-    try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            resp = client.get(f"{_DATATRACKER_BASE}/doc/{draft_name}/")
-            if resp.status_code != 200:
-                return None
-            match = re.search(r"/doc/rfc(\d+)/", str(resp.url))
-            return match.group(1) if match else None
-    except httpx.HTTPError:
-        return None
+    from services.ietf_import_service import cached_datatracker_resolution
+
+    def _fetch() -> str | None:
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get(f"{_DATATRACKER_BASE}/doc/{draft_name}/")
+                if resp.status_code != 200:
+                    return None
+                match = re.search(r"/doc/rfc(\d+)/", str(resp.url))
+                return match.group(1) if match else None
+        except httpx.HTTPError:
+            return None
+
+    return cached_datatracker_resolution(f"ietf_rfc_number_for_draft:{draft_name}", _fetch)
 
 
 def _list_available_corpora(
@@ -929,12 +971,11 @@ def _judge_lane_discussion(
             ],
             # top_p omitted: some model providers (e.g. Anthropic's newer
             # Claude models) reject a request that sets both temperature
-            # and top_p, and top_p=1 was a no-op default anyway.
-            # max_tokens caps generation explicitly -- a provider's credential-level
-            # max_tokens is only a UI default/bound, not an enforced per-call limit,
-            # so slow local models (e.g. Ollama) can otherwise run until the context
-            # window fills and blow past the plugin's hardcoded 300s read timeout.
-            model_parameters={"temperature": 0.1, "max_tokens": 1500},
+            # and top_p, and top_p=1 was a no-op default anyway. max_tokens
+            # is NOT set here -- see _invoke_llm_with_retry's own comment on
+            # _OLLAMA_PROVIDER for why that has to be scoped to Ollama only,
+            # not every provider's call.
+            model_parameters={"temperature": 0.1},
             tools=[],
             stop=[],
             stream=False,
@@ -1538,16 +1579,35 @@ def _format_evolution_hits(hits: list[str], start: int = 1) -> tuple[str, list[t
 
 
 def _http_get_text(url: str) -> str | None:
+    """Fetch a URL's text, Redis-cached by URL (see
+    ietf_import_service.cached_datatracker_resolution).
+
+    Every caller of this (fetch_rfc, fetch_draft, the two-revision diff
+    fetchers, the iddiff anchor lookup) fetches content that's permanently
+    immutable once published: an RFC's text, one specific draft revision's
+    text, or the rendered diff between two specific fixed revisions --
+    confirmed live that leaving this uncached meant a multi-turn research
+    run re-downloaded the exact same RFC/draft text from scratch on every
+    single turn that looked at a different paragraph of it (the tool's
+    `query` param changes per turn to filter a different section, but the
+    underlying document fetch was always identical), needlessly slow and
+    wasteful for a document that will never change.
+    """
     import httpx
 
-    try:
-        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-            resp = client.get(url)
-            if resp.status_code != 200:
-                return None
-            return resp.text
-    except httpx.HTTPError:
-        return None
+    from services.ietf_import_service import cached_datatracker_resolution
+
+    def _fetch() -> str | None:
+        try:
+            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                resp = client.get(url)
+                if resp.status_code != 200:
+                    return None
+                return resp.text
+        except httpx.HTTPError:
+            return None
+
+    return cached_datatracker_resolution(f"ietf_doc_fetch:{url}", _fetch)
 
 
 def _filter_primary_source_text(text: str, query: str | None, source_label: str, max_chars: int = 6000) -> str:
@@ -2194,10 +2254,11 @@ def _verify_answer(
         ],
         # top_p omitted: some model providers (e.g. Anthropic's newer Claude
         # models) reject a request that sets both temperature and top_p,
-        # and top_p=1 was a no-op default anyway.
-        # max_tokens caps generation explicitly -- see the lane-discussion call
-        # above for why a credential-level max_tokens alone isn't enough.
-        model_parameters={"temperature": 0.1, "max_tokens": 1500},
+        # and top_p=1 was a no-op default anyway. max_tokens is NOT set
+        # here -- see _invoke_llm_with_retry's own comment on
+        # _OLLAMA_PROVIDER for why that has to be scoped to Ollama only,
+        # not every provider's call.
+        model_parameters={"temperature": 0.1},
         tools=[],
         stop=[],
         stream=False,
@@ -2855,14 +2916,53 @@ def ask(
             from services.ietf_import_service import IetfImportService
 
             local_names = IetfImportService.list_local_source_names(viewer_account_id)
-            is_local = any(name.lower() == draft.strip().lower() for name in local_names)
+            needle = draft.strip().lower()
+            matched_local_name = next((name for name in local_names if name.lower() == needle), None)
+            # A bare "RFC 3168"-style hint never equals a draft name
+            # directly (local sources are tracked by draft name -- this
+            # project's identity key -- not RFC number). Confirmed live:
+            # an admin had already downloaded and shared draft-ietf-tsvwg-
+            # ecn (= RFC 3168), but Workspace's "start from an RFC" still
+            # got "Known drafts: (none found)" because this check only
+            # ever did a literal string match. _resolve_draft_hint already
+            # does this RFC-number translation for registered Dify
+            # datasets above; local sources need the same live reverse
+            # lookup (RFC number -> draft name) before giving up on them.
+            if matched_local_name is None and re.match(r"^rfc\s*\d+$", needle):
+                # resolve_draft_name_for_rfc builds its Datatracker URL
+                # from this string verbatim and doesn't strip internal
+                # whitespace itself -- confirmed live that the un-stripped
+                # "rfc 3168" (the exact form Workspace sends) 404'd as
+                # ".../doc/rfc%203168/", while "rfc3168" 200s correctly.
+                resolved_name = IetfImportService.resolve_draft_name_for_rfc(re.sub(r"\s+", "", needle))
+                if resolved_name:
+                    matched_local_name = next(
+                        (name for name in local_names if name.lower() == resolved_name.lower()), None
+                    )
+            is_local = matched_local_name is not None
             if not is_local:
+                # Confirmed live: sys.exit()-ing here took down the whole
+                # web request with a raw CLI-flavored "SystemExit: --draft
+                # ... did not match" message surfaced straight to the
+                # browser -- for an interactive CLI run, a hard fail on a
+                # mistyped --draft is reasonable; for a question submitted
+                # through the UI (e.g. Workspace's "start from an RFC"), a
+                # hint that happens not to match THIS account's corpus is a
+                # normal, expected case, not a fatal one. Same fallback as
+                # the local-source branch below: proceed with no hint at
+                # all, exactly as if none had been given -- the agent still
+                # finds the right source itself via its own search tools.
                 known = ", ".join(entry["draft_name"] for entry in draft_catalog) or "(none found)"
-                sys.exit(f"--draft {draft!r} did not match exactly one known draft. Known drafts: {known}")
-            if verbose:
-                print(f"[draft hint] {draft!r} resolved to a local-only source, no dataset ids to pre-seed", file=sys.stderr)
-            scoped_draft_name = next(name for name in local_names if name.lower() == draft.strip().lower())
-            scoped_rfc_number = IetfImportService.resolve_rfc_number_for_draft(scoped_draft_name)
+                print(
+                    f"[draft hint] {draft!r} did not match exactly one known draft or local source "
+                    f"(known drafts: {known}) -- proceeding without a draft hint.",
+                    file=sys.stderr,
+                )
+            else:
+                if verbose:
+                    print(f"[draft hint] {draft!r} resolved to a local-only source, no dataset ids to pre-seed", file=sys.stderr)
+                scoped_draft_name = matched_local_name
+                scoped_rfc_number = IetfImportService.resolve_rfc_number_for_draft(scoped_draft_name)
         else:
             if verbose:
                 print(f"[draft hint] {draft!r} resolved to {resolved['draft_name']}", file=sys.stderr)
@@ -3541,10 +3641,14 @@ def ask(
             prompt_messages=call_messages,
             # top_p omitted: some model providers (e.g. Anthropic's newer
             # Claude models) reject a request that sets both temperature
-            # and top_p, and top_p=1 was a no-op default anyway.
-            # max_tokens caps generation explicitly -- see the lane-discussion call
-            # above for why a credential-level max_tokens alone isn't enough.
-            model_parameters={"temperature": 0.3, "max_tokens": 1500},
+            # and top_p, and top_p=1 was a no-op default anyway. max_tokens
+            # is NOT set here -- see _invoke_llm_with_retry's own comment
+            # on _OLLAMA_PROVIDER for why that has to be scoped to Ollama
+            # only, not every provider's call -- confirmed live that an
+            # unconditional 1500 cap starved a completely different
+            # provider's reasoning model of the budget it needed to answer
+            # at all (its own <think> block alone used up the whole cap).
+            model_parameters={"temperature": 0.3},
             tools=[] if is_last else tools,
             stop=[],
             stream=False,

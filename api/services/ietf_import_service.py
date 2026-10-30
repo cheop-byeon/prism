@@ -43,6 +43,7 @@ from configs import dify_config
 from controllers.common.errors import FileTooLargeError, RemoteFileUploadError, UnsupportedFileTypeError
 from dify_graph.file import helpers as file_helpers
 from extensions.ext_database import db
+from extensions.ext_redis import redis_client
 from fields.file_fields import FileWithSignedUrl
 from libs.login import current_account_with_tenant
 from services.email_quote_cleaning import QuoteHandling, clean_email_body
@@ -51,6 +52,36 @@ from services.file_service import FileService
 logger = logging.getLogger(__name__)
 
 ietfdata_service_url = URL(str(dify_config.IETFDATA_SERVICE_URL))
+
+# A draft's owning WG and RFC-publication status are effectively permanent
+# once set, so there's no reason to re-hit Datatracker for the same draft on
+# every request -- confirmed live that doing so unconditionally, across the
+# ~300 local sources one deployment had accumulated, made a single
+# /api/research call take 10+ minutes with no error and nothing saved (the
+# client gave up long before the live-Datatracker sweep finished). 30 days
+# rather than forever so a draft that changes group affiliation eventually
+# self-corrects without a manual cache flush.
+_DATATRACKER_RESOLUTION_CACHE_TTL = 60 * 60 * 24 * 30
+_DATATRACKER_CACHE_MISS = b"\x00none\x00"
+
+
+def cached_datatracker_resolution(cache_key: str, fetch) -> str | None:
+    """Redis-backed memo for a live Datatracker lookup keyed by draft name.
+
+    Stored in Redis (already this stack's Celery broker) rather than an
+    in-process dict so the cache survives this container being recreated on
+    every deploy, instead of going cold again right after each one.
+    """
+    cached = redis_client.get(cache_key)
+    if cached is not None:
+        return None if cached == _DATATRACKER_CACHE_MISS else cached.decode()
+    result = fetch()
+    redis_client.setex(
+        cache_key,
+        _DATATRACKER_RESOLUTION_CACHE_TTL,
+        result.encode() if result is not None else _DATATRACKER_CACHE_MISS,
+    )
+    return result
 
 
 class IetfMailarchiveImportPayload(TypedDict):
@@ -249,7 +280,10 @@ class IetfImportService:
 
     @staticmethod
     def resolve_rfc_number_for_draft(draft_name: str) -> str | None:
-        """Live lookup of the RFC number a draft was published as, if any.
+        """RFC number a draft was published as, if any -- Redis-cached (see
+        cached_datatracker_resolution) under the same key namespace as
+        ask_decision_agent.py's own `_resolve_rfc_number_for_draft`, since
+        both compute the identical value from the identical lookup.
 
         Datatracker's draft-keyed document record always has rfc/rfc_number set
         to null (confirmed directly, even for long-published drafts), so the
@@ -259,22 +293,27 @@ class IetfImportService:
         and just stays on the draft's own page otherwise. Returns None if
         unpublished or on any lookup failure.
         """
-        try:
-            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-                resp = client.get(f"https://datatracker.ietf.org/doc/{draft_name}/")
-                if resp.status_code != 200:
-                    return None
-                match = re.search(r"/doc/rfc(\d+)/", str(resp.url))
-                return match.group(1) if match else None
-        except httpx.HTTPError:
-            return None
+
+        def _fetch() -> str | None:
+            try:
+                with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                    resp = client.get(f"https://datatracker.ietf.org/doc/{draft_name}/")
+                    if resp.status_code != 200:
+                        return None
+                    match = re.search(r"/doc/rfc(\d+)/", str(resp.url))
+                    return match.group(1) if match else None
+            except httpx.HTTPError:
+                return None
+
+        return cached_datatracker_resolution(f"ietf_rfc_number_for_draft:{draft_name}", _fetch)
 
     @staticmethod
     def resolve_wg_for_draft(draft_name: str) -> str | None:
         """Live lookup of a draft's owning WG's real mailing-list name via
-        IETF Datatracker (draft -> group -> list_email's local-part) -- not
-        cached, matching the pattern used by every other live-fetch tool.
-        Returns None on any lookup failure.
+        IETF Datatracker (draft -> group -> list_email's local-part) --
+        Redis-cached (see cached_datatracker_resolution). Returns None on any
+        lookup failure (a miss is cached too, so a draft Datatracker doesn't
+        know about doesn't get re-fetched on every call either).
 
         Deliberately prefers list_email's local-part over the bare group
         acronym, and falls back to the acronym only when list_email is
@@ -290,26 +329,30 @@ class IetfImportService:
         these (measured: 65 of 69 successful RFC/draft pulls in one bulk-pull
         session got zero mail because of exactly this, before this fix).
         """
-        try:
-            with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-                doc_resp = client.get(
-                    f"https://datatracker.ietf.org/api/v1/doc/document/{draft_name}/", params={"format": "json"}
-                )
-                if doc_resp.status_code != 200:
-                    return None
-                group_url = doc_resp.json().get("group")
-                if not group_url:
-                    return None
-                group_resp = client.get(f"https://datatracker.ietf.org{group_url}", params={"format": "json"})
-                if group_resp.status_code != 200:
-                    return None
-                group_data = group_resp.json()
-                list_email = group_data.get("list_email")
-                if list_email and "@" in list_email:
-                    return list_email.split("@", 1)[0]
-                return group_data.get("acronym")
-        except httpx.HTTPError:
-            return None
+
+        def _fetch() -> str | None:
+            try:
+                with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+                    doc_resp = client.get(
+                        f"https://datatracker.ietf.org/api/v1/doc/document/{draft_name}/", params={"format": "json"}
+                    )
+                    if doc_resp.status_code != 200:
+                        return None
+                    group_url = doc_resp.json().get("group")
+                    if not group_url:
+                        return None
+                    group_resp = client.get(f"https://datatracker.ietf.org{group_url}", params={"format": "json"})
+                    if group_resp.status_code != 200:
+                        return None
+                    group_data = group_resp.json()
+                    list_email = group_data.get("list_email")
+                    if list_email and "@" in list_email:
+                        return list_email.split("@", 1)[0]
+                    return group_data.get("acronym")
+            except httpx.HTTPError:
+                return None
+
+        return cached_datatracker_resolution(f"ietf_wg_mailinglist_for_draft:{draft_name}", _fetch)
 
     _RFC_WAS_DRAFT_RE = re.compile(r'Was\s*<a href="/doc/([a-z0-9-]+)/\d+/">')
 
