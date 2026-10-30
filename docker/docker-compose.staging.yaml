@@ -1,0 +1,33 @@
+# Staging counterpart of docker-compose.prism-cloud.yaml -- same shape, but
+# pointed at this staging server (plain HTTP on its IP, no domain/TLS yet)
+# instead of production's https://prism.uiocloud.no. Never load both files
+# together: prism-cloud.yaml would point staging's browser traffic at the
+# production API.
+x-staging-urls: &staging-urls
+  CONSOLE_API_URL: http://158.39.200.108
+  CONSOLE_WEB_URL: http://158.39.200.108
+  SERVICE_API_URL: http://158.39.200.108
+  APP_API_URL: http://158.39.200.108
+  APP_WEB_URL: http://158.39.200.108
+
+services:
+  ietf_decision_agent_ui:
+    environment:
+      <<: *staging-urls
+      PRISM_URL_PREFIX: /prism
+
+  api:
+    environment: *staging-urls
+
+  worker:
+    environment: *staging-urls
+
+  worker_beat:
+    environment: *staging-urls
+
+  web:
+    environment:
+      CONSOLE_API_URL: http://158.39.200.108
+      APP_API_URL: http://158.39.200.108
+      NEXT_PUBLIC_PRISM_CLASSIC_URL: http://158.39.200.108/classic/
+      NEXT_PUBLIC_PRISM_SPECTRUM_URL: http://158.39.200.108/spectrum/
