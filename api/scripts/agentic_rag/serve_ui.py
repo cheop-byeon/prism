@@ -608,9 +608,10 @@ def _is_data_admin(account) -> bool:
     accounts someone deliberately invited to it pass.
     """
     from extensions.ext_database import db
-    from models.account import Tenant, TenantAccountJoin
+    from models.account import TenantAccountJoin
+    from services.agentic_rag_session_service import get_data_tenant_id
 
-    admin_tenant_id = db.session.query(Tenant).first().id
+    admin_tenant_id = get_data_tenant_id()
     return (
         db.session.query(TenantAccountJoin)
         .filter(
@@ -828,11 +829,9 @@ def main() -> None:
         """
         from core.provider_manager import ProviderManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
-        from extensions.ext_database import db
-        from models.account import Tenant
-        from services.agentic_rag_session_service import get_owned_tenant_id
+        from services.agentic_rag_session_service import get_data_tenant_id, get_owned_tenant_id
 
-        admin_tenant_id = db.session.query(Tenant).first().id
+        admin_tenant_id = get_data_tenant_id()
         # Every real account has exactly one owned tenant (its own workspace,
         # created alongside the account -- see create_account_and_tenant);
         # the admin_tenant_id fallback below only matters for the
@@ -2155,8 +2154,9 @@ def main() -> None:
         """
         from extensions.ext_database import db
         from models.account import Account, Tenant, TenantAccountJoin
+        from services.agentic_rag_session_service import get_data_tenant_id
 
-        admin_tenant_id = db.session.query(Tenant).first().id
+        admin_tenant_id = get_data_tenant_id()
 
         accounts = db.session.query(Account).order_by(Account.created_at.desc()).all()
         account_ids = [a.id for a in accounts]
@@ -2302,7 +2302,8 @@ def main() -> None:
         break AccountService.login's own tenant check guards against).
         """
         from extensions.ext_database import db
-        from models.account import Account, Tenant, TenantAccountJoin
+        from models.account import Account, TenantAccountJoin
+        from services.agentic_rag_session_service import get_data_tenant_id
 
         payload = request.get_json(silent=True) or {}
         make_admin = payload.get("admin")
@@ -2315,7 +2316,7 @@ def main() -> None:
         if target.id == g.account.id and not make_admin:
             return jsonify({"error": "You can't revoke your own admin access."}), 400
 
-        admin_tenant_id = db.session.query(Tenant).first().id
+        admin_tenant_id = get_data_tenant_id()
         existing = (
             db.session.query(TenantAccountJoin)
             .filter_by(tenant_id=admin_tenant_id, account_id=account_id)
@@ -2528,10 +2529,9 @@ def main() -> None:
         """
         from core.model_manager import ModelManager
         from dify_graph.model_runtime.entities.model_entities import ModelType
-        from extensions.ext_database import db
-        from models.account import Tenant
+        from services.agentic_rag_session_service import get_data_tenant_id
 
-        tenant_id = db.session.query(Tenant).first().id
+        tenant_id = get_data_tenant_id()
         return ModelManager().get_model_instance(
             tenant_id=tenant_id,
             provider="",

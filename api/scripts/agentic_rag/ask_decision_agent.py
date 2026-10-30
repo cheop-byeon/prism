@@ -1222,7 +1222,8 @@ def _resolve_fallback_tenant_id(viewer_account_id: str | None) -> str:
     possibly the wrong tenant's model credentials entirely.
     """
     from extensions.ext_database import db
-    from models.account import Tenant, TenantAccountJoin
+    from models.account import TenantAccountJoin
+    from services.agentic_rag_session_service import get_data_tenant_id
 
     if viewer_account_id:
         joins = db.session.query(TenantAccountJoin).filter(TenantAccountJoin.account_id == viewer_account_id).all()
@@ -1231,7 +1232,7 @@ def _resolve_fallback_tenant_id(viewer_account_id: str | None) -> str:
             return current.tenant_id
         if joins:
             return joins[0].tenant_id
-    return db.session.query(Tenant).first().id
+    return get_data_tenant_id()
 
 
 def _filter_sections_by_hint(sorted_sections: list[str], section_hint: str | None, emit) -> list[str]:

@@ -7,12 +7,14 @@ already-configured one, so it's tested against real Account/Tenant/
 TenantAccountJoin rows rather than trusted on inspection alone.
 """
 
+from datetime import timedelta
 from uuid import uuid4
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from models.account import Account, Tenant, TenantAccountJoin, TenantAccountRole
-from services.agentic_rag_session_service import get_owned_tenant_id
+from services.agentic_rag_session_service import get_data_tenant_id, get_owned_tenant_id
 
 
 class AgenticRagTestDataFactory:
@@ -104,3 +106,32 @@ class TestGetOwnedTenantId:
         )
 
         assert get_owned_tenant_id(account) is None
+
+
+class TestGetDataTenantId:
+    # The integration DB is shared across tests and never cleaned, so each
+    # test backdates the tenant it expects to win to just before whatever
+    # is already there, rather than assuming the table starts empty.
+    @staticmethod
+    def _create_tenant_older_than_all(db_session_with_containers: Session) -> Tenant:
+        oldest_existing = db_session_with_containers.query(func.min(Tenant.created_at)).scalar()
+        tenant = AgenticRagTestDataFactory.create_tenant(db_session_with_containers)
+        if oldest_existing is not None:
+            tenant.created_at = oldest_existing - timedelta(days=1)
+            db_session_with_containers.commit()
+        return tenant
+
+    def test_resolves_to_the_oldest_tenant(self, db_session_with_containers: Session):
+        setup_tenant = self._create_tenant_older_than_all(db_session_with_containers)
+        AgenticRagTestDataFactory.create_tenant(db_session_with_containers)
+
+        assert get_data_tenant_id() == setup_tenant.id
+
+    def test_ignores_insertion_order(self, db_session_with_containers: Session):
+        # A newer sign-up workspace whose row happens to be inserted (and so
+        # physically stored) before the setup workspace must not win -- the
+        # unordered Tenant.first() this replaces could return either.
+        AgenticRagTestDataFactory.create_tenant(db_session_with_containers)
+        setup_tenant = self._create_tenant_older_than_all(db_session_with_containers)
+
+        assert get_data_tenant_id() == setup_tenant.id

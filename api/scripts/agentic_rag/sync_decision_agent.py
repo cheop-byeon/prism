@@ -312,10 +312,11 @@ def main() -> None:
 
         from extensions.ext_database import db
         from models.account import Account, Tenant
+        from services.agentic_rag_session_service import get_data_tenant_id
         from services.app_dsl_service import AppDslService
 
         account = db.session.query(Account).first()
-        account.current_tenant = db.session.query(Tenant).first()
+        account.current_tenant = db.session.get(Tenant, get_data_tenant_id())
         login_user(account)
 
         if args.app_id:

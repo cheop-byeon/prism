@@ -88,6 +88,22 @@ def get_owned_tenant_id(account: Account) -> str | None:
     return join.tenant_id if join else None
 
 
+def get_data_tenant_id() -> str:
+    """The tenant holding the real IETF datasets: the one Dify's own
+    /install setup created, behind INIT_PASSWORD. Its members are Prism's
+    data admins; self-service sign-ups each get a separate personal tenant.
+
+    Identified as the oldest tenant -- every console route (sign-up
+    included) is gated on setup_required, so no other tenant can exist
+    before setup's. Replaces a bare, unordered Tenant.first(), which
+    Postgres may answer with any row once sign-ups add more tenants.
+    """
+    tenant = db.session.query(Tenant).order_by(Tenant.created_at.asc(), Tenant.id.asc()).first()
+    if tenant is None:
+        raise RuntimeError("No tenant exists yet -- complete Dify's /install setup first.")
+    return tenant.id
+
+
 class AgenticRagSessionService:
     """CRUD and history assembly for Prism's conversations -- backed by
     Dify's real Conversation/Message tables instead of a bespoke pair, so
@@ -576,7 +592,7 @@ class AgenticRagSessionService:
             # Reuses Dify's own conversation-naming LLM call -- the same one
             # a real chat app gets -- instead of hand-rolling a second title
             # generator now that this is a real Conversation row.
-            tenant_id = db.session.query(Tenant).first().id
+            tenant_id = get_data_tenant_id()
             with contextlib.suppress(Exception):
                 ConversationService.auto_generate_name(_prism_app(tenant_id), conversation)
 
