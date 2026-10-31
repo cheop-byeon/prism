@@ -2597,6 +2597,11 @@ def main() -> None:
         if not query and not keywords:
             return jsonify({"error": "query or keywords is required"}), 400
         query_arg = keywords if keywords else query
+        # Set only by the Document viewer's "Track this decision" (the
+        # section the clicked paragraph/line actually lives in) -- the
+        # manual Track phrase box never sends this, so typing a keyword
+        # by hand still searches every section it touches, unchanged.
+        section_hint = (request.args.get("section") or "").strip() or None
         account_id = g.account.id
         session_id = request.args.get("session_id") or None
         # Same model the user already picked for the main composer -- without
@@ -2610,7 +2615,9 @@ def main() -> None:
 
         def work(on_event):
             nonlocal session_id
-            result = decision_thread(draft, query_arg, on_event=on_event, viewer_account_id=account_id, **model_kwargs)
+            result = decision_thread(
+                draft, query_arg, on_event=on_event, viewer_account_id=account_id, section_hint=section_hint, **model_kwargs
+            )
             # Creates its own session if none was given -- confirmed live
             # this gap was real: a user who opens Decision history and runs
             # Track phrase WITHOUT first asking a main question in that

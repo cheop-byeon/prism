@@ -3545,6 +3545,17 @@ function trackDecision() {
     params.set('query', query);
   }
   if (draft) params.set('draft', draft);
+  // Consumed once -- a later, unrelated manual Track phrase click (after
+  // this run) must not inherit a stale section scope from a paragraph
+  // click two investigations ago. The backend falls back to searching
+  // every matching section on its own if this section turns out to have
+  // no match for the phrase, so a stale-but-still-applicable hint here
+  // is harmless even in the narrow case the draft field also changed
+  // in between.
+  if (pendingSectionHint) {
+    params.set('section', pendingSectionHint);
+    pendingSectionHint = null;
+  }
   // Lets the backend save this run against the real investigation it
   // belongs to (see IetfSessionDecisionThread) -- omitted (not an error)
   // if no session exists yet, same as /api/research's own session_id.
@@ -3719,6 +3730,14 @@ function renderCoverage() {
 let currentDocument = null;
 let currentDocSectionIdx = 0;
 let selectedPassageText = null;
+// Set by "Track this decision" (see below), read and cleared by the next
+// trackDecision() call -- carries the section a clicked paragraph/line
+// actually lives in across the gap between that click and the user's own
+// later "Track phrase" click (deliberately not auto-fired -- see the
+// button's own click handler for why). Manually typing into the Decision
+// history box never sets this, so hand-typed keywords keep searching
+// every section they touch, unchanged.
+let pendingSectionHint = null;
 
 // Paragraphs render at whole-paragraph granularity (click the <SUP>pilcrow</SUP>
 // handle) AND at individual-line granularity (click a specific wrapped
@@ -3823,6 +3842,12 @@ function renderDocSection(idx) {
     // so this doesn't need its own draft-vs-RFC branch.
     poThreadDraftEl.value = currentDocument.doc_id;
     document.getElementById('poThreadQuery').value = candidates.join(', ');
+    // The section this paragraph/line actually lives in -- trackDecision
+    // sends this on the next Track phrase click so the backend only has
+    // to LLM-judge this one section instead of every section a broad
+    // keyword happens to touch (confirmed live: "ECT"+"ECN" alone
+    // touched 62 sections of RFC 3168).
+    pendingSectionHint = currentDocument.sections[currentDocSectionIdx].number || null;
     go('investigation');
     view('timeline');
     evSelectScale('within');

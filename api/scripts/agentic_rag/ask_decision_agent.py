@@ -1159,6 +1159,39 @@ def _resolve_fallback_tenant_id(viewer_account_id: str | None) -> str:
     return db.session.query(Tenant).first().id
 
 
+def _filter_sections_by_hint(sorted_sections: list[str], section_hint: str | None, emit) -> list[str]:
+    """Narrows an already-keyword-matched set of sections down to just the
+    one the caller already knows the real decision lives in -- the
+    Document viewer already told us which section a clicked paragraph/
+    line belongs to, so there's no need to also LLM-judge every OTHER
+    section the keyword happens to touch too. Confirmed live this is the
+    actual cost: a two-word keyword combination ("ECT", "ECN") touched 62
+    sections in one real draft, each needing its own lane-judging LLM
+    call -- scoping to the one section the user actually selected text in
+    turns that into effectively one.
+
+    Falls back to the full, unscoped set (not an empty result) if the
+    hint doesn't match any keyword-touched section at all -- confirmed
+    live this is a real, not hypothetical, case (the exact wording a
+    user selected doesn't necessarily recur verbatim in that same
+    section's own older revisions), and silently showing nothing with no
+    explanation would be worse than just ignoring an unhelpful hint.
+    """
+    if not section_hint:
+        return sorted_sections
+    hint = section_hint.strip()
+    matched = [s for s in sorted_sections if s == hint]
+    if matched:
+        emit("matched", f"Scoped to §{hint} (the section you selected text in)")
+        return matched
+    emit(
+        "matched",
+        f"§{hint} (the section you selected text in) has no match for this phrase in its own "
+        f"history -- showing every matching section instead",
+    )
+    return sorted_sections
+
+
 def _local_decision_thread(
     draft_name: str,
     query: str | list[str],
@@ -1166,6 +1199,7 @@ def _local_decision_thread(
     model_name: str = _DEFAULT_MODEL_NAME,
     on_event=None,
     viewer_account_id: str | None = None,
+    section_hint: str | None = None,
 ) -> dict:
     """Local-source equivalent of decision_thread() -- same per-revision,
     per-section timeline, same return shape ({draft_name, rfc_number, query,
@@ -1241,6 +1275,7 @@ def _local_decision_thread(
         by_section.setdefault(m["section"], []).append(m)
     sorted_sections = sorted(by_section, key=_section_sort_key)
     _emit("matched", f"Found {len(raw_matches)} matching change(s) across {len(sorted_sections)} section(s)")
+    sorted_sections = _filter_sections_by_hint(sorted_sections, section_hint, _emit)
 
     lanes = []
     for section in sorted_sections:
@@ -1278,12 +1313,19 @@ def decision_thread(
     model_name: str = _DEFAULT_MODEL_NAME,
     on_event=None,
     viewer_account_id: str | None = None,
+    section_hint: str | None = None,
 ) -> dict:
     """Trace one specific decision's actual text across every revision where
     it changed, compressing over every revision where it didn't -- unlike
     a full-corpus change graph, this is a per-version, paragraph-level view
     of a single parameter/decision's history (e.g. "how did INIT_CWND's
     value change over time", not "what changed in every section").
+
+    section_hint, when given, narrows the keyword-matched sections down to
+    just this one before any lane gets LLM-judged -- see
+    _filter_sections_by_hint's own docstring for why (a broad keyword can
+    legitimately touch dozens of sections; the Document viewer already
+    knows which one the user actually selected text in).
 
     Matches every evolution-dataset segment whose header+body contains
     *query* (case-insensitive substring), across the WHOLE draft history --
@@ -1354,7 +1396,22 @@ def decision_thread(
             from services.ietf_import_service import IetfImportService
 
             local_names = IetfImportService.list_local_source_names(viewer_account_id)
-            local_match = next((name for name in local_names if name.lower() == draft_hint.strip().lower()), None)
+            needle = draft_hint.strip().lower()
+            local_match = next((name for name in local_names if name.lower() == needle), None)
+            # A bare "RFC 3168"-style hint never equals a draft name
+            # directly (local sources are tracked by draft name) --
+            # confirmed live this hit the exact same bug ask()'s own
+            # --draft hint resolution had: the Document viewer's "Track
+            # this decision" sends the doc_id it already has, which for
+            # an RFC is "RFC NNNN", not its draft name, even though the
+            # underlying local source (and its shared flag) is tracked
+            # under the draft name and genuinely exists. Same fix: try
+            # resolving it as an RFC number via the live reverse lookup
+            # before giving up on it.
+            if local_match is None and re.match(r"^rfc\s*\d+$", needle):
+                resolved_name = IetfImportService.resolve_draft_name_for_rfc(re.sub(r"\s+", "", needle))
+                if resolved_name:
+                    local_match = next((name for name in local_names if name.lower() == resolved_name.lower()), None)
             if local_match:
                 return _local_decision_thread(
                     local_match,
@@ -1363,6 +1420,7 @@ def decision_thread(
                     model_name=model_name,
                     on_event=on_event,
                     viewer_account_id=viewer_account_id,
+                    section_hint=section_hint,
                 )
             known = ", ".join(entry["draft_name"] for entry in catalog) or "(none registered)"
             raise ValueError(
@@ -1439,6 +1497,7 @@ def decision_thread(
         "matched",
         f"Found {len(raw_matches)} matching change(s) across {len(sorted_sections)} section(s)",
     )
+    sorted_sections = _filter_sections_by_hint(sorted_sections, section_hint, _emit)
     lanes = []
     for section in sorted_sections:
         _emit("building", f"Building §{section} timeline…")
