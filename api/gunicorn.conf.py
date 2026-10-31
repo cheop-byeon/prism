@@ -27,6 +27,14 @@ from grpc.experimental import gevent as grpc_gevent  # type: ignore
 # - https://github.com/benoitc/gunicorn/blob/23.0.0/gunicorn/arbiter.py#L605-L609
 
 
+# gunicorn 25's control socket runs an asyncio thread in the arbiter that
+# logs while the arbiter forks workers. A fork landing while that thread
+# holds the logging handler lock leaves the child with a lock nobody will
+# release: the worker hangs forever on its first log line ("Booting
+# worker") and every request times out. Dify never uses the control socket.
+control_socket_disable = True
+
+
 def post_patch(event):
     # this function is only called for gevent worker.
     # from gevent docs (https://www.gevent.org/api/gevent.monkey.html):
