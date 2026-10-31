@@ -20,6 +20,10 @@
 #   which service changed).
 #   PULL=false deploy/rebuild: skips the git pull, e.g. when you've already
 #   pulled or are testing uncommitted local changes.
+#   PRISM_DEPLOY_ENV=staging deploy/rebuild: loads
+#   docker-compose.staging.yaml instead of docker-compose.prism-cloud.yaml
+#   (see below). Set it once in this machine's docker/.env instead of on
+#   every run.
 set -euo pipefail
 
 SCRIPT_DIR="$(dirname "$(realpath "$0")")"
@@ -49,10 +53,27 @@ DEFAULT_SERVICES=(api worker worker_beat web)
 # itself is a local, gitignored file -- present on machines that actually
 # run Prism, not guaranteed for every clone -- so it's included
 # conditionally rather than hardcoded, same as dev/rebuild-backend does.
+#
+# Which public-URL file that is depends on the machine: production's
+# prism-cloud.yaml, or a sibling like staging.yaml. Loading production's on
+# the staging VM would silently point staging's browser traffic at the
+# production API, so the choice is per-machine (docker/.env is gitignored)
+# rather than something every run has to remember to pass.
+if [ -z "${PRISM_DEPLOY_ENV:-}" ] && [ -f .env ]; then
+  PRISM_DEPLOY_ENV="$(sed -n 's/^PRISM_DEPLOY_ENV=["'\'']\{0,1\}\([^"'\'']*\)["'\'']\{0,1\}$/\1/p' .env | tail -n 1)"
+fi
+PRISM_DEPLOY_ENV="${PRISM_DEPLOY_ENV:-prism-cloud}"
+URLS_COMPOSE_FILE="docker-compose.${PRISM_DEPLOY_ENV}.yaml"
+
 HAS_IETF_UI=false
 if [ -f docker-compose.ietf-ui.yaml ]; then
+  if [ ! -f "$URLS_COMPOSE_FILE" ]; then
+    echo "error: PRISM_DEPLOY_ENV=${PRISM_DEPLOY_ENV}, but docker/${URLS_COMPOSE_FILE} doesn't exist" >&2
+    exit 1
+  fi
   HAS_IETF_UI=true
-  COMPOSE_FILES+=(-f docker-compose.ietf-ui.yaml -f docker-compose.prism-cloud.yaml)
+  COMPOSE_FILES+=(-f docker-compose.ietf-ui.yaml -f "$URLS_COMPOSE_FILE")
+  echo "==> Public URLs from ${URLS_COMPOSE_FILE}"
   # ietf_decision_agent_ui runs off the SAME dify-local-api:dev image tag as
   # api, but is a separate container -- left out of the default list, it
   # keeps running its old image indefinitely after a rebuild (confirmed
