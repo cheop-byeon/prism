@@ -519,12 +519,26 @@
   .po-toc button[aria-pressed="true"] { color: var(--po-accent); }
   .po-docpaper { background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 12px; padding: 26px; min-width: 0; }
   .po-docpaper h2 { font: 500 22px var(--po-serif); margin: 6px 0 18px; }
-  .po-passage {
-    display: block; width: 100%; text-align: left; padding: 12px 14px; margin-bottom: 12px;
-    background: transparent; border: 0; border-left: 3px solid var(--po-line); border-radius: 0 6px 6px 0;
-    font: 14px/1.8 var(--po-serif); color: var(--po-ink);
+  .po-paragraph {
+    display: flex; align-items: flex-start; gap: 10px; margin-bottom: 12px; padding: 4px 14px 4px 0;
+    border-left: 3px solid var(--po-line); border-radius: 0 6px 6px 0;
   }
-  .po-passage[aria-pressed="true"] { background: var(--po-tint); border-left-color: var(--po-accent); }
+  .po-paragraph[data-preview="true"] { display: none; }
+  .po-docpaper.show-all .po-paragraph[data-preview="true"] { display: flex; }
+  .po-para-handle {
+    flex: 0 0 auto; width: 22px; height: 22px; margin-top: 2px; padding: 0; text-align: center;
+    background: transparent; border: 1px solid var(--po-line); border-radius: 4px; color: var(--po-muted);
+    font-size: 12px; line-height: 20px; cursor: pointer;
+  }
+  .po-para-handle[aria-pressed="true"] { background: var(--po-accent); border-color: var(--po-accent); color: #fff; }
+  .po-para-lines { flex: 1; min-width: 0; font: 14px/1.8 var(--po-serif); color: var(--po-ink); }
+  .po-line { display: block; padding: 1px 6px; margin: 0 -6px; border-radius: 3px; cursor: pointer; }
+  .po-line:hover { background: var(--po-tint); }
+  .po-line[aria-pressed="true"] { background: var(--po-tint); color: var(--po-accent); font-weight: 500; }
+  .po-section-more {
+    display: block; margin: 4px 0 16px; padding: 6px 0; background: none; border: 0;
+    color: var(--po-muted); font-size: 12px; text-decoration: underline; cursor: pointer;
+  }
   .po-selectionbar { margin-top: 8px; display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
   .po-selectionbar[hidden] { display: none; }
 
@@ -1353,6 +1367,13 @@ function view(name) {
     evApplyDefaultScale();
     updateThreadQueryPlaceholder();
   }
+  // Re-evaluates whether poComposerBar (and the model picker inside it)
+  // should be visible now that the active view has changed -- without
+  // this, switching to Decision history on a session that already has a
+  // main-Ask turn left the model picker hidden (poComposerBar only shows
+  // when there's no conversation yet), with no way to pick a model before
+  // Track phrase.
+  updateInvestigationComposerVisibility();
 }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
 
@@ -2762,7 +2783,14 @@ function finishResearchStatusPill(outcome, turn) {
 // turn in it. Call this any time poConversation's turn count changes.
 function updateInvestigationComposerVisibility() {
   const hasConversation = document.getElementById('poConversation').children.length > 0;
-  document.getElementById('poComposerBar').hidden = hasConversation || !currentSessionIsOwner;
+  // poComposerBar holds the shared provider/model picker Track phrase also
+  // reads (see trackDecision) -- normally hidden once there's a
+  // conversation (the Follow-up form takes over for asking), but Decision
+  // history still needs a reachable way to pick a model, so it stays
+  // visible whenever that tab is the active one even with turns already
+  // in poConversation.
+  const onTimelineView = document.querySelector('[data-panel="timeline"]')?.hidden === false;
+  document.getElementById('poComposerBar').hidden = (hasConversation && !onTimelineView) || !currentSessionIsOwner;
   document.getElementById('poFollowupForm').hidden = !hasConversation || !currentSessionIsOwner;
   const titleEl = document.getElementById('poInvestTitle');
   titleEl.classList.toggle('is-asked', hasConversation);
@@ -3031,6 +3059,21 @@ let dtOcc = 0;
 const poThreadStatusEl = document.getElementById('poThreadStatus');
 const poThreadBodyEl = document.getElementById('poThreadBody');
 const poThreadBtn = document.getElementById('poThreadBtn');
+// Track phrase requires an explicit model choice -- unlike the main Ask
+// flow (which silently falls back to decision_thread's/ask()'s own
+// hardcoded default when poModel is left on its placeholder), this is a
+// deliberate decision the user wants to see named up front, not defaulted
+// quietly. Re-checked on every provider/model change and reused by
+// trackDecision's own stop() so a finished run doesn't blindly re-enable
+// the button if the model was since cleared.
+function updateThreadButtonState() {
+  const hasModel = Boolean(poModelEl.value);
+  poThreadBtn.disabled = !hasModel;
+  poThreadBtn.title = hasModel ? '' : 'Choose a model above first';
+}
+poModelEl.addEventListener('change', updateThreadButtonState);
+poProviderEl.addEventListener('change', updateThreadButtonState);
+updateThreadButtonState();
 
 // Union of every revision any track actually has a captured excerpt at --
 // real, not a fabricated "every revision this draft ever had" range, since
@@ -3410,6 +3453,24 @@ function extractTrackingKeywords(query, evidence) {
   }
   return confirmed;
 }
+// For the Document viewer's "Track this decision" -- the selected text IS
+// real document text already (not a question), so this skips
+// extractTrackingKeywords's evidence-confirmation step entirely and just
+// extracts straight from the selection itself.
+function extractKeywordsFromText(text) {
+  const direct = extractPhraseCandidates(text);
+  if (direct.length) return direct;
+  const seen = new Set();
+  const picked = [];
+  for (const w of (text.match(/[A-Za-z][A-Za-z0-9_-]{3,}/g) || [])) {
+    const lw = w.toLowerCase();
+    if (_KEYWORD_STOPWORDS.has(lw) || seen.has(lw)) continue;
+    seen.add(lw);
+    picked.push(w);
+    if (picked.length >= 3) break;
+  }
+  return picked;
+}
 function buildThreadQueryPlaceholder(query) {
   const candidates = extractPhraseCandidates(query);
   if (!candidates.length) return 'e.g. "An INIT_CWND of"';
@@ -3499,7 +3560,7 @@ function trackDecision() {
     finished = true;
     source.close();
     if (threadToken === activeThreadToken) {
-      poThreadBtn.disabled = false;
+      updateThreadButtonState();
       poThreadBtn.textContent = originalBtnText;
     }
   };
@@ -3659,6 +3720,17 @@ let currentDocument = null;
 let currentDocSectionIdx = 0;
 let selectedPassageText = null;
 
+// Paragraphs render at whole-paragraph granularity (click the <SUP>pilcrow</SUP>
+// handle) AND at individual-line granularity (click a specific wrapped
+// line) -- most of the time the actual decision a user wants to track
+// lives in a line or two, not the whole paragraph (which may cover
+// several). Lines are the document's own raw `\n`-wrapped lines (fixed
+// ~72-col RFC formatting, not real sentence boundaries -- a line can cut
+// off mid-word), which is fine here: the selected text only ever feeds
+// extractKeywordsFromText below, which pulls a short distinctive term out
+// of it, not a citable sentence.
+const SECTION_PARAGRAPH_PREVIEW = 8;
+
 function renderDocSection(idx) {
   currentDocSectionIdx = idx;
   const section = currentDocument.sections[idx];
@@ -3669,7 +3741,26 @@ function renderDocSection(idx) {
   `).join('');
 
   const paragraphs = section.text.split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
-  const passagesHtml = paragraphs.map((p) => `<button type="button" class="po-passage">${escapeHtml(p)}</button>`).join('');
+  const linesByParagraph = paragraphs.map((p) => p.split('\n').map((l) => l.trim()).filter(Boolean));
+
+  const passagesHtml = paragraphs.map((p, pIdx) => {
+    const linesHtml = linesByParagraph[pIdx].map((line, lIdx) =>
+      `<span class="po-line" data-pidx="${pIdx}" data-lidx="${lIdx}" tabindex="0" role="button">${escapeHtml(line)}</span>`
+    ).join('');
+    const preview = pIdx >= SECTION_PARAGRAPH_PREVIEW ? ' data-preview="true"' : '';
+    return `
+      <div class="po-paragraph"${preview}>
+        <button type="button" class="po-para-handle" data-pidx="${pIdx}" title="Select whole paragraph">&para;</button>
+        <div class="po-para-lines">${linesHtml}</div>
+      </div>
+    `;
+  }).join('');
+  // Full section text is always sent now (_segment_document_text no
+  // longer caps it server-side) -- this is purely a display clamp against
+  // data already in hand, revealed by a class toggle, not a second fetch.
+  const expandHtml = paragraphs.length > SECTION_PARAGRAPH_PREVIEW
+    ? `<button type="button" class="po-section-more" id="poSectionMoreBtn">&hellip; show ${paragraphs.length - SECTION_PARAGRAPH_PREVIEW} more paragraph(s)</button>`
+    : '';
 
   document.getElementById('poDocBody').innerHTML = `
     <div class="po-context"><code>${escapeHtml(currentDocument.doc_id)}</code><span>${escapeHtml(currentDocument.title)}</span></div>
@@ -3678,10 +3769,10 @@ function renderDocSection(idx) {
       <article class="po-docpaper">
         <h2>${escapeHtml(section.number ? `${section.number}. ${section.title}` : section.title)}</h2>
         ${passagesHtml || '<p class="corpora-hint">No text in this section.</p>'}
-        ${section.truncated ? '<p class="po-tiny">[Section truncated -- long past what fits here. Ask a question about it instead of reading the rest.]</p>' : ''}
+        ${expandHtml}
         <div class="po-selectionbar" id="poSelectionBar" hidden>
-          <span class="po-tiny">Passage selected</span>
-          <button type="button" class="po-primary" id="poExplainBtn">Explain this decision →</button>
+          <span class="po-tiny" id="poSelectionLabel">Passage selected</span>
+          <button type="button" class="po-primary" id="poTrackPassageBtn">Track this decision &rarr;</button>
         </div>
       </article>
     </div>
@@ -3690,32 +3781,51 @@ function renderDocSection(idx) {
   document.querySelectorAll('#poDocBody .po-toc button').forEach((b) => {
     b.addEventListener('click', () => renderDocSection(parseInt(b.dataset.idx, 10)));
   });
-  document.querySelectorAll('#poDocBody .po-passage').forEach((b) => {
-    b.addEventListener('click', () => {
-      const wasSelected = b.getAttribute('aria-pressed') === 'true';
-      document.querySelectorAll('#poDocBody .po-passage').forEach((x) => x.setAttribute('aria-pressed', 'false'));
-      const bar = document.getElementById('poSelectionBar');
-      if (wasSelected) {
-        selectedPassageText = null;
-        bar.hidden = true;
-      } else {
-        b.setAttribute('aria-pressed', 'true');
-        selectedPassageText = b.textContent;
-        bar.hidden = false;
-      }
-    });
+
+  document.getElementById('poSectionMoreBtn')?.addEventListener('click', (e) => {
+    document.querySelector('#poDocBody .po-docpaper').classList.add('show-all');
+    e.target.remove();
   });
-  document.getElementById('poExplainBtn')?.addEventListener('click', () => {
+
+  const clearSelection = () => {
+    document.querySelectorAll('#poDocBody .po-para-handle, #poDocBody .po-line').forEach((x) => x.setAttribute('aria-pressed', 'false'));
+  };
+  const selectText = (el, text, label) => {
+    const wasSelected = el.getAttribute('aria-pressed') === 'true';
+    clearSelection();
+    const bar = document.getElementById('poSelectionBar');
+    if (wasSelected) {
+      selectedPassageText = null;
+      bar.hidden = true;
+    } else {
+      el.setAttribute('aria-pressed', 'true');
+      selectedPassageText = text.trim();
+      document.getElementById('poSelectionLabel').textContent = label;
+      bar.hidden = false;
+    }
+  };
+  document.querySelectorAll('#poDocBody .po-para-handle').forEach((b) => {
+    const pIdx = parseInt(b.dataset.pidx, 10);
+    b.addEventListener('click', () => selectText(b, paragraphs[pIdx], 'Paragraph selected'));
+  });
+  document.querySelectorAll('#poDocBody .po-line').forEach((el) => {
+    const pIdx = parseInt(el.dataset.pidx, 10);
+    const lIdx = parseInt(el.dataset.lidx, 10);
+    el.addEventListener('click', () => selectText(el, linesByParagraph[pIdx][lIdx], 'Line selected'));
+  });
+
+  document.getElementById('poTrackPassageBtn')?.addEventListener('click', () => {
     if (!selectedPassageText) return;
-    document.getElementById('poQuery').value = `Why does ${currentDocument.doc_id} say: "${selectedPassageText}"`;
+    const candidates = extractKeywordsFromText(selectedPassageText);
     // Only a draft name is a real <option> in the picker (RFC text's
     // doc_id, e.g. "RFC 9000", has no matching catalog entry) -- setting
     // .value to something with no matching option is a harmless no-op,
     // so this doesn't need its own draft-vs-RFC branch.
-    poDraftEl.value = currentDocument.doc_id;
+    poThreadDraftEl.value = currentDocument.doc_id;
+    document.getElementById('poThreadQuery').value = candidates.join(', ');
     go('investigation');
-    view('findings');
-    runAsk();
+    view('timeline');
+    evSelectScale('within');
   });
 }
 

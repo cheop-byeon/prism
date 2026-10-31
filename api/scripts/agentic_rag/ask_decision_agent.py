@@ -1578,6 +1578,140 @@ def _format_evolution_hits(hits: list[str], start: int = 1) -> tuple[str, list[t
     return "\n\n".join(blocks), citations
 
 
+# RFC/draft plaintext is still formatted for the print-paginated era: every
+# ~58 lines, the real text is interrupted by a footer line ending "[Page
+# N]" (sometimes with an author/category prefix, sometimes bare, sometimes
+# a roman numeral for front matter -- confirmed live against RFC 791/793),
+# optionally a form-feed character, and then a running header before the
+# body continues -- confirmed live this splits a sentence/paragraph in
+# half with that boilerplate sitting in between, rendered as if it were
+# real content (Document viewer paragraph/line picker made this directly
+# visible for the first time, but it was already in every fetch_rfc/
+# fetch_draft observation the agent reads too).
+#
+# The header defeated a content-pattern match (tried first: "RFC NNNN ..."
+# or "Internet-Draft ...") -- confirmed live against a broad sample of
+# Internet-Drafts that the header is wildly inconsistent across them (the
+# draft's own filename, its title, an "Expires:" line, or two of those
+# stacked, sometimes centered with 15+ leading spaces -- a leading-
+# whitespace-count heuristic tried first confirmed WRONG against exactly
+# this), with no common prefix to anchor on at all. What IS consistent:
+# every real example seen has at most a couple of short lines of this
+# filler before either a blank line or real body text resumes, so
+# _eat_header_filler below just consumes short, non-heading lines up to a
+# small bound and any blank lines immediately after them, rather than
+# trying to pattern-match the filler's content.
+# Form-feed normalized to "\n" before this ever runs (see _strip_page_breaks)
+# -- confirmed live it shows up on BOTH sides of a footer depending on the
+# document (sometimes trailing the footer, sometimes leading straight into
+# the NEXT one with no newline at all in between, e.g. "...\n \n\x0cAbel
+# ... [Page 3]"), and treating it as a page/line separator in either
+# position is simpler and more robust than special-casing an optional
+# "\x0c?" into the pattern itself.
+# Trailing newlines are optional ("\n*", not "\n+") -- confirmed live
+# against a draft whose very last page footer is also the literal last
+# byte of the file, with nothing (not even one newline) after it; a
+# mandatory "one more newline" with nothing left to match failed the
+# whole pattern right at the finish line, same failure mode RFC 1518 hit.
+# "\s*" (not "\s+") on both sides of the page number -- confirmed live
+# against real drafts with "[Page1]" (no space before the number) and
+# "[Page 1 ]" (a stray space before the closing bracket). The number
+# itself can include a decimal point ("[Page 5.1]"), an "of N" suffix
+# ("[Page 1 of 101]"), and the closing bracket is optional and only
+# matched if present -- confirmed live against several drafts whose page
+# marker is simply never closed at all ("...[Page 13" then straight into
+# a blank line), apparently a transcription error in the original text
+# that's existed since authoring, not something to "fix" by inventing a
+# bracket, just something to still recognize as the marker it clearly is.
+_PAGE_FOOTER_RE = re.compile(
+    r"\n+[ \t]*(?:\S[^\n]*)?\[Page\s*[0-9ivxlcdmIVXLCDM.]+(?:\s+of\s+\d+)?\s*\]?[ \t]*\n*"
+)
+_LINE_RE = re.compile(r"[^\n]*\n+")
+_HEADER_FILLER_MAX_LINES = 3
+# A run of 3+ spaces between two non-space characters -- the column
+# padding real header/footer lines always have ("RFC 3168        Title
+# September 2001"), that real body prose never does (confirmed live this
+# was the real bug in an earlier, length-only version of this check: on a
+# short page -- e.g. a one-line mailing-list-archive reference with
+# little real content before the NEXT page's own footer -- ordinary short
+# body lines got misclassified as filler too, cascading until it ate
+# straight through the next page's footer along with them).
+_INTERNAL_GAP_RE = re.compile(r"\S {3,}\S")
+
+
+def _eat_header_filler(text: str, pos: int, limit: int | None = None) -> int:
+    """How far past `pos` the running header after a page-footer extends.
+    Consumes blank lines freely (always safe), and up to
+    _HEADER_FILLER_MAX_LINES lines that look like column-formatted header
+    text (see _INTERNAL_GAP_RE) -- stopping at the first line that doesn't
+    (ordinary prose, or a numbered section heading, so a page break
+    landing right before a real heading doesn't eat the heading itself).
+    Also eats any blank lines immediately following the filler, so the
+    whole page-break span (footer through here) collapses to one join
+    point -- same reasoning as RFC 3168's own fix: a break that really did
+    land mid-sentence rejoins cleanly; one that happened to land between
+    two real paragraphs merges them into one, which is a minor cosmetic
+    imperfection next to leaving the boilerplate visible.
+
+    `limit`, when given, caps how far this can advance -- confirmed live
+    against a draft whose body happened to contain two short, padded
+    "Field:   value" lines (own internal gaps for their own reason, not
+    page-header column alignment) right where a page break landed: both
+    got misclassified as filler, using up the whole budget and leaving
+    `pos` sitting just past the START of the very next real page-footer's
+    own match -- which made the caller's own "already consumed" check
+    skip that next footer entirely instead of cleaning it. Capping at the
+    next real match's start (passed in by the caller) means a
+    misclassification here can cost at most "that one footer stays
+    unrecognized this pass", never "swallow the next footer too".
+    """
+    eaten = 0
+    while eaten < _HEADER_FILLER_MAX_LINES:
+        if limit is not None and pos >= limit:
+            return limit
+        m = _LINE_RE.match(text, pos)
+        if not m or (limit is not None and m.end() > limit):
+            break
+        line = m.group().rstrip("\n")
+        stripped = line.strip()
+        if not stripped:
+            pos = m.end()
+            continue
+        if _SECTION_HEADING_RE.match(line) or not _INTERNAL_GAP_RE.search(stripped):
+            break
+        pos = m.end()
+        eaten += 1
+    while True:
+        if limit is not None and pos >= limit:
+            return limit
+        m = _LINE_RE.match(text, pos)
+        if not m or (limit is not None and m.end() > limit) or m.group().strip():
+            break
+        pos = m.end()
+    return pos
+
+
+def _strip_page_breaks(text: str) -> str:
+    # Normalized to "\n" up front (see _PAGE_FOOTER_RE's own comment) so
+    # every match/line-scan below only ever has to think about one kind of
+    # separator. A run of "\n\x0c" or "\x0c\n" collapsing to a single
+    # effective break is fine -- _PAGE_FOOTER_RE's own "\n+" already
+    # absorbs runs of consecutive breaks.
+    text = text.replace("\x0c", "\n")
+    matches = list(_PAGE_FOOTER_RE.finditer(text))
+    out = []
+    pos = 0
+    for i, m in enumerate(matches):
+        if m.start() < pos:
+            continue  # inside a span already consumed by a previous match
+        out.append(text[pos : m.start()])
+        out.append(" ")
+        next_start = matches[i + 1].start() if i + 1 < len(matches) else None
+        pos = _eat_header_filler(text, m.end(), limit=next_start)
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def _http_get_text(url: str) -> str | None:
     """Fetch a URL's text, Redis-cached by URL (see
     ietf_import_service.cached_datatracker_resolution).
@@ -1592,6 +1726,10 @@ def _http_get_text(url: str) -> str | None:
     `query` param changes per turn to filter a different section, but the
     underlying document fetch was always identical), needlessly slow and
     wasteful for a document that will never change.
+
+    Print-pagination boilerplate (_strip_page_breaks) is removed here, once,
+    before caching -- every caller benefits and pays the cleanup cost at
+    most once per URL rather than on every read.
     """
     import httpx
 
@@ -1603,7 +1741,7 @@ def _http_get_text(url: str) -> str | None:
                 resp = client.get(url)
                 if resp.status_code != 200:
                     return None
-                return resp.text
+                return _strip_page_breaks(resp.text)
         except httpx.HTTPError:
             return None
 
@@ -1677,28 +1815,24 @@ def _resolve_latest_draft_revision(draft_name: str) -> str | None:
 # convention) avoids matching a body sentence that happens to start with
 # "5.1 was...".
 _SECTION_HEADING_RE = re.compile(r"^(\d+(?:\.\d+)*\.?)[ \t]{2,}([A-Z][^\n]{0,78})[ \t]*$", re.MULTILINE)
-_DOCUMENT_SECTION_MAX_CHARS = 4000
-
-
-def _cap_section_text(text: str) -> tuple[str, bool]:
-    """(possibly-truncated text, was it truncated) -- explicit about a cap
-    having been hit, matching the honesty convention _filter_primary_source_text
-    already uses elsewhere, rather than silently handing back a cut-off
-    section with no indication anything was left out."""
-    if len(text) <= _DOCUMENT_SECTION_MAX_CHARS:
-        return text, False
-    return text[:_DOCUMENT_SECTION_MAX_CHARS], True
 
 
 def _segment_document_text(text: str) -> list[dict]:
-    """Split raw RFC/draft plaintext into {number, title, text, truncated}
-    sections on its own numbered headings. Falls back to one whole-document
-    section (no number/title) if nothing matches -- an unusual format, not
-    an error -- rather than returning nothing for a real document."""
+    """Split raw RFC/draft plaintext into {number, title, text} sections on
+    its own numbered headings. Falls back to one whole-document section (no
+    number/title) if nothing matches -- an unusual format, not an error --
+    rather than returning nothing for a real document.
+
+    Full section text, uncapped -- the Document viewer used to cap each
+    section at 4000 chars server-side (dropping the rest entirely, with no
+    way to see it), but the whole document is already fetched in one piece
+    (and, since _http_get_text's own Redis cache, free to re-send); display-
+    length truncation with a click-to-expand "..." belongs client-side
+    against this same already-fetched text, not as a hard server-side cut.
+    """
     matches = list(_SECTION_HEADING_RE.finditer(text))
     if not matches:
-        capped, truncated = _cap_section_text(text)
-        return [{"number": "", "title": "Full text", "text": capped, "truncated": truncated}]
+        return [{"number": "", "title": "Full text", "text": text}]
 
     sections: list[dict] = []
     for i, m in enumerate(matches):
@@ -1707,19 +1841,16 @@ def _segment_document_text(text: str) -> list[dict]:
         body = text[body_start:body_end].strip()
         if not body:
             continue
-        capped, truncated = _cap_section_text(body)
         sections.append(
             {
                 "number": m.group(1).rstrip("."),
                 "title": m.group(2).strip(),
-                "text": capped,
-                "truncated": truncated,
+                "text": body,
             }
         )
     if sections:
         return sections
-    capped, truncated = _cap_section_text(text)
-    return [{"number": "", "title": "Full text", "text": capped, "truncated": truncated}]
+    return [{"number": "", "title": "Full text", "text": text}]
 
 
 def resolve_document_text(hint: str) -> dict | None:
