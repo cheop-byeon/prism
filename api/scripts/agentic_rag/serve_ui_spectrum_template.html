@@ -215,6 +215,29 @@
   .po-recent strong { display: block; font-size: 13px; font-weight: 500; }
   .po-recent small { display: block; color: var(--po-muted); font-size: 11px; margin-top: 4px; }
 
+  /* Suggested questions (Findings' empty-state only -- see
+     renderSuggestedQuestions) -- same card shape as .po-recent, just with
+     a leading "?" glyph standing in for a document thumbnail. */
+  .po-suggest-wrap { margin: 4px 0 22px; }
+  .po-suggest-wrap[hidden] { display: none; }
+  .po-suggest-heading {
+    font-size: 11px; font-weight: 600; color: var(--po-muted); text-transform: uppercase;
+    letter-spacing: 0.04em; margin-bottom: 8px;
+  }
+  .po-suggest-card {
+    display: flex; align-items: flex-start; gap: 12px; width: 100%; text-align: left;
+    padding: 13px 16px; border: 1px solid var(--po-line); border-radius: 10px; background: var(--po-paper);
+    margin-bottom: 8px; cursor: pointer;
+  }
+  .po-suggest-card:hover { border-color: var(--po-accent); background: var(--po-tint); }
+  .po-suggest-icon {
+    display: flex; align-items: center; justify-content: center; flex: none; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--po-tint); color: var(--po-accent); font: 600 12px var(--po-sans); margin-top: 1px;
+  }
+  .po-suggest-card:hover .po-suggest-icon { background: var(--po-accent); color: var(--po-paper); }
+  .po-suggest-text { display: block; font-size: 13px; color: var(--po-ink); line-height: 1.4; }
+  .po-suggest-card small { display: block; color: var(--po-muted); font-size: 11px; margin-top: 4px; }
+
   /* Investigation page chrome */
   .po-context { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px; color: var(--po-muted); margin-bottom: 12px; }
   .po-context code { background: var(--po-soft); padding: 3px 6px; border-radius: 4px; color: var(--po-ink); font-size: 11px; font-family: var(--po-mono); }
@@ -263,11 +286,24 @@
      temporary bridge so the core research flow is actually usable now). */
   .po-composer-bar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
   .po-composer-bar[hidden] { display: none; }
-  .po-composer-bar select, .po-composer-bar input[type=text] {
+  .po-composer-bar select, .po-composer-bar input[type=text],
+  .po-session-controls select, .po-session-controls input[type=text] {
     background: var(--po-paper); border: 1px solid var(--po-line); border-radius: 7px;
     padding: 9px 10px; font-size: 13px; color: var(--po-ink);
   }
   .po-composer-bar input[type=text] { flex: 1; min-width: 220px; }
+  /* The document + model picker, split out of the composer bar itself --
+     unlike the question box and Ask button below it, this needs to stay
+     visible on EVERY Investigation tab (Decision history's own Track
+     phrase reads the same #poProvider/#poModel too, see trackDecision),
+     not just Findings. Previously poComposerBar held all five of these
+     controls together, which meant keeping the whole bar visible on the
+     Decision history tab just to keep the model picker reachable there --
+     dragging a "question" box and an "Ask" button onto a tab neither one
+     belongs to. */
+  .po-session-controls { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+  .po-session-controls[hidden] { display: none; }
+  .po-draft-rfc-badge { font-size: 11px; color: var(--po-muted); white-space: nowrap; }
   /* Editable + filterable document picker (Investigations page only --
      Decision history's own "Within a document" picker stays a plain
      <select>, deliberately unchanged elsewhere in this file). Typing
@@ -1006,14 +1042,17 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <h1 class="po-invest-title" id="poInvestTitle">Ask a question about an RFC or draft</h1>
       <div id="poInvestPills" style="margin-bottom:14px;"></div>
 
-      <div class="po-composer-bar" id="poComposerBar">
+      <div class="po-session-controls" id="poSessionControls">
         <div class="po-draftcombo" id="poDraftCombo">
           <input type="text" id="poDraft" class="po-draftcombo-input" placeholder="(let the agent discover)"
             role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="poDraftListbox" autocomplete="off">
           <ul id="poDraftListbox" class="po-draftcombo-list" role="listbox" hidden></ul>
         </div>
+        <span id="poDraftRfcBadge" class="po-draft-rfc-badge" hidden></span>
         <select id="poProvider"><option value="">(default provider)</option></select>
         <select id="poModel"><option value="">(default model)</option></select>
+      </div>
+      <div class="po-composer-bar" id="poComposerBar">
         <input id="poQuery" type="text" placeholder="Why was INIT_CWND set to 4?">
         <button id="poAskBtn" class="po-primary" type="button">Ask</button>
       </div>
@@ -1027,9 +1066,19 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
 
       <div data-panel="findings">
         <div id="poConversation"></div>
-        <!-- Same runAsk()/poQuery/poDraft/poModel state as poComposerBar
-             above -- a follow-up IS another turn in this session, not a
-             different action, so only one of these two ever shows at once
+        <!-- Only ever populated/shown on a genuinely empty Findings --
+             see renderSuggestedQuestions. Clicking a card fills poQuery
+             (in poComposerBar, just below the session controls above)
+             rather than asking it immediately, so a real LLM run always
+             needs one more deliberate click. -->
+        <div id="poSuggestedQuestions" class="po-suggest-wrap" hidden>
+          <div class="po-suggest-heading">You might want to know</div>
+          <div id="poSuggestedQuestionsList"></div>
+        </div>
+        <!-- Same runAsk()/poQuery state as poComposerBar above (poDraft/
+             poModel now live in poSessionControls, further up) -- a
+             follow-up IS another turn in this session, not a different
+             action, so only one of these two ever shows at once
              (see updateInvestigationComposerVisibility) instead of offering
              two identical-looking ways to type into the same conversation. -->
         <form class="po-composer-bar" id="poFollowupForm" style="margin-top:16px;" hidden>
@@ -1051,6 +1100,7 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
                   role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="poThreadDraftListbox" autocomplete="off">
                 <ul id="poThreadDraftListbox" class="po-draftcombo-list" role="listbox" hidden></ul>
               </div>
+              <span id="poThreadDraftRfcBadge" class="po-draft-rfc-badge" hidden></span>
             </label>
             <label>Keyword or exact phrase<input id="poThreadQuery" type="text" placeholder='e.g. "An INIT_CWND of"'></label>
             <button id="poThreadBtn" class="pt-action" type="submit">Track phrase</button>
@@ -1367,12 +1417,11 @@ function view(name) {
     evApplyDefaultScale();
     updateThreadQueryPlaceholder();
   }
-  // Re-evaluates whether poComposerBar (and the model picker inside it)
-  // should be visible now that the active view has changed -- without
-  // this, switching to Decision history on a session that already has a
-  // main-Ask turn left the model picker hidden (poComposerBar only shows
-  // when there's no conversation yet), with no way to pick a model before
-  // Track phrase.
+  // poSessionControls/poComposerBar/poFollowupForm's visibility no longer
+  // depends on which view is active (poSessionControls -- document +
+  // model picker -- is always visible regardless), so this call is now a
+  // no-op on a plain view switch; left in since it's harmless and some
+  // callers still expect state to be current right after switching views.
   updateInvestigationComposerVisibility();
 }
 document.querySelectorAll('[data-view]').forEach((b) => b.addEventListener('click', () => view(b.dataset.view)));
@@ -1437,7 +1486,10 @@ document.getElementById('poWorkspaceForm').addEventListener('submit', async (e) 
   document.getElementById('poQuery').value = query;
   workspaceQueryEl.value = '';
   const hint = guessDocumentHintFromText(query) || await guessDocumentHintFromServer(query);
-  if (hint) poDraftEl.value = hint;
+  if (hint) {
+    poDraftEl.value = hint;
+    updateDraftRfcBadge(poDraftEl, document.getElementById('poDraftRfcBadge'));
+  }
   go('investigation');
   view('activity');
   runAsk();
@@ -1487,8 +1539,10 @@ document.getElementById('poNewBtn').addEventListener('click', () => {
   lastAskedQuery = '';
   document.getElementById('poThreadQuery').value = '';
   poThreadDraftEl.value = '';
+  updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
   poThreadStatusEl.textContent = '';
   poThreadBodyEl.innerHTML = '';
+  currentThreadData = null;
   document.getElementById('poConversation').innerHTML = '';
   setActivityData([], true, false);
   document.getElementById('poInvestPills').innerHTML = '';
@@ -1500,6 +1554,7 @@ document.getElementById('poNewBtn').addEventListener('click', () => {
   // that used a specific draft+model, hit New investigation, and both
   // were still sitting there, pre-selected, from the session just left).
   poDraftEl.value = '';
+  updateDraftRfcBadge(poDraftEl, document.getElementById('poDraftRfcBadge'));
   poProviderEl.value = '';
   poPopulateModelOptionsForProvider('');
   document.getElementById('poDraftBadge').textContent = '(let the agent discover)';
@@ -1622,6 +1677,11 @@ fetch(`${PRISM_PREFIX}/api/corpora`).then((r) => r.json()).then((data) => {
   });
   renderDraftOptions(filterDraftOptions(poDraftEl.value), poDraftListEl);
   renderDraftOptions(filterDraftOptions(poThreadDraftEl.value), poThreadDraftListEl);
+  // Catches a draft value set (e.g. by session restore) before this fetch
+  // resolved -- draftOptions was empty then, so that earlier badge-update
+  // call had nothing to match against yet.
+  updateDraftRfcBadge(poDraftEl, document.getElementById('poDraftRfcBadge'));
+  updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
 }).catch(() => {});
 
 function filterDraftOptions(query) {
@@ -1638,10 +1698,30 @@ function renderDraftOptions(items, listEl) {
       ).join('')
     : '<li class="po-draftcombo-empty">No matches</li>';
 }
-// One combobox's worth of open/close/filter/pick wiring -- shared by poDraft
-// and poThreadDraft so both behave identically rather than keeping two
-// parallel copies of the same five listeners in sync by hand.
-function wireDraftCombo(inputEl, listEl) {
+// The draft input only ever holds a plain draft name (that's what the
+// backend's `draft` param needs), so the RFC number this draft resolved
+// to -- already known from draftOptions, used inside the dropdown list
+// itself -- has nowhere to show once a value is actually picked/typed.
+// This keeps a small adjacent badge in sync with whatever's currently in
+// `inputEl`, matched by exact draft name; hidden when there's no exact
+// match yet (mid-typing) or the match has no known RFC number.
+function updateDraftRfcBadge(inputEl, badgeEl) {
+  if (!badgeEl) return;
+  const match = draftOptions.find((o) => o.draftName === inputEl.value.trim());
+  if (match && match.rfcNumber) {
+    badgeEl.textContent = `RFC ${match.rfcNumber}`;
+    badgeEl.hidden = false;
+  } else {
+    badgeEl.hidden = true;
+    badgeEl.textContent = '';
+  }
+}
+// One combobox's worth of open/close/filter/pick/RFC-badge wiring --
+// shared by poDraft and poThreadDraft so both behave identically rather
+// than keeping two parallel copies of the same listeners in sync by hand.
+// badgeEl is optional (passed for both today, but this stays usable for a
+// future combobox with no adjacent badge).
+function wireDraftCombo(inputEl, listEl, badgeEl) {
   function open() {
     renderDraftOptions(filterDraftOptions(inputEl.value), listEl);
     listEl.hidden = false;
@@ -1651,7 +1731,7 @@ function wireDraftCombo(inputEl, listEl) {
     listEl.hidden = true;
     inputEl.setAttribute('aria-expanded', 'false');
   }
-  inputEl.addEventListener('input', open);
+  inputEl.addEventListener('input', () => { open(); updateDraftRfcBadge(inputEl, badgeEl); });
   inputEl.addEventListener('focus', open);
   inputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') close();
@@ -1664,14 +1744,15 @@ function wireDraftCombo(inputEl, listEl) {
     if (!li) return;
     e.preventDefault();
     inputEl.value = li.dataset.draft;
+    updateDraftRfcBadge(inputEl, badgeEl);
     close();
   });
   document.addEventListener('click', (e) => {
     if (!inputEl.contains(e.target) && !listEl.contains(e.target)) close();
   });
 }
-wireDraftCombo(poDraftEl, poDraftListEl);
-wireDraftCombo(poThreadDraftEl, poThreadDraftListEl);
+wireDraftCombo(poDraftEl, poDraftListEl, document.getElementById('poDraftRfcBadge'));
+wireDraftCombo(poThreadDraftEl, poThreadDraftListEl, document.getElementById('poThreadDraftRfcBadge'));
 
 // Shared by Documents' own lookup and Workspace's "Start from a document"
 // tab -- matches the mockup's own live-filtered doc-result, just against
@@ -1965,7 +2046,15 @@ function openSession(id) {
       poThreadDraftEl.value = data.decision_thread.draft_hint || '';
       document.getElementById('poThreadQuery').value = data.decision_thread.query || '';
       renderThread(data.decision_thread.data);
+    } else {
+      // Otherwise currentThreadData (and the suggested questions it
+      // feeds, see renderSuggestedQuestions) would still be whichever
+      // OTHER session was viewed last -- this session genuinely has no
+      // Decision history result of its own yet.
+      currentThreadData = null;
+      renderSuggestedQuestions();
     }
+    updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
     // Reset before the conditional restore below -- without this, a
     // session with no stored model (model_provider/model_id both empty)
     // silently kept whatever was left in the picker from the PREVIOUS
@@ -1992,15 +2081,15 @@ function openSession(id) {
       // discover" one, even though a specific document was actually used.
       poDraftEl.value = lastTurn.draft || '';
       lastAskedQuery = lastTurn.query || '';
-      // poDraftEl itself lives inside poComposerBar, which
-      // updateInvestigationComposerVisibility() just hid (a reopened
-      // session always "hasConversation") -- so it's set correctly above
-      // for Decision history/follow-ups to read, but invisible. This badge
-      // is the one draft indicator still on screen either way, and before
-      // this it was only ever written by a live runAsk(), so reopening a
-      // past "within one document" session showed the generic placeholder
+      // poDraftEl itself lives in poSessionControls, which stays visible
+      // regardless of conversation state, so this is on-screen either
+      // way -- but poDraftBadge (next to the title, in .po-context) is a
+      // second, more stable record of the same thing. Before this it was
+      // only ever written by a live runAsk(), so reopening a past
+      // "within one document" session showed the generic placeholder
       // even though a specific document was actually used.
       document.getElementById('poDraftBadge').textContent = lastTurn.draft || '(let the agent discover)';
+      updateDraftRfcBadge(poDraftEl, document.getElementById('poDraftRfcBadge'));
       document.getElementById('poInvestTitle').textContent = lastTurn.query;
       document.getElementById('poInvestPills').innerHTML = deriveStatusPills(lastTurn.answer);
       setActivityData(lastTurn.trace || [], false, true);
@@ -2790,14 +2879,36 @@ function finishResearchStatusPill(outcome, turn) {
 // turn in it. Call this any time poConversation's turn count changes.
 function updateInvestigationComposerVisibility() {
   const hasConversation = document.getElementById('poConversation').children.length > 0;
-  // poComposerBar holds the shared provider/model picker Track phrase also
-  // reads (see trackDecision) -- normally hidden once there's a
-  // conversation (the Follow-up form takes over for asking), but Decision
-  // history still needs a reachable way to pick a model, so it stays
-  // visible whenever that tab is the active one even with turns already
-  // in poConversation.
+  // poSessionControls (document + provider/model picker) stays visible
+  // wherever a live, model-driven action is still actually available --
+  // Findings (a follow-up can always be asked) and Decision history's
+  // "within a document" scale (Track phrase reads the same #poProvider/
+  // #poModel too, see trackDecision) -- but NOT on views that are purely
+  // a finished, read-only display of something already computed, with no
+  // action left to configure a model for: Research activity (a replay of
+  // an already-recorded trace) and Decision history's "Across
+  // specifications" scale (a "panorama"-style chronological map derived
+  // from RFCs this investigation already visited -- see evSelectScale/
+  // buildEvolutionAcross, neither of which ever calls an LLM). Confirmed
+  // live this read as a genuine inconsistency otherwise: some finished
+  // sessions showed the picker, some didn't, depending only on which tab
+  // happened to be open when the session was last viewed/reopened, not on
+  // whether that tab actually had anything left to do with it.
+  const onActivityView = document.querySelector('[data-panel="activity"]')?.hidden === false;
   const onTimelineView = document.querySelector('[data-panel="timeline"]')?.hidden === false;
-  document.getElementById('poComposerBar').hidden = (hasConversation && !onTimelineView) || !currentSessionIsOwner;
+  // poEvAcross's own hidden flag is scale state WITHIN the timeline panel
+  // -- it keeps whatever it was last set to even after switching away
+  // from that panel entirely, so it only means "on the across scale"
+  // when the timeline panel is actually the one showing right now.
+  const onAcrossScale = onTimelineView && document.getElementById('poEvAcross')?.hidden === false;
+  document.getElementById('poSessionControls').hidden = onActivityView || onAcrossScale || !currentSessionIsOwner;
+  // poComposerBar (now just the question box + Ask button) is the
+  // Findings-only "ask something" affordance -- hidden once there's a
+  // conversation (the Follow-up form takes over for asking a NEXT
+  // question in it), with no Decision-history special case needed any
+  // more now that the model picker it used to drag along lives in
+  // poSessionControls instead.
+  document.getElementById('poComposerBar').hidden = hasConversation || !currentSessionIsOwner;
   document.getElementById('poFollowupForm').hidden = !hasConversation || !currentSessionIsOwner;
   const titleEl = document.getElementById('poInvestTitle');
   titleEl.classList.toggle('is-asked', hasConversation);
@@ -2810,6 +2921,7 @@ function updateInvestigationComposerVisibility() {
   // same words. Also the only title a multi-turn session could show
   // without being wrong for every turn but the last one.
   titleEl.hidden = hasConversation;
+  renderSuggestedQuestions();
 }
 
 function runAsk() {
@@ -3100,6 +3212,98 @@ function allTrackRevs(lanes) {
   return [...set].sort((a, b) => (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0));
 }
 
+// A Document-viewer "Track this decision" click drops the viewer straight
+// into Decision history (see poTrackPassageBtn's own handler -- go/view/
+// evSelectScale, never runAsk()), so Findings stays completely empty the
+// whole time: there was never a main investigation question to answer,
+// just a paragraph trace. Grounds a handful of candidate follow-up
+// questions in whatever Decision history ALREADY found for this
+// session -- real revision numbers, real "was this ever discussed"
+// answers -- rather than generic placeholder prompts, so clicking one
+// turns the paragraph trace that's already done into a real Ask()
+// investigation with one click instead of requiring the viewer to
+// compose a question about a trace they just watched run.
+function buildSuggestedQuestions(threadData) {
+  if (!threadData || !threadData.lanes || !threadData.lanes.length) return [];
+  const docLabel = threadData.rfc_number ? `RFC ${threadData.rfc_number}` : threadData.draft_name;
+  const out = [];
+  // Capped at 2 PER LANE (below) before the overall slice(0, 6) further
+  // down -- confirmed live against a real multi-section keyword-search
+  // result that without this, a section with many edits ate the whole
+  // budget by itself, crowding out every other section entirely. Capping
+  // per lane first means the final list samples across sections instead.
+  threadData.lanes.forEach((lane) => {
+    const secLabel = lane.title ? `§${lane.section} (${lane.title})` : `§${lane.section}`;
+    const laneQuestions = [];
+    if (!lane.edges || !lane.edges.length) {
+      laneQuestions.push({ text: `Why has ${secLabel} in ${docLabel} never been revised?`, meta: 'Unchanged across every revision traced' });
+    } else {
+      lane.edges.forEach((edge) => {
+        if (edge.type === 'modified') {
+          laneQuestions.push({
+            text: `Why was ${secLabel} changed between revision ${edge.from_rev} and ${edge.to_rev}?`,
+            meta: `rev ${edge.from_rev} → ${edge.to_rev} · wording changed`,
+          });
+        } else if (edge.type === 'added') {
+          laneQuestions.push({
+            text: `Why was ${secLabel} added in revision ${edge.to_rev}?`,
+            meta: `rev ${edge.to_rev} · newly added`,
+          });
+        }
+        if (edge.has_discussion) {
+          laneQuestions.push({
+            text: `What did the working group discuss when ${secLabel} changed?`,
+            meta: 'Mailing-list discussion found for this change',
+          });
+        }
+      });
+    }
+    out.push(...laneQuestions.slice(0, 2));
+  });
+  out.push({ text: `What is the overall purpose of ${docLabel}?`, meta: `About ${docLabel}` });
+  const seen = new Set();
+  return out.filter((q) => {
+    if (seen.has(q.text)) return false;
+    seen.add(q.text);
+    return true;
+  }).slice(0, 6);
+}
+// Shown only on a genuinely empty Findings (no conversation yet) -- once
+// a real turn exists, each turn's own content is the thing to look at,
+// not a set of prompts suggesting what to ask next (the Follow-up form
+// covers that). Re-run from updateInvestigationComposerVisibility (so it
+// reacts to the same hasConversation changes that gate everything else
+// in Findings) and from renderThread (so a just-finished trace's own
+// findings show up immediately, without needing a conversation-state
+// change to trigger a re-render).
+function renderSuggestedQuestions() {
+  const wrapEl = document.getElementById('poSuggestedQuestions');
+  const listEl = document.getElementById('poSuggestedQuestionsList');
+  if (!wrapEl || !listEl) return;
+  const hasConversation = document.getElementById('poConversation').children.length > 0;
+  const candidates = hasConversation ? [] : buildSuggestedQuestions(currentThreadData);
+  if (!candidates.length) {
+    wrapEl.hidden = true;
+    listEl.innerHTML = '';
+    return;
+  }
+  wrapEl.hidden = false;
+  listEl.innerHTML = candidates.map((q, i) => `
+    <button type="button" class="po-suggest-card" data-suggest-idx="${i}">
+      <span class="po-suggest-icon" aria-hidden="true">?</span>
+      <span class="po-suggest-copy"><span class="po-suggest-text">${escapeHtml(q.text)}</span><small>${escapeHtml(q.meta)}</small></span>
+    </button>
+  `).join('');
+  listEl.querySelectorAll('[data-suggest-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const q = candidates[Number(btn.dataset.suggestIdx)];
+      const queryEl = document.getElementById('poQuery');
+      queryEl.value = q.text;
+      queryEl.focus();
+    });
+  });
+}
+
 // Passage map (track x revision grid) + selected-track timeline + tabbed
 // detail panel (Passage/Compare/Discussion) -- ported from prism-complete's
 // dedicated "Decision history" page design, same real lanes/nodes/edges
@@ -3108,6 +3312,7 @@ function allTrackRevs(lanes) {
 // past every lane to find the one that matters.
 function renderThread(data) {
   currentThreadData = data;
+  renderSuggestedQuestions();
   if (!data.lanes.length) {
     poThreadBodyEl.innerHTML = '<p class="corpora-hint">No revision mentions that phrase. Try a more distinctive quote from the decision text.</p>';
     return;
@@ -3281,7 +3486,13 @@ function evSelectScale(scale) {
   // directly in this panel.
   if (scale === 'within' && !poThreadDraftEl.value && poDraftEl.value) {
     poThreadDraftEl.value = poDraftEl.value;
+    updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
   }
+  // This toggle alone (clicking "Within a document"/"Across
+  // specifications" directly, without switching the top-level view) can
+  // change whether poSessionControls should be showing -- view() isn't
+  // necessarily re-run here, so this needs its own re-evaluation.
+  updateInvestigationComposerVisibility();
 }
 document.querySelectorAll('[data-evscale]').forEach((b) => b.addEventListener('click', () => evSelectScale(b.dataset.evscale)));
 // Picks the default sub-tab each time Decision history is opened. A single
@@ -3380,6 +3591,7 @@ function evSelectNode(idx) {
     document.getElementById('poEvTraceBtn').addEventListener('click', () => {
       document.querySelector('[data-evscale="within"]').click();
       poThreadDraftEl.value = draftNode.focus;
+      updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
     });
   }
 }
@@ -3515,6 +3727,7 @@ function autoTrackDecisionHistory(query, draftHint, evidence) {
   const candidates = extractTrackingKeywords(query, evidence);
   if (!candidates.length) return;
   poThreadDraftEl.value = draftHint;
+  updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
   document.getElementById('poThreadQuery').value = candidates.join(', ');
   trackDecision();
 }
@@ -3864,6 +4077,7 @@ function renderDocSection(idx) {
     // .value to something with no matching option is a harmless no-op,
     // so this doesn't need its own draft-vs-RFC branch.
     poThreadDraftEl.value = currentDocument.doc_id;
+    updateDraftRfcBadge(poThreadDraftEl, document.getElementById('poThreadDraftRfcBadge'));
     // Paragraph-lineage tracing, not a keyword search -- traces this
     // EXACT selection's own history backward through revisions (see
     // trace_paragraph_lineage) instead of guessing a keyword and
