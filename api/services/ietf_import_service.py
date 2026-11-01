@@ -84,6 +84,122 @@ def cached_datatracker_resolution(cache_key: str, fetch) -> str | None:
     return result
 
 
+# Print-pagination boilerplate (a running footer like "...[Page 3]" plus the
+# running header that follows it onto the next page) that archive.ietf.org's
+# plaintext drafts/RFCs still carry verbatim. Left in, it doesn't just look
+# ugly -- it corrupts paragraph-level diffing: confirmed live on
+# draft-ietf-tsvwg-ecn-03 that a page break landing mid-paragraph in its own
+# section text splits one real paragraph into three (body, then the leaked
+# header line "draft-ietf-tsvwg-ecn-03 Addition of ECN to IP March 2001", then
+# the rest of the body), which throws off every paragraph-index-based
+# comparison downstream -- both the evolution dataset's own prose diffing and
+# trace_paragraph_lineage's anchor walk. Stripped once here, at the fetch
+# layer, so every consumer (evolution building, paragraph-lineage tracing,
+# the agent's own document fetch in ask_decision_agent._http_get_text, which
+# imports _strip_page_breaks from here) sees already-clean text.
+#
+# Pattern notes (each confirmed live against real drafts during the full
+# local-corpus validation this went through): leading "\n+" absorbs any
+# number of blank lines before the footer; the optional "(?:\S[^\n]*)?" is
+# the running-header text some documents prepend on the SAME line as the
+# "[Page N]" marker; "\s*" (not "\s+") around the page number tolerates both
+# "[Page1]" (no space) and "[Page 1 ]" (stray space before the bracket); the
+# number itself may have a decimal point ("[Page 5.1]") or an "of N" suffix
+# ("[Page 1 of 101]"); the closing bracket is optional since some drafts
+# simply never close it ("...[Page 13" then a blank line, apparently a
+# transcription error present since authoring); trailing "\n*" (not "\n+")
+# tolerates a footer that is the literal last byte of the file.
+_PAGE_FOOTER_RE = re.compile(
+    r"\n+[ \t]*(?:\S[^\n]*)?\[Page\s*[0-9ivxlcdmIVXLCDM.]+(?:\s+of\s+\d+)?\s*\]?[ \t]*\n*"
+)
+_LINE_RE = re.compile(r"[^\n]*\n+")
+_HEADER_FILLER_MAX_LINES = 3
+# A run of 3+ spaces between two non-space characters -- the column padding
+# real header/footer lines always have ("RFC 3168        Title September
+# 2001"), that real body prose never does.
+_INTERNAL_GAP_RE = re.compile(r"\S {3,}\S")
+
+
+def _eat_header_filler(text: str, pos: int, limit: int | None = None) -> int:
+    """How far past `pos` the running header after a page-footer extends.
+
+    Consumes blank lines freely, and up to _HEADER_FILLER_MAX_LINES lines
+    that look like column-formatted header text (see _INTERNAL_GAP_RE) --
+    stopping at the first line that doesn't (ordinary prose, or a real
+    section heading per IetfImportService._SECTION_RE, so a page break
+    landing right before a real heading doesn't eat the heading itself).
+    Also eats any blank lines immediately following the filler, so the whole
+    page-break span (footer through here) collapses to one join point.
+
+    `limit`, when given, caps how far this can advance to the next real
+    footer match's own start -- confirmed live this prevents a
+    misclassified body line from using up the whole filler budget and then
+    skipping past the START of the very next real footer, which would make
+    the caller's "already consumed" check skip cleaning it entirely.
+    """
+    eaten = 0
+    while eaten < _HEADER_FILLER_MAX_LINES:
+        if limit is not None and pos >= limit:
+            return limit
+        m = _LINE_RE.match(text, pos)
+        if not m or (limit is not None and m.end() > limit):
+            break
+        line = m.group().rstrip("\n")
+        stripped = line.strip()
+        if not stripped:
+            pos = m.end()
+            continue
+        if IetfImportService._SECTION_RE.match(line) or not _INTERNAL_GAP_RE.search(stripped):
+            break
+        pos = m.end()
+        eaten += 1
+    while True:
+        if limit is not None and pos >= limit:
+            return limit
+        m = _LINE_RE.match(text, pos)
+        if not m or (limit is not None and m.end() > limit) or m.group().strip():
+            break
+        pos = m.end()
+    return pos
+
+
+def _strip_page_breaks(text: str) -> str:
+    # Normalized to "\n" up front so every match/line-scan below only ever
+    # has to think about one kind of separator; a run of "\n\x0c" or
+    # "\x0c\n" collapsing to a single effective break is fine since
+    # _PAGE_FOOTER_RE's own "\n+" already absorbs runs of consecutive breaks.
+    text = text.replace("\x0c", "\n")
+    matches = list(_PAGE_FOOTER_RE.finditer(text))
+    out = []
+    pos = 0
+    for i, m in enumerate(matches):
+        if m.start() < pos:
+            continue  # inside a span already consumed by a previous match
+        out.append(text[pos : m.start()])
+        next_start = matches[i + 1].start() if i + 1 < len(matches) else None
+        new_pos = _eat_header_filler(text, m.end(), limit=next_start)
+        # What follows the stripped footer/filler usually continues the
+        # SAME sentence/paragraph the page break interrupted, so a single
+        # joining space is right there. But when a page break lands right
+        # before a new section heading -- confirmed live on
+        # draft-ietf-tsvwg-ecn-03, where "...should be small." (end of
+        # §3's body) got glued straight onto "4.  Active Queue Management
+        # (AQM)" (§4's own heading) with one space, since there was no
+        # header filler for _eat_header_filler to stop at and skip past --
+        # a bare space merges the heading into the middle of the PREVIOUS
+        # line, where IetfImportService._SECTION_RE (which requires the
+        # heading flush-left at its own line start) can never find it
+        # again. A paragraph break there instead keeps the heading on its
+        # own line, exactly as if the page break had never split it from
+        # its surrounding blank lines in the first place.
+        rest_line_end = text.find("\n", new_pos)
+        rest_line = text[new_pos : rest_line_end if rest_line_end != -1 else len(text)]
+        out.append("\n\n" if IetfImportService._SECTION_RE.match(rest_line) else " ")
+        pos = new_pos
+    out.append(text[pos:])
+    return "".join(out)
+
+
 class IetfMailarchiveImportPayload(TypedDict):
     mailing_list: str
     sent_after: str
@@ -2471,7 +2587,20 @@ class IetfImportService:
         """
         old_paras = IetfImportService._split_paragraphs(old_text)
         new_paras = IetfImportService._split_paragraphs(new_text)
-        matcher = difflib.SequenceMatcher(None, old_paras, new_paras, autojunk=False)
+        # Compare on whitespace-normalized text, not the raw paragraphs --
+        # confirmed live (via trace_paragraph_lineage, which hit the same
+        # SequenceMatcher-on-paragraphs pattern) that a page break landing
+        # at a different spot across two revisions turns one line-wrap
+        # newline into _strip_page_breaks's join space, which otherwise
+        # reads as a real "replace" even though the prose is identical
+        # once whitespace is collapsed. old_paras/new_paras keep their
+        # original formatting for the before/after blocks below; only the
+        # comparison basis is normalized, and since normalization is 1:1
+        # per paragraph the opcodes' indices still index correctly into
+        # the original lists.
+        old_norm = [" ".join(p.split()) for p in old_paras]
+        new_norm = [" ".join(p.split()) for p in new_paras]
+        matcher = difflib.SequenceMatcher(None, old_norm, new_norm, autojunk=False)
         blocks: list[str] = []
         for tag, i1, i2, j1, j2 in matcher.get_opcodes():
             if tag == 'equal':
@@ -2732,7 +2861,29 @@ class IetfImportService:
                 with httpx.Client(timeout=30.0) as c:
                     r = c.get(url)
                     if r.status_code == 200:
-                        return rev, r.text
+                        # Strip print-pagination boilerplate before anything
+                        # downstream (section parsing, paragraph diffing)
+                        # ever sees this text -- confirmed live a page break
+                        # landing mid-paragraph otherwise leaks a running
+                        # header line in as a spurious extra "paragraph",
+                        # throwing off paragraph-index-based diffing.
+                        text = _strip_page_breaks(r.text)
+                        # A 200 alone isn't proof this is the real draft text
+                        # -- confirmed live against a 2001-era draft (its own
+                        # highest revision per Datatracker) whose archive URL
+                        # 200s with an RFC-editor "new RFC announcement"
+                        # notice instead ("A new Request for Comments is now
+                        # available..."), not the superseded draft it used
+                        # to be. Every real IETF draft/RFC has at least one
+                        # numbered section heading; an announcement notice
+                        # has none, so this is a cheap, general way to catch
+                        # that bad fetch (and whatever else archive.ietf.org
+                        # might someday serve in its place) rather than
+                        # trusting any 200 response verbatim and letting a
+                        # downstream section lookup fail confusingly instead.
+                        if any(IetfImportService._SECTION_RE.match(line) for line in text.splitlines()):
+                            return rev, text
+                        logger.debug("Fetched %s but it has no section headings -- treating as unavailable", url)
             except Exception as exc:
                 logger.debug("Could not fetch %s: %s", url, exc)
             return rev, None

@@ -1966,6 +1966,13 @@ function openSession(id) {
       document.getElementById('poThreadQuery').value = data.decision_thread.query || '';
       renderThread(data.decision_thread.data);
     }
+    // Reset before the conditional restore below -- without this, a
+    // session with no stored model (model_provider/model_id both empty)
+    // silently kept whatever was left in the picker from the PREVIOUS
+    // session viewed, which read as "it cached [the other] session's
+    // LLM". Same reset the "New investigation" button already does.
+    poProviderEl.value = '';
+    poPopulateModelOptionsForProvider('');
     if (data.model_provider && data.model_id) {
       poSelectModelPair(data.model_provider, data.model_id);
     }
@@ -3074,6 +3081,15 @@ function updateThreadButtonState() {
 poModelEl.addEventListener('change', updateThreadButtonState);
 poProviderEl.addEventListener('change', updateThreadButtonState);
 updateThreadButtonState();
+// Editing the query box by hand after a paragraph click cancels
+// paragraph-lineage mode back to a regular keyword search -- the two
+// modes share this one box for different things (a preview of the full
+// selection vs. the literal phrase to search for), so once the user
+// changes what's in it, trackDecision should search for THAT text, not
+// silently keep tracing the original selection underneath. Setting
+// .value from code (see poTrackPassageBtn's own handler) never fires
+// 'input', so this only ever reacts to genuine typing.
+document.getElementById('poThreadQuery').addEventListener('input', () => { pendingParagraphTrace = null; });
 
 // Union of every revision any track actually has a captured excerpt at --
 // real, not a fabricated "every revision this draft ever had" range, since
@@ -3531,31 +3547,34 @@ function trackDecision() {
   poThreadStatusEl.textContent = 'Starting…';
   poThreadBodyEl.innerHTML = '';
 
-  // A comma splits the box into several AND-matched keywords instead of
-  // one exact phrase -- same convention the automatic post-answer
-  // tracking uses (autoTrackDecisionHistory), now also typeable by hand:
-  // "ECN, backoff" finds decisions mentioning both, not either alone (see
-  // decision_thread's own docstring for why that's the more useful
-  // default for more-than-one-word questions).
-  const keywordParts = query.split(',').map((k) => k.trim()).filter(Boolean);
   const params = new URLSearchParams();
-  if (keywordParts.length > 1) {
-    params.set('keywords', keywordParts.join(','));
+  // Consumed once either way -- a later, unrelated manual Track phrase
+  // click (after this run) must not inherit a stale paragraph trace or
+  // section scope from a click two investigations ago.
+  const paragraphTrace = pendingParagraphTrace;
+  pendingParagraphTrace = null;
+  if (paragraphTrace) {
+    // Paragraph-lineage tracing (trace_paragraph_lineage) -- the exact
+    // selection's own text, not whatever's in the (possibly truncated-
+    // preview) query box. See poTrackPassageBtn's own click handler for
+    // why these can diverge.
+    params.set('selected_text', paragraphTrace.text);
+    if (paragraphTrace.section) params.set('section', paragraphTrace.section);
   } else {
-    params.set('query', query);
+    // A comma splits the box into several AND-matched keywords instead of
+    // one exact phrase -- same convention the automatic post-answer
+    // tracking uses (autoTrackDecisionHistory), now also typeable by hand:
+    // "ECN, backoff" finds decisions mentioning both, not either alone (see
+    // decision_thread's own docstring for why that's the more useful
+    // default for more-than-one-word questions).
+    const keywordParts = query.split(',').map((k) => k.trim()).filter(Boolean);
+    if (keywordParts.length > 1) {
+      params.set('keywords', keywordParts.join(','));
+    } else {
+      params.set('query', query);
+    }
   }
   if (draft) params.set('draft', draft);
-  // Consumed once -- a later, unrelated manual Track phrase click (after
-  // this run) must not inherit a stale section scope from a paragraph
-  // click two investigations ago. The backend falls back to searching
-  // every matching section on its own if this section turns out to have
-  // no match for the phrase, so a stale-but-still-applicable hint here
-  // is harmless even in the narrow case the draft field also changed
-  // in between.
-  if (pendingSectionHint) {
-    params.set('section', pendingSectionHint);
-    pendingSectionHint = null;
-  }
   // Lets the backend save this run against the real investigation it
   // belongs to (see IetfSessionDecisionThread) -- omitted (not an error)
   // if no session exists yet, same as /api/research's own session_id.
@@ -3730,14 +3749,19 @@ function renderCoverage() {
 let currentDocument = null;
 let currentDocSectionIdx = 0;
 let selectedPassageText = null;
-// Set by "Track this decision" (see below), read and cleared by the next
-// trackDecision() call -- carries the section a clicked paragraph/line
-// actually lives in across the gap between that click and the user's own
-// later "Track phrase" click (deliberately not auto-fired -- see the
-// button's own click handler for why). Manually typing into the Decision
-// history box never sets this, so hand-typed keywords keep searching
-// every section they touch, unchanged.
-let pendingSectionHint = null;
+// Set by "Track this decision" (see below): {section, text}, read and
+// cleared by the next trackDecision() call -- carries the exact section
+// and text a clicked paragraph/line came from across the gap between
+// that click and the user's own later "Track phrase" click (deliberately
+// not auto-fired -- see the button's own click handler for why). Its
+// presence switches that next Track phrase run to paragraph-lineage
+// tracing (trace_paragraph_lineage) instead of the regular keyword
+// search -- a second, parallel mode, not a replacement: manually typing
+// into the Decision history box never sets this, and editing the query
+// box after a paragraph click cancels it back to keyword mode (see the
+// box's own 'input' listener below), since the two modes use that one
+// box for different things.
+let pendingParagraphTrace = null;
 
 // Paragraphs render at whole-paragraph granularity (click the <SUP>pilcrow</SUP>
 // handle) AND at individual-line granularity (click a specific wrapped
@@ -3835,19 +3859,25 @@ function renderDocSection(idx) {
 
   document.getElementById('poTrackPassageBtn')?.addEventListener('click', () => {
     if (!selectedPassageText) return;
-    const candidates = extractKeywordsFromText(selectedPassageText);
     // Only a draft name is a real <option> in the picker (RFC text's
     // doc_id, e.g. "RFC 9000", has no matching catalog entry) -- setting
     // .value to something with no matching option is a harmless no-op,
     // so this doesn't need its own draft-vs-RFC branch.
     poThreadDraftEl.value = currentDocument.doc_id;
-    document.getElementById('poThreadQuery').value = candidates.join(', ');
-    // The section this paragraph/line actually lives in -- trackDecision
-    // sends this on the next Track phrase click so the backend only has
-    // to LLM-judge this one section instead of every section a broad
-    // keyword happens to touch (confirmed live: "ECT"+"ECN" alone
-    // touched 62 sections of RFC 3168).
-    pendingSectionHint = currentDocument.sections[currentDocSectionIdx].number || null;
+    // Paragraph-lineage tracing, not a keyword search -- traces this
+    // EXACT selection's own history backward through revisions (see
+    // trace_paragraph_lineage) instead of guessing a keyword and
+    // searching for it (confirmed live: "ECT"+"ECN" alone touched 62
+    // unrelated sections of RFC 3168). The query box shows a preview so
+    // the user can see what's about to be traced, but the full text
+    // travels in pendingParagraphTrace, not whatever's visible/editable
+    // in that truncated preview.
+    const preview = selectedPassageText.length > 160 ? `${selectedPassageText.slice(0, 160)}…` : selectedPassageText;
+    document.getElementById('poThreadQuery').value = preview;
+    pendingParagraphTrace = {
+      section: currentDocument.sections[currentDocSectionIdx].number || '',
+      text: selectedPassageText,
+    };
     go('investigation');
     view('timeline');
     evSelectScale('within');

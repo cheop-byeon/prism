@@ -119,6 +119,13 @@
   }
   .form-footnote a:hover { text-decoration: underline; }
   .form-hint { font-size: var(--text-xs); color: var(--text-tertiary); margin: 6px 0 0; }
+  /* .form-hint's own color (--text-tertiary) is a muted gray meant for
+     de-emphasized hint text, not a clickable link -- confirmed live this
+     made "Forgot password?" (and the two "Resend code" links, same
+     parent) nearly invisible against the page background. Same override
+     .form-footnote already gives its own links, just scoped to .form-hint. */
+  .form-hint a { color: var(--accent); text-decoration: none; }
+  .form-hint a:hover { text-decoration: underline; }
 
   /* Below this, the hero panel adds more weight than it earns on a phone-
      width screen -- collapse to just the form, same breakpoint spirit as

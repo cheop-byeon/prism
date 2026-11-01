@@ -221,6 +221,24 @@ class AgenticRagSessionService:
         row.model_provider = model_provider or ""
         row.model_name = model_name or ""
         row.data = json.dumps(data)
+        # Mirrors append_turn's own Conversation.model_provider/model_id
+        # update -- same "remembers whichever model a session last
+        # actually used" semantics, just for a Track-phrase/paragraph-trace
+        # run instead of a main Ask() turn. Without this, a session whose
+        # ONLY activity was ever a Decision history run (the lazy
+        # session-creation path above, or more generally any session a
+        # Track phrase run touched most recently) left Conversation's own
+        # columns untouched: the frontend's session-reopen code reads only
+        # those columns to restore the model picker, so it either kept
+        # whatever model happened to still be sitting in the picker from
+        # whichever OTHER session was open before (looks like the wrong
+        # session's model got "cached") or, on a fresh page load with no
+        # leftover picker state, fell back to the picker's own blank/first
+        # option -- confirmed live as "reverted to default provider and
+        # default model after refresh".
+        if model_provider and model_name:
+            conversation.model_provider = model_provider
+            conversation.model_id = model_name
         db.session.commit()
 
     @staticmethod

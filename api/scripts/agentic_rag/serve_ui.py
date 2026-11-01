@@ -2583,7 +2583,7 @@ def main() -> None:
 
     @app.route(f"{_URL_PREFIX}/api/decision-thread", methods=["GET"])
     def api_decision_thread():
-        from scripts.agentic_rag.ask_decision_agent import decision_thread
+        from scripts.agentic_rag.ask_decision_agent import decision_thread, resolve_plain_draft_name, trace_paragraph_lineage
 
         draft = (request.args.get("draft") or "").strip() or None
         query = (request.args.get("query") or "").strip()
@@ -2594,14 +2594,18 @@ def main() -> None:
         # keyword in the list instead of one exact phrase -- see its own
         # docstring for why ("backoff" + "ECN" together, not either alone).
         keywords = [k.strip() for k in (request.args.get("keywords") or "").split(",") if k.strip()]
-        if not query and not keywords:
+        # Set only by the Document viewer's "Track this decision": the
+        # exact text a paragraph/line click selected, plus which section
+        # it's in. Its presence switches this whole request to
+        # trace_paragraph_lineage (paragraph-lineage tracing) instead of
+        # decision_thread's own keyword search -- a second, parallel way
+        # to run Decision history, not a replacement; manually typing a
+        # keyword into the Track phrase box never sends this.
+        selected_text = (request.args.get("selected_text") or "").strip() or None
+        section_hint = (request.args.get("section") or "").strip() or None
+        if not query and not keywords and not selected_text:
             return jsonify({"error": "query or keywords is required"}), 400
         query_arg = keywords if keywords else query
-        # Set only by the Document viewer's "Track this decision" (the
-        # section the clicked paragraph/line actually lives in) -- the
-        # manual Track phrase box never sends this, so typing a keyword
-        # by hand still searches every section it touches, unchanged.
-        section_hint = (request.args.get("section") or "").strip() or None
         account_id = g.account.id
         session_id = request.args.get("session_id") or None
         # Same model the user already picked for the main composer -- without
@@ -2615,9 +2619,21 @@ def main() -> None:
 
         def work(on_event):
             nonlocal session_id
-            result = decision_thread(
-                draft, query_arg, on_event=on_event, viewer_account_id=account_id, section_hint=section_hint, **model_kwargs
-            )
+            if selected_text:
+                if not draft or not section_hint:
+                    raise ValueError("Paragraph tracking needs both a document and the section it's in.")
+                result = trace_paragraph_lineage(
+                    resolve_plain_draft_name(draft),
+                    section_hint,
+                    selected_text,
+                    on_event=on_event,
+                    viewer_account_id=account_id,
+                    **model_kwargs,
+                )
+            else:
+                result = decision_thread(
+                    draft, query_arg, on_event=on_event, viewer_account_id=account_id, section_hint=section_hint, **model_kwargs
+                )
             # Creates its own session if none was given -- confirmed live
             # this gap was real: a user who opens Decision history and runs
             # Track phrase WITHOUT first asking a main question in that

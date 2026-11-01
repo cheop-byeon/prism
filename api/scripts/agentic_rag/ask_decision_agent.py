@@ -1192,6 +1192,229 @@ def _filter_sections_by_hint(sorted_sections: list[str], section_hint: str | Non
     return sorted_sections
 
 
+def resolve_plain_draft_name(hint: str) -> str:
+    """hint -> a real draft name, for callers (trace_paragraph_lineage's
+    own route) that only ever fetch revisions live and so don't care
+    whether the draft is registered as a Dify dataset or local-only --
+    unlike decision_thread()'s own hint resolution, which also needs to
+    find an evolution_dataset_id for the registered case. The Document
+    viewer's doc_id is already the real draft name for an Internet-Draft
+    (no translation needed) or "RFC NNNN" for a published one (needs the
+    same live reverse lookup ask()'s own --draft hint resolution uses).
+    Raises ValueError if an "RFC NNNN"-shaped hint can't be resolved.
+    """
+    import re
+
+    from services.ietf_import_service import IetfImportService
+
+    stripped = hint.strip()
+    if re.match(r"^rfc\s*\d+$", stripped, re.IGNORECASE):
+        resolved = IetfImportService.resolve_draft_name_for_rfc(re.sub(r"\s+", "", stripped))
+        if not resolved:
+            raise ValueError(f"Couldn't resolve {hint!r} to a draft name via Datatracker.")
+        return resolved
+    return stripped
+
+
+def trace_paragraph_lineage(
+    draft_name: str,
+    section_id: str,
+    selected_text: str,
+    model_provider: str = _DEFAULT_MODEL_PROVIDER,
+    model_name: str = _DEFAULT_MODEL_NAME,
+    on_event=None,
+    viewer_account_id: str | None = None,
+) -> dict:
+    """Trace one SPECIFIC paragraph's own lineage backward through every
+    revision -- a second way to run Decision history, alongside (not
+    replacing) decision_thread()'s keyword search. The Document viewer's
+    "Track this decision" already knows exactly which section a clicked
+    paragraph/line lives in and the exact text selected; this uses that
+    directly instead of extracting a keyword and searching for it, which
+    can be too common (confirmed live: "ECT"+"ECN" alone matched 62
+    unrelated sections of RFC 3168) or too rare (a keyword pulled from
+    the selection might not recur verbatim once wording drifts).
+
+    Walks backward one revision pair at a time, using the same
+    paragraph-level SequenceMatcher IetfImportService._prose_diff_blocks
+    already uses to build the evolution dataset in the first place (not
+    a new or different diffing approach -- the same one, just driven by
+    "where does THIS paragraph's opcode land" instead of "list every
+    change"). At each step: "equal" means the same text existed in the
+    older revision too, so keep walking back with no new node; "replace"
+    is a real change point (recorded), and the older wording becomes the
+    new anchor to keep walking back with; "insert" (no older counterpart
+    for this paragraph at all) means this is as far back as it goes.
+
+    Returns the same {draft_name, rfc_number, query, lanes} shape
+    decision_thread()/_local_decision_thread() do, so the frontend's
+    existing rendering needs no changes -- `lanes` is always a single
+    entry here, since one specific paragraph is inherently already
+    scoped to one section's own history.
+    """
+    import difflib
+
+    from services.ietf_import_service import IetfImportService
+
+    def _emit(stage: str, message: str) -> None:
+        if on_event:
+            on_event({"stage": stage, "message": message})
+
+    _emit("resolving", f"Tracing the selected text through {draft_name}'s §{section_id} history…")
+    sorted_revs, version_texts = IetfImportService._fetch_all_revisions(draft_name)
+    parsed = {rev: IetfImportService._parse_sections(version_texts[rev]) for rev in sorted_revs}
+
+    needle = " ".join(selected_text.split())
+    latest_rev = sorted_revs[-1]
+    latest_title, latest_body = parsed[latest_rev].get(section_id, (None, None))
+    if latest_body is None:
+        raise ValueError(f"§{section_id} doesn't exist in {draft_name}'s latest revision ({latest_rev}).")
+    latest_paras = IetfImportService._split_paragraphs(latest_body)
+
+    def _needle_coverage(a: str, b: str) -> float:
+        if not a:
+            return 0.0
+        matched = sum(block.size for block in difflib.SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks())
+        return matched / len(a)
+
+    # Fuzzy, not exact-substring: the whole premise of this feature is that
+    # wording drifts (that's what the backward walk below traces), so the
+    # selected text landing here verbatim is the exception, not the rule --
+    # confirmed live the Document viewer can be showing the PUBLISHED RFC's
+    # own wording (lightly copy-edited during AUTH48) while this anchor step
+    # starts from the latest known DRAFT revision's wording, which differs
+    # even when nothing substantive changed. 0.6 needle-coverage (most of
+    # the selection's characters findable, in order, in one paragraph) is
+    # loose enough to tolerate that drift while still confident it's the
+    # right paragraph, not a coincidentally similar one elsewhere.
+    anchor_idx, best_score = None, 0.0
+    for i, p in enumerate(latest_paras):
+        score = _needle_coverage(needle, " ".join(p.split()))
+        if score > best_score:
+            anchor_idx, best_score = i, score
+    if best_score < 0.6:
+        anchor_idx = None
+    if anchor_idx is None:
+        raise ValueError(
+            f"Couldn't find the selected text in {draft_name}'s current §{section_id} -- "
+            f"the document may have changed since this page loaded."
+        )
+
+    anchor_text = latest_paras[anchor_idx]
+    section_title = (latest_title or section_id).strip()
+    raw_matches: list[dict] = []
+
+    for i in range(len(sorted_revs) - 1, 0, -1):
+        old_rev, new_rev = sorted_revs[i - 1], sorted_revs[i]
+        _emit("searching", f"Checking rev {old_rev} → {new_rev}…")
+        old_title, old_body = parsed[old_rev].get(section_id, (None, None))
+        if old_body is None:
+            # Section itself didn't exist yet in old_rev -- as far back
+            # as this paragraph (and its section) goes.
+            raw_matches.append(
+                {"from_rev": old_rev, "to_rev": new_rev, "section": section_id, "type": "added",
+                 "title": section_title, "before": "", "after": anchor_text}
+            )
+            break
+        _, new_body = parsed[new_rev].get(section_id, (None, ""))
+        old_paras = IetfImportService._split_paragraphs(old_body)
+        new_paras = IetfImportService._split_paragraphs(new_body or "")
+        # Compare on whitespace-normalized text, not the raw paragraphs --
+        # confirmed live that a page break landing at a different spot
+        # within the SAME paragraph across two revisions (one revision's
+        # own pagination vs. the other's) turns one line-wrap newline into
+        # _strip_page_breaks's join space, which SequenceMatcher then sees
+        # as a real "replace" even though the prose is byte-for-byte
+        # identical once whitespace is collapsed. old_paras/new_paras keep
+        # their original formatting for display; only the comparison basis
+        # is normalized, and since normalization is 1:1 per paragraph (never
+        # merges or splits list entries) the opcodes' indices still index
+        # correctly into the original lists.
+        old_norm = [" ".join(p.split()) for p in old_paras]
+        new_norm = [" ".join(p.split()) for p in new_paras]
+        matcher = difflib.SequenceMatcher(None, old_norm, new_norm, autojunk=False)
+
+        placed = False
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if not (j1 <= anchor_idx < j2):
+                continue
+            placed = True
+            if tag == "equal":
+                anchor_idx = i1 + (anchor_idx - j1)
+                anchor_text = old_paras[anchor_idx]
+            elif tag == "insert":
+                raw_matches.append(
+                    {"from_rev": old_rev, "to_rev": new_rev, "section": section_id, "type": "added",
+                     "title": section_title, "before": "", "after": anchor_text}
+                )
+                anchor_idx = None
+            else:  # "replace" or "delete" -- a real prior version (maybe several candidates) exists
+                old_block = old_paras[i1:i2]
+                if old_block:
+                    best = max(
+                        range(len(old_block)),
+                        key=lambda k: difflib.SequenceMatcher(None, old_block[k], anchor_text).ratio(),
+                    )
+                    before_text, anchor_idx = old_block[best], i1 + best
+                else:
+                    before_text, anchor_idx = "", None
+                raw_matches.append(
+                    {"from_rev": old_rev, "to_rev": new_rev, "section": section_id,
+                     "type": "modified" if before_text else "added",
+                     "title": section_title, "before": before_text, "after": anchor_text}
+                )
+                if before_text:
+                    anchor_text = before_text
+            break
+        if not placed or anchor_idx is None:
+            break
+
+    raw_matches.reverse()  # walked backward; present oldest-to-newest
+
+    if not raw_matches:
+        # Walked all the way back to the earliest revision without ever
+        # finding a "replace"/"insert" opcode -- the text genuinely never
+        # changed. _build_evolution_lane assumes at least one real change
+        # record (confirmed live: crashes on an empty list), and there's
+        # nothing to LLM-judge discussion for either when there's no edge
+        # at all, so this returns a plain single, edge-less node directly
+        # instead of forcing the normal change-lane machinery onto a
+        # "nothing changed" result.
+        _emit("matched", "This text has been unchanged since the earliest available revision")
+        lane = {
+            "section": section_id,
+            "title": section_title,
+            "nodes": [{"rev": sorted_revs[0], "text": anchor_text}],
+            "edges": [],
+        }
+    else:
+        _emit("matched", f"Traced {len(raw_matches)} real change(s) to this paragraph across its history")
+        # _find_local_discussion_candidates searches a draft's own WG mail
+        # index directly by draft_name regardless of whether that draft
+        # also has a registered Dify evolution dataset (that distinction
+        # only matters for where the draft's OWN text comes from, not for
+        # finding mailing-list discussion of a given passage) -- no need
+        # to branch on registered-vs-local here the way the keyword-
+        # search path does.
+        lane = _build_evolution_lane(
+            raw_matches, draft_name, lambda t: _find_local_discussion_candidates(draft_name, t)
+        )
+        tenant_id = _resolve_fallback_tenant_id(viewer_account_id)
+        _judge_lane_discussion(lane, _resolve_discussion_links_local, tenant_id, model_provider, model_name, on_event=on_event)
+        for edge in lane["edges"]:
+            edge.pop("_candidates", None)
+            edge.setdefault("has_discussion", False)
+            edge.setdefault("discussion", None)
+            edge.setdefault("discussion_links", [])
+
+    return {
+        "draft_name": draft_name,
+        "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
+        "query": selected_text[:120],
+        "lanes": [lane],
+    }
+
+
 def _local_decision_thread(
     draft_name: str,
     query: str | list[str],
@@ -1637,6 +1860,12 @@ def _format_evolution_hits(hits: list[str], start: int = 1) -> tuple[str, list[t
     return "\n\n".join(blocks), citations
 
 
+# _strip_page_breaks lives in services.ietf_import_service now (imported
+# below) -- it needs to run at _fetch_all_revisions's own fetch layer too
+# (trace_paragraph_lineage's paragraph-index diffing silently broke on a
+# leaked running-header line otherwise), not just here, so there's one
+# implementation both callers share instead of two copies drifting apart.
+#
 # RFC/draft plaintext is still formatted for the print-paginated era: every
 # ~58 lines, the real text is interrupted by a footer line ending "[Page
 # N]" (sometimes with an author/category prefix, sometimes bare, sometimes
@@ -1646,129 +1875,10 @@ def _format_evolution_hits(hits: list[str], start: int = 1) -> tuple[str, list[t
 # half with that boilerplate sitting in between, rendered as if it were
 # real content (Document viewer paragraph/line picker made this directly
 # visible for the first time, but it was already in every fetch_rfc/
-# fetch_draft observation the agent reads too).
-#
-# The header defeated a content-pattern match (tried first: "RFC NNNN ..."
-# or "Internet-Draft ...") -- confirmed live against a broad sample of
-# Internet-Drafts that the header is wildly inconsistent across them (the
-# draft's own filename, its title, an "Expires:" line, or two of those
-# stacked, sometimes centered with 15+ leading spaces -- a leading-
-# whitespace-count heuristic tried first confirmed WRONG against exactly
-# this), with no common prefix to anchor on at all. What IS consistent:
-# every real example seen has at most a couple of short lines of this
-# filler before either a blank line or real body text resumes, so
-# _eat_header_filler below just consumes short, non-heading lines up to a
-# small bound and any blank lines immediately after them, rather than
-# trying to pattern-match the filler's content.
-# Form-feed normalized to "\n" before this ever runs (see _strip_page_breaks)
-# -- confirmed live it shows up on BOTH sides of a footer depending on the
-# document (sometimes trailing the footer, sometimes leading straight into
-# the NEXT one with no newline at all in between, e.g. "...\n \n\x0cAbel
-# ... [Page 3]"), and treating it as a page/line separator in either
-# position is simpler and more robust than special-casing an optional
-# "\x0c?" into the pattern itself.
-# Trailing newlines are optional ("\n*", not "\n+") -- confirmed live
-# against a draft whose very last page footer is also the literal last
-# byte of the file, with nothing (not even one newline) after it; a
-# mandatory "one more newline" with nothing left to match failed the
-# whole pattern right at the finish line, same failure mode RFC 1518 hit.
-# "\s*" (not "\s+") on both sides of the page number -- confirmed live
-# against real drafts with "[Page1]" (no space before the number) and
-# "[Page 1 ]" (a stray space before the closing bracket). The number
-# itself can include a decimal point ("[Page 5.1]"), an "of N" suffix
-# ("[Page 1 of 101]"), and the closing bracket is optional and only
-# matched if present -- confirmed live against several drafts whose page
-# marker is simply never closed at all ("...[Page 13" then straight into
-# a blank line), apparently a transcription error in the original text
-# that's existed since authoring, not something to "fix" by inventing a
-# bracket, just something to still recognize as the marker it clearly is.
-_PAGE_FOOTER_RE = re.compile(
-    r"\n+[ \t]*(?:\S[^\n]*)?\[Page\s*[0-9ivxlcdmIVXLCDM.]+(?:\s+of\s+\d+)?\s*\]?[ \t]*\n*"
-)
-_LINE_RE = re.compile(r"[^\n]*\n+")
-_HEADER_FILLER_MAX_LINES = 3
-# A run of 3+ spaces between two non-space characters -- the column
-# padding real header/footer lines always have ("RFC 3168        Title
-# September 2001"), that real body prose never does (confirmed live this
-# was the real bug in an earlier, length-only version of this check: on a
-# short page -- e.g. a one-line mailing-list-archive reference with
-# little real content before the NEXT page's own footer -- ordinary short
-# body lines got misclassified as filler too, cascading until it ate
-# straight through the next page's footer along with them).
-_INTERNAL_GAP_RE = re.compile(r"\S {3,}\S")
-
-
-def _eat_header_filler(text: str, pos: int, limit: int | None = None) -> int:
-    """How far past `pos` the running header after a page-footer extends.
-    Consumes blank lines freely (always safe), and up to
-    _HEADER_FILLER_MAX_LINES lines that look like column-formatted header
-    text (see _INTERNAL_GAP_RE) -- stopping at the first line that doesn't
-    (ordinary prose, or a numbered section heading, so a page break
-    landing right before a real heading doesn't eat the heading itself).
-    Also eats any blank lines immediately following the filler, so the
-    whole page-break span (footer through here) collapses to one join
-    point -- same reasoning as RFC 3168's own fix: a break that really did
-    land mid-sentence rejoins cleanly; one that happened to land between
-    two real paragraphs merges them into one, which is a minor cosmetic
-    imperfection next to leaving the boilerplate visible.
-
-    `limit`, when given, caps how far this can advance -- confirmed live
-    against a draft whose body happened to contain two short, padded
-    "Field:   value" lines (own internal gaps for their own reason, not
-    page-header column alignment) right where a page break landed: both
-    got misclassified as filler, using up the whole budget and leaving
-    `pos` sitting just past the START of the very next real page-footer's
-    own match -- which made the caller's own "already consumed" check
-    skip that next footer entirely instead of cleaning it. Capping at the
-    next real match's start (passed in by the caller) means a
-    misclassification here can cost at most "that one footer stays
-    unrecognized this pass", never "swallow the next footer too".
-    """
-    eaten = 0
-    while eaten < _HEADER_FILLER_MAX_LINES:
-        if limit is not None and pos >= limit:
-            return limit
-        m = _LINE_RE.match(text, pos)
-        if not m or (limit is not None and m.end() > limit):
-            break
-        line = m.group().rstrip("\n")
-        stripped = line.strip()
-        if not stripped:
-            pos = m.end()
-            continue
-        if _SECTION_HEADING_RE.match(line) or not _INTERNAL_GAP_RE.search(stripped):
-            break
-        pos = m.end()
-        eaten += 1
-    while True:
-        if limit is not None and pos >= limit:
-            return limit
-        m = _LINE_RE.match(text, pos)
-        if not m or (limit is not None and m.end() > limit) or m.group().strip():
-            break
-        pos = m.end()
-    return pos
-
-
-def _strip_page_breaks(text: str) -> str:
-    # Normalized to "\n" up front (see _PAGE_FOOTER_RE's own comment) so
-    # every match/line-scan below only ever has to think about one kind of
-    # separator. A run of "\n\x0c" or "\x0c\n" collapsing to a single
-    # effective break is fine -- _PAGE_FOOTER_RE's own "\n+" already
-    # absorbs runs of consecutive breaks.
-    text = text.replace("\x0c", "\n")
-    matches = list(_PAGE_FOOTER_RE.finditer(text))
-    out = []
-    pos = 0
-    for i, m in enumerate(matches):
-        if m.start() < pos:
-            continue  # inside a span already consumed by a previous match
-        out.append(text[pos : m.start()])
-        out.append(" ")
-        next_start = matches[i + 1].start() if i + 1 < len(matches) else None
-        pos = _eat_header_filler(text, m.end(), limit=next_start)
-    out.append(text[pos:])
-    return "".join(out)
+# fetch_draft observation the agent reads too, and in
+# IetfImportService._fetch_all_revisions's own fetch layer, which is why
+# _strip_page_breaks now lives there and is imported below rather than
+# defined twice).
 
 
 def _http_get_text(url: str) -> str | None:
@@ -1792,7 +1902,7 @@ def _http_get_text(url: str) -> str | None:
     """
     import httpx
 
-    from services.ietf_import_service import cached_datatracker_resolution
+    from services.ietf_import_service import _strip_page_breaks, cached_datatracker_resolution
 
     def _fetch() -> str | None:
         try:
