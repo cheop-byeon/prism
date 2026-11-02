@@ -1,0 +1,13 @@
+# Twice-weekly run of deploy/renew-cert on this VM. Install (per VM):
+#   sudo cp deploy/renew-cert.service deploy/renew-cert.timer /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now renew-cert.timer
+[Unit]
+Description=Renew Prism's Let's Encrypt certificate if due
+
+[Timer]
+OnCalendar=Mon,Thu 03:30
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

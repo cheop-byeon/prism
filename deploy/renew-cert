@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Renew this VM's Let's Encrypt certificate (if due) and reload nginx so it
+# serves the new one. Safe to run often: certbot only renews within 30 days
+# of expiry and otherwise exits without contacting Let's Encrypt for a new
+# cert. Meant for a scheduler on each VM (see deploy/renew-cert.timer);
+# installing it on one VM has no effect on any other.
+#
+# Usage: sudo deploy/renew-cert
+set -euo pipefail
+
+SCRIPT_DIR="$(dirname "$(realpath "$0")")"
+cd "${SCRIPT_DIR}/../docker"
+
+# certbot and nginx are both defined in the base file, so these two are
+# enough to address them. Passing the certbot profile via COMPOSE_PROFILES
+# (not --profile) keeps .env's own profiles too -- see deploy/deploy-nrec.
+COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.override.yaml)
+export COMPOSE_PROFILES="weaviate,postgresql,certbot"
+
+# The certbot service has no restart policy, so it isn't running after a
+# reboot. `up -d --no-deps` starts it without touching anything else.
+"${COMPOSE[@]}" up -d --no-deps certbot
+
+echo "==> $(date -Is) Renewing certificate if due"
+"${COMPOSE[@]}" exec -T certbot /bin/sh /update-cert.sh
+
+echo "==> Reloading nginx"
+"${COMPOSE[@]}" exec -T nginx nginx -s reload

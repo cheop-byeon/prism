@@ -1,0 +1,10 @@
+# Run by renew-cert.timer; see that file for installation. Assumes the repo
+# lives at /home/ubuntu/prism -- edit ExecStart on a VM where it doesn't.
+[Unit]
+Description=Renew Prism's Let's Encrypt certificate if due
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/home/ubuntu/prism/deploy/renew-cert
