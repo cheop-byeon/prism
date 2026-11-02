@@ -1,14 +1,14 @@
 # Staging counterpart of docker-compose.prism-cloud.yaml -- same shape, but
-# pointed at this staging server (plain HTTP on its IP, no domain/TLS yet)
+# pointed at this staging server, https://staging.prism.uiocloud.no,
 # instead of production's https://prism.uiocloud.no. Never load both files
 # together: prism-cloud.yaml would point staging's browser traffic at the
 # production API.
 x-staging-urls: &staging-urls
-  CONSOLE_API_URL: http://158.39.200.108
-  CONSOLE_WEB_URL: http://158.39.200.108
-  SERVICE_API_URL: http://158.39.200.108
-  APP_API_URL: http://158.39.200.108
-  APP_WEB_URL: http://158.39.200.108
+  CONSOLE_API_URL: https://staging.prism.uiocloud.no
+  CONSOLE_WEB_URL: https://staging.prism.uiocloud.no
+  SERVICE_API_URL: https://staging.prism.uiocloud.no
+  APP_API_URL: https://staging.prism.uiocloud.no
+  APP_WEB_URL: https://staging.prism.uiocloud.no
 
 services:
   ietf_decision_agent_ui:
@@ -27,7 +27,7 @@ services:
 
   web:
     environment:
-      CONSOLE_API_URL: http://158.39.200.108
-      APP_API_URL: http://158.39.200.108
-      NEXT_PUBLIC_PRISM_CLASSIC_URL: http://158.39.200.108/classic/
-      NEXT_PUBLIC_PRISM_SPECTRUM_URL: http://158.39.200.108/spectrum/
+      CONSOLE_API_URL: https://staging.prism.uiocloud.no
+      APP_API_URL: https://staging.prism.uiocloud.no
+      NEXT_PUBLIC_PRISM_CLASSIC_URL: https://staging.prism.uiocloud.no/classic/
+      NEXT_PUBLIC_PRISM_SPECTRUM_URL: https://staging.prism.uiocloud.no/spectrum/
