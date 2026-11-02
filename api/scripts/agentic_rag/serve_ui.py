@@ -2659,10 +2659,22 @@ def main() -> None:
                         title_seed=f"Within: {display_query}", account=account
                     )
                     session_id = session.id
+                # result["draft_name"] (both trace_paragraph_lineage and
+                # decision_thread always return it) is the real, resolved
+                # draft name -- raw `draft` can be an "RFC NNNN" label
+                # instead (the Document viewer's poTrackPassageBtn sets
+                # poThreadDraftEl.value from currentDocument.doc_id, which
+                # is "RFC 9000"-shaped when viewing a published RFC's own
+                # text, not a draft). Saving the raw value here meant a
+                # reopened session's document picker showed a bare "RFC
+                # 3168" with no matching catalog entry at all -- no draft
+                # name, no RFC pill either, unlike every other session's
+                # picker (see openSession's own poDraftEl restore, which
+                # only knows how to match a real draft name).
                 AgenticRagSessionService.save_decision_thread(
                     session_id,
                     account=account,
-                    draft_hint=draft or "",
+                    draft_hint=result.get("draft_name") or draft or "",
                     query=display_query,
                     model_provider=model_provider or "",
                     model_name=model_name or "",

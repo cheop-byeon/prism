@@ -885,6 +885,81 @@ def _find_discussion_candidates(mailarchive_dataset, query_text: str, top_k: int
     return kept
 
 
+_PASSAGE_QUESTIONS_INSTRUCTION = (
+    "You are a technically curious reader of IETF Internet-Drafts and RFCs. You are "
+    "given one specific passage someone just selected, plus which section it's in "
+    "and which document. Write short, substantive questions a knowledgeable reader "
+    "might actually want answered about THIS passage's own technical content, "
+    "design rationale, trade-offs, or protocol implications -- not about its "
+    "revision history, authorship, or the drafting process (a draft being revised "
+    "repeatedly over time is normal and never itself interesting). Ground every "
+    "question in something the passage actually says, not a generic question that "
+    "would fit any protocol document.\n\n"
+    "Respond with exactly 4 questions, one per line, no numbering, no bullet "
+    "points, no preamble or commentary -- just the 4 questions."
+)
+
+
+def _suggest_passage_questions(
+    selected_text: str,
+    section_id: str,
+    section_title: str,
+    draft_name: str,
+    rfc_number: str | None,
+    tenant_id: str,
+    model_provider: str,
+    model_name: str,
+) -> list[str]:
+    """One short LLM call: 4 content-grounded candidate follow-up questions
+    about the EXACT passage a Document viewer click selected, for Findings'
+    empty-state (see renderSuggestedQuestions in serve_ui_spectrum_template.html)
+    to offer when a paragraph trace lands there with no main Ask() turn yet.
+
+    Deliberately NOT the lineage walk's own revision-number/discussion-found
+    facts (from_rev/to_rev/has_discussion) -- confirmed this read as
+    uninteresting by design, not just poorly worded: a draft getting revised
+    repeatedly is the normal IETF process, not a question worth asking. This
+    reads the passage's own technical content instead, the same way a human
+    reader actually curious about it would.
+
+    Returns [] (never raises) on any failure -- a missing suggestion list is
+    a quiet no-op for the caller, same conservative-by-design rule
+    _judge_lane_discussion follows for discussion-matching.
+    """
+    from core.model_manager import ModelManager
+    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from dify_graph.model_runtime.entities.model_entities import ModelType
+
+    user_prompt = (
+        f"Document: {draft_name}{f' (published as RFC {rfc_number})' if rfc_number else ''}\n"
+        f"Section {section_id} ({section_title or 'untitled'})\n\n"
+        f"Selected passage:\n{selected_text[:1500]}"
+    )
+    try:
+        model_instance = ModelManager().get_model_instance(
+            tenant_id=tenant_id, provider=model_provider, model_type=ModelType.LLM, model=model_name
+        )
+        result = _invoke_llm_with_retry(
+            model_instance,
+            prompt_messages=[
+                SystemPromptMessage(content=_PASSAGE_QUESTIONS_INSTRUCTION),
+                UserPromptMessage(content=user_prompt),
+            ],
+            model_parameters={"temperature": 0.4},
+            tools=[],
+            stop=[],
+            stream=False,
+            user="ask_decision_agent_passage_questions",
+        )
+    except Exception:
+        return []
+
+    content = result.message.content
+    content = content if isinstance(content, str) else str(content)
+    questions = [re.sub(r"^[\s\-*\d.)]+", "", line).strip() for line in content.splitlines()]
+    return [q for q in questions if q][:4]
+
+
 _LANE_DISCUSSION_INSTRUCTION = (
     "You are auditing whether specific email discussions genuinely explain specific "
     "design-decision changes in an IETF draft. You are given one section's decision "
@@ -1407,10 +1482,24 @@ def trace_paragraph_lineage(
             edge.setdefault("discussion", None)
             edge.setdefault("discussion_links", [])
 
+    rfc_number = IetfImportService.resolve_rfc_number_for_draft(draft_name)
+    _emit("thinking", "Thinking of a few questions this passage itself raises…")
+    suggested_questions = _suggest_passage_questions(
+        selected_text,
+        section_id,
+        section_title,
+        draft_name,
+        rfc_number,
+        _resolve_fallback_tenant_id(viewer_account_id),
+        model_provider,
+        model_name,
+    )
+
     return {
         "draft_name": draft_name,
-        "rfc_number": IetfImportService.resolve_rfc_number_for_draft(draft_name),
+        "rfc_number": rfc_number,
         "query": selected_text[:120],
+        "suggested_questions": suggested_questions,
         "lanes": [lane],
     }
 
@@ -3956,8 +4045,23 @@ def ask(
         )
         message = result.message
         content = message.content if isinstance(message.content, str) else str(message.content or "")
+        # Guards against a provider/model returning a tool call whose
+        # function name isn't one of OUR registered tools at all --
+        # confirmed live (Mistral via an openai_api_compatible endpoint)
+        # that it can emit a "tool call" whose name is garbage (seen live:
+        # a bare comma-separated list of citation numbers, presumably a
+        # formatting slip while it was reasoning about citations). Blindly
+        # replaying that into prompt_messages crashes every subsequent
+        # iteration identically -- the provider's own function-name
+        # pattern validation rejects the WHOLE request once it's embedded
+        # in history, deterministically, not a transient error, so a retry
+        # loop can't recover from it either. Dropped here and treated the
+        # same as the model not calling a tool at all this round, instead
+        # of permanently corrupting the rest of this run over one bad call.
+        valid_tool_names = {t.name for t in tools}
+        tool_calls = [tc for tc in (message.tool_calls or []) if tc.function.name in valid_tool_names]
 
-        if not message.tool_calls:
+        if not tool_calls:
             if is_last:
                 return _finish(content)
 
@@ -4034,10 +4138,10 @@ def ask(
         if content.strip() and on_event:
             on_event({"stage": "reasoning", "message": content.strip()})
 
-        assistant_msg = AssistantPromptMessage(content=content, tool_calls=message.tool_calls)
+        assistant_msg = AssistantPromptMessage(content=content, tool_calls=tool_calls)
         prompt_messages.append(assistant_msg)
 
-        for tool_call in message.tool_calls:
+        for tool_call in tool_calls:
             try:
                 args = json.loads(tool_call.function.arguments) if tool_call.function.arguments else {}
             except json.JSONDecodeError:
