@@ -345,14 +345,17 @@ class TestSegmentDocumentText:
         sections = _segment_document_text(text)
         assert [s["number"] for s in sections] == ["2"]
 
-    def test_oversized_section_is_capped_and_flagged_truncated(self):
+    def test_oversized_section_is_returned_in_full(self):
+        # The viewer clamps long sections client-side now; the server used
+        # to cut them at 4000 chars, dropping the rest with no way to read it.
         body = "x" * 5000
         text = f"1.  Introduction\n\n   {body}\n"
         sections = _segment_document_text(text)
-        assert sections[0]["truncated"] is True
-        assert len(sections[0]["text"]) == 4000
+        assert body in sections[0]["text"]
+        assert "truncated" not in sections[0]
 
-    def test_normal_sized_section_is_not_flagged_truncated(self):
+    def test_normal_sized_section_is_returned_in_full(self):
         text = "1.  Introduction\n\n   Short body.\n"
         sections = _segment_document_text(text)
-        assert sections[0]["truncated"] is False
+        assert "Short body." in sections[0]["text"]
+        assert "truncated" not in sections[0]
