@@ -27,6 +27,8 @@ import logging
 import operator
 import re
 import string
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime
 from pathlib import Path
@@ -293,9 +295,33 @@ class IetfImportService:
         )
         return IetfImportService._upload_sidecar_payload(sidecar_payload, source_url=source_url)
 
+    # Mailing lists whose real archive lives somewhere other than
+    # mailarchive.ietf.org entirely -- the ietfdata sidecar only ever
+    # talks to THAT host, so it can never fetch these regardless of
+    # mailing_list name. Confirmed live via Datatracker's own
+    # group.list_archive field: httpbis's is
+    # "http://lists.w3.org/Archives/Public/ietf-http-wg/", a different
+    # host altogether (a handful of old WGs predate IETF's own archive
+    # and never moved). Keyed by mailing-list LOCAL PART -- what
+    # resolve_wg_for_draft already returns and every caller here already
+    # uses to name local files -- not WG acronym; the two differ for
+    # httpbis itself (acronym "httpbis", list "ietf-http-wg"). Datatracker
+    # doesn't expose a cheap "search groups by list_archive host" query,
+    # so this can't be derived generically and grows by hand as each one
+    # is found, same as resolve_wg_for_draft's own acronym-exception list.
+    _EXTERNALLY_HOSTED_MAIL_ARCHIVES: dict[str, str] = {
+        "ietf-http-wg": "https://lists.w3.org/Archives/Public/ietf-http-wg/",
+    }
+
     @staticmethod
     def download_mailarchive_as_mbox_to_local(payload: IetfMailarchiveImportPayload) -> tuple[dict, int]:
         """Download mbox export into local mounted storage and return local file metadata."""
+
+        archive_base = IetfImportService._EXTERNALLY_HOSTED_MAIL_ARCHIVES.get(payload["mailing_list"])
+        if archive_base:
+            return IetfImportService._download_w3c_mailarchive_year_to_local(
+                payload["mailing_list"], archive_base, payload["sent_after"], payload["sent_before"]
+            )
 
         sidecar_payload = IetfImportService._request_sidecar("/api/v1/import/mailarchive/mbox", payload)
         try:
@@ -328,6 +354,274 @@ class IetfImportService:
             },
             201,
         )
+
+    # W3C's own hypermail-generated archive (lists.w3.org) exports raw
+    # mbox only to logged-in W3C accounts ("messages in mailbox format"
+    # redirects straight to W3C's login page for an anonymous request --
+    # confirmed live) -- so unlike mailarchive.ietf.org, there is no
+    # anonymous bulk-export endpoint to lean on at all. These three
+    # helpers fetch hypermail's own per-message HTML pages instead and
+    # reconstruct a real mbox file from them, one quarter ("2026JanMar"
+    # etc. -- hypermail's own fixed period-naming convention, confirmed
+    # live back to the list's first quarter in 1994) at a time, so
+    # everything downstream of download_mailarchive_as_mbox_to_local
+    # (preprocess_mbox_file, the per-year threading pass, dataset
+    # embedding) needs no changes at all to handle this list too.
+    _W3C_PERIOD_RE = re.compile(r'href="(\d{4}(?:JanMar|AprJun|JulSep|OctDec))/"')
+    _W3C_MESSAGE_HREF_RE = re.compile(r'href="(\d{4}\.html)"')
+    _W3C_COMMENT_RE = re.compile(r'<!--\s*(\w+)="([^"]*)"\s*-->')
+    # A true GLOBAL rate gate, not per-call-site pacing -- confirmed live
+    # that lists.w3.org (Cloudflare-fronted) 429s on sustained traffic
+    # even at just ~2 requests in flight at once with no burst at all, so
+    # pacing requests out only within one quarter or one year was never
+    # going to be enough once download_and_preprocess_years' own
+    # outer-level cross-year concurrency (up to 8 years at once) put
+    # several of THIS year-local sequences in flight simultaneously. One
+    # shared lock + "next allowed" timestamp serializes every single
+    # request to this host across every thread, regardless of how many
+    # years/quarters happen to be running concurrently elsewhere.
+    _w3c_rate_lock = threading.Lock()
+    _w3c_next_allowed_at = 0.0
+    _W3C_MIN_REQUEST_INTERVAL = 1.5
+
+    @staticmethod
+    def _download_w3c_mailarchive_year_to_local(
+        mailing_list: str, archive_base: str, sent_after: str, sent_before: str
+    ) -> tuple[dict, int]:
+        """W3C-archive equivalent of download_mailarchive_as_mbox_to_local --
+        returns the exact same {saved_path, host_path_hint, filename, size,
+        message_count} shape so every caller works unchanged regardless of
+        which path produced it.
+
+        sent_after/sent_before are always a full calendar year in practice
+        (download_and_preprocess_years' own per-year split), so this just
+        fetches all four of that year's quarters -- being slightly
+        over-inclusive for a genuinely partial first/last year (the same
+        approximation download_and_preprocess_years already makes by
+        chunking at calendar-year boundaries in the first place) rather
+        than parsing exact day boundaries out of hypermail's own period
+        pages, which don't expose per-message dates cheaply enough to
+        filter on before fetching each one anyway.
+        """
+        try:
+            start_year = datetime.fromisoformat(sent_after).year
+            end_year = datetime.fromisoformat(sent_before).year
+        except ValueError:
+            start_year = end_year = datetime.now(tz=UTC).year
+
+        quarters = ("JanMar", "AprJun", "JulSep", "OctDec")
+        periods = [f"{year}{q}" for year in range(start_year, end_year + 1) for q in quarters]
+
+        # Sequential, not a pool -- confirmed live this needs to be: the
+        # CALLER (download_and_preprocess_years) already runs up to 8
+        # years concurrently, each landing here independently, so even
+        # fetching this year's own 4 quarters one at a time still means
+        # up to ~8 simultaneous requests to lists.w3.org in the worst
+        # case (one per in-flight year) -- adding a second layer of
+        # concurrency ON TOP of that (this used to run all 4 quarters at
+        # once) multiplied into a burst big enough to get flatly 429'd by
+        # Cloudflare the very first time this ran against 2 real years.
+        # Request pacing itself lives in _w3c_get_with_retry's own global
+        # gate now (shared across every thread, not just within this
+        # year's own 4 quarters), so no per-quarter sleep is needed here
+        # specifically -- it would just be redundant with that gate.
+        messages: list[dict] = []
+        for period in periods:
+            messages.extend(IetfImportService._fetch_w3c_period_messages(archive_base, period))
+
+        mbox_bytes = IetfImportService._build_mbox_bytes_from_w3c_messages(messages)
+
+        local_dir = Path("/app/api/storage/ietf-downloads")
+        local_dir.mkdir(parents=True, exist_ok=True)
+        start_str = f"{start_year}0101"
+        end_str = f"{end_year}1231"
+        filename = f"ietf-mailarchive-{mailing_list}-{start_str}-{end_str}.mbox"
+        destination = local_dir / filename
+        destination.write_bytes(mbox_bytes)
+
+        relative_hint = destination.as_posix().replace("/app/api/storage/", "docker/volumes/app/storage/")
+        return (
+            {
+                "saved_path": destination.as_posix(),
+                "host_path_hint": relative_hint,
+                "filename": destination.name,
+                "size": destination.stat().st_size,
+                "message_count": len(messages),
+            },
+            201,
+        )
+
+    @staticmethod
+    def _w3c_get_with_retry(client: httpx.Client, url: str, max_retries: int = 4) -> httpx.Response | None:
+        """GET with backoff on 429/5xx -- confirmed live lists.w3.org
+        (Cloudflare-fronted) 429s almost immediately under even modest
+        bursts of concurrent requests, so anything hitting it more than
+        one at a time needs to actually survive a 429, not just avoid
+        causing one. Honors a numeric Retry-After if the response sends
+        one, otherwise a short exponential backoff (1s, 2s, 4s, 8s).
+        Returns None (not an exception) on a non-retryable status or
+        exhausted retries, same "treat as empty, don't sink the whole
+        fetch" convention _fetch_w3c_period_messages' own caller relies on.
+        """
+        for attempt in range(max_retries + 1):
+            # Reserve the next slot BEFORE making the request, and release
+            # the lock immediately after (not held across the network
+            # call itself) -- every caller, in every thread, waits its
+            # turn here before lists.w3.org ever sees the request.
+            with IetfImportService._w3c_rate_lock:
+                now = time.monotonic()
+                wait = IetfImportService._w3c_next_allowed_at - now
+                if wait > 0:
+                    time.sleep(wait)
+                    now = time.monotonic()
+                IetfImportService._w3c_next_allowed_at = now + IetfImportService._W3C_MIN_REQUEST_INTERVAL
+            try:
+                resp = client.get(url)
+            except httpx.HTTPError:
+                return None
+            if resp.status_code == 200:
+                return resp
+            if resp.status_code not in (429, 500, 502, 503, 504) or attempt == max_retries:
+                return None
+            retry_after = resp.headers.get("Retry-After")
+            try:
+                delay = float(retry_after) if retry_after else float(2**attempt)
+            except ValueError:
+                delay = float(2**attempt)
+            time.sleep(min(delay, 30.0))
+        return None
+
+    @staticmethod
+    def _fetch_w3c_period_messages(archive_base: str, period: str) -> list[dict]:
+        """Every message in one hypermail quarter -- [] (not an error) for a
+        quarter the list didn't exist yet in, or hasn't reached yet, same
+        as a genuinely-empty year elsewhere in this file.
+        """
+        period_url = f"{archive_base}{period}/"
+        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+            index_resp = IetfImportService._w3c_get_with_retry(client, f"{period_url}index.html")
+            if index_resp is None:
+                return []
+            hrefs = sorted(set(IetfImportService._W3C_MESSAGE_HREF_RE.findall(index_resp.text)))
+            if not hrefs:
+                return []
+
+            # Sequential, not a pool -- _w3c_get_with_retry's own global
+            # gate (shared across every thread) already serializes the
+            # actual request timing, so a thread pool here would only add
+            # complexity without adding any real throughput: every thread
+            # would just queue up waiting for the same shared slot anyway.
+            messages: list[dict] = []
+            for href in hrefs:
+                resp = IetfImportService._w3c_get_with_retry(client, f"{period_url}{href}")
+                if resp is None:
+                    continue
+                parsed = IetfImportService._parse_w3c_message_page(resp.text, f"{period_url}{href}")
+                if parsed:
+                    messages.append(parsed)
+            return messages
+
+    @staticmethod
+    def _parse_w3c_message_page(page_html: str, page_url: str) -> dict | None:
+        """One hypermail message page -> the fields _build_mbox_bytes_from_
+        w3c_messages needs. hypermail embeds clean, machine-readable
+        metadata as HTML comments right in <header> (confirmed live --
+        name/email/subject/sent/isosent/id, and inreplyto when the message
+        is itself a reply) -- far more reliable than scraping the rendered
+        <From>/<Date> text, and it's what makes real In-Reply-To/References
+        headers (so group_into_threads downstream threads these exactly
+        the way it already threads real IETF-list mail) possible at all.
+        """
+        import html as html_lib
+
+        comments = dict(IetfImportService._W3C_COMMENT_RE.findall(page_html))
+        message_id = html_lib.unescape(comments.get("id", "")).strip()
+        if not message_id:
+            return None
+
+        soup = BeautifulSoup(page_html, "html.parser")
+        body_tag = soup.find("pre", class_="body")
+        body = body_tag.get_text() if body_tag else ""
+        if not body.strip():
+            return None
+
+        name = html_lib.unescape(comments.get("name", "")).strip()
+        email_addr = html_lib.unescape(comments.get("email", "")).strip()
+        from_header = f"{name} <{email_addr}>" if name and email_addr else (email_addr or name or "unknown@example.invalid")
+
+        # "sent" is already RFC-5322-shaped ("Tue, 3 Mar 2026 00:09:48
+        # +0000") straight from the original message -- preferred whenever
+        # present; "isosent" ("20260303000948", always UTC) is the
+        # fallback for the rare page missing it.
+        date_value = html_lib.unescape(comments.get("sent", "")).strip()
+        if not date_value and comments.get("isosent"):
+            try:
+                dt = datetime.strptime(comments["isosent"][:14], "%Y%m%d%H%M%S")
+                date_value = dt.strftime("%a, %d %b %Y %H:%M:%S +0000")
+            except ValueError:
+                date_value = ""
+
+        return {
+            "message_id": message_id,
+            "in_reply_to": html_lib.unescape(comments.get("inreplyto", "")).strip(),
+            "from": from_header,
+            "subject": html_lib.unescape(comments.get("subject", "")).strip(),
+            "date": date_value,
+            "body": body,
+            "url": page_url,
+        }
+
+    @staticmethod
+    def _build_mbox_bytes_from_w3c_messages(messages: list[dict]) -> bytes:
+        """Synthesizes a real mbox file from parsed W3C-archive message
+        dicts -- preprocess_mbox_file (shared with every IETF-hosted list)
+        just splits on "^From " lines and re-parses each part as a real
+        email message (confirmed live: it doesn't care what put that text
+        there), so an EmailMessage built with real From/Date/Subject/
+        Message-ID/In-Reply-To/Archived-At headers behaves identically
+        there regardless of which archive the raw material came from. The
+        "From " envelope line's own content is never read by anything
+        downstream (confirmed live: email.message_from_bytes treats a
+        colon-free leading line as filler, not a header) -- just needs to
+        be present and start the message.
+        """
+        from email.message import EmailMessage
+
+        parts: list[bytes] = []
+        for m in messages:
+            try:
+                em = EmailMessage()
+                em["From"] = m["from"]
+                em["Subject"] = m["subject"]
+                if m["date"]:
+                    em["Date"] = m["date"]
+                em["Message-ID"] = f"<{m['message_id']}>"
+                if m["in_reply_to"]:
+                    em["In-Reply-To"] = f"<{m['in_reply_to']}>"
+                    em["References"] = f"<{m['in_reply_to']}>"
+                # Preferred over Message-ID by preprocess_mbox_file for
+                # both url and id (matches real IETF-list mail from ~2014
+                # onward, which carries a real Archived-At too) -- every
+                # message here gets a real, clickable source link instead
+                # of a synthetic mid: one.
+                em["Archived-At"] = f"<{m['url']}>"
+                em.set_content(m["body"], subtype="plain", charset="utf-8")
+                serialized = em.as_bytes()
+            except (UnicodeEncodeError, UnicodeDecodeError, ValueError) as exc:
+                # Confirmed live: one message out of an entire year's
+                # worth (hundreds) had SOME header value email's own
+                # RFC-2047 folding/encoding couldn't handle (30 years of
+                # real-world mail-client quirks -- not reproducible from
+                # any one adversarial input tried in isolation) and
+                # crashed as_bytes() outright. preprocess_mbox_file
+                # already has its own per-message discard convention for
+                # unparseable input; this is that same convention one
+                # layer earlier, so one bad message loses only itself,
+                # not the other ~hundreds already fetched for this year.
+                logger.debug("Could not serialize W3C archive message %s: %s", m.get("url"), exc)
+                continue
+            parts.append(b"From mailarchive@w3.org Mon Jan  1 00:00:00 2000\n" + serialized)
+        return b"\n".join(parts) + b"\n" if parts else b""
 
     @staticmethod
     def download_drafts_to_local(payload: IetfDraftImportPayload) -> tuple[dict, int]:
