@@ -18,6 +18,8 @@
 #   With arguments: rebuilds only the named services, still pulls and
 #   restarts nginx afterward regardless (it caches upstream IPs no matter
 #   which service changed).
+#   Run with sudo (Docker needs root); the git pull itself still runs as
+#   the user who invoked sudo, with that user's GitHub key.
 #   PULL=false deploy/rebuild: skips the git pull, e.g. when you've already
 #   pulled or are testing uncommitted local changes.
 #   PRISM_DEPLOY_ENV=staging deploy/rebuild: loads
@@ -31,13 +33,21 @@ REPO_DIR="${SCRIPT_DIR}/.."
 cd "$REPO_DIR"
 
 if [ "${PULL:-true}" = true ]; then
-  BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+  # Under `sudo deploy/rebuild`, git would run as root: root has no GitHub
+  # key (the deploy key is the invoking user's), and root-written files in
+  # .git would break that user's later git commands. So git runs as the
+  # user who invoked sudo; only Docker needs root.
+  GIT=(git)
+  if [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != root ]; then
+    GIT=(sudo -u "$SUDO_USER" git)
+  fi
+  BRANCH="$("${GIT[@]}" rev-parse --abbrev-ref HEAD)"
   echo "==> Pulling $BRANCH"
   # --ff-only: this script runs on a deployment VM, which should never have
   # its own local commits diverging from the branch -- a merge here would
   # mean something unexpected happened and deserves a look, not an
   # automatic merge commit.
-  git pull --ff-only origin "$BRANCH"
+  "${GIT[@]}" pull --ff-only origin "$BRANCH"
 fi
 
 cd "${REPO_DIR}/docker"
