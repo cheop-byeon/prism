@@ -1,4 +1,4 @@
-"""Unit tests for LocalSourceIndexService.build_embedding_index."""
+"""Unit tests for LocalSourceIndexService.build_content_embedding_index."""
 
 import json
 
@@ -43,9 +43,9 @@ class TestBuildEmbeddingIndex:
         monkeypatch.setattr(local_source_index_service, "_DOWNLOADS_DIR", tmp_path)
         monkeypatch.setattr(local_source_index_service, "_PREPROCESSED_DIR", tmp_path / "preprocessed")
 
-        result = LocalSourceIndexService.build_embedding_index("draft-ietf-missing", wg=None, rfc_number=None)
+        result = LocalSourceIndexService.build_content_embedding_index("draft-ietf-missing", rfc_number=None)
 
-        assert result == {"error": "Nothing downloaded locally yet for this draft -- sync first."}
+        assert result == {"error": "Nothing to embed yet -- sync and build the sparse index first."}
 
     def test_embeds_every_gathered_document_and_caches_to_disk(self, tmp_path, monkeypatch):
         monkeypatch.setattr(local_source_index_service, "_DOWNLOADS_DIR", tmp_path)
@@ -59,22 +59,23 @@ class TestBuildEmbeddingIndex:
         monkeypatch.setattr(local_source_index_service.httpx, "Client", lambda **kwargs: _FakeClient(calls, **kwargs))
 
         events: list[dict] = []
-        result = LocalSourceIndexService.build_embedding_index(
-            "draft-ietf-quic-transport", wg=None, rfc_number=None, on_event=events.append, batch_size=1
+        result = LocalSourceIndexService.build_content_embedding_index(
+            "draft-ietf-quic-transport", rfc_number=None, on_event=events.append, batch_size=1
         )
 
         assert result["total_documents"] == 2
+        assert result["failed"] == 0
         assert result["dims"] == 4
-        # batch_size=1 with 2 documents -> 2 separate embedding calls
+        # One embedding call per document, whatever batch_size is
         assert len(calls) == 2
+        assert all(len(body["input"]) == 1 for _, body in calls)
 
-        ids_path = tmp_path / "index" / "draft-ietf-quic-transport-embeddings-ids.json"
-        matrix_path = tmp_path / "index" / "draft-ietf-quic-transport-embeddings.npy"
+        ids_path = tmp_path / "index" / "draft-ietf-quic-transport-content-embeddings-ids.json"
+        matrix_path = tmp_path / "index" / "draft-ietf-quic-transport-content-embeddings.npy"
         assert ids_path.is_file()
         assert matrix_path.is_file()
         assert len(json.loads(ids_path.read_text())) == 2
 
-        # Progress events report a growing "current" out of a fixed "total"
-        # once the actual embedding batches start (the initial "gathering"
-        # event has total=0, filtered out here).
-        assert [e["current"] for e in events if e["total"]] == [1, 2]
+        # batch_size=1 -> one progress event per document, "current" growing
+        # out of a fixed "total"
+        assert [(e["current"], e["total"]) for e in events] == [(1, 2), (2, 2)]

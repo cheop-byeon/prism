@@ -5,6 +5,8 @@ from services.ietf_import_service import IetfImportService
 
 class TestBuildRfcRelationshipGraph:
     def test_surfaces_family_lookup_error_and_truncation_note(self, monkeypatch):
+        # No precomputed family for this RFC -> the live build path under test
+        monkeypatch.setattr(IetfImportService, "get_family_graph_for_rfc", lambda rfc: None)
         monkeypatch.setattr(
             IetfImportService,
             "_structural_neighbors",

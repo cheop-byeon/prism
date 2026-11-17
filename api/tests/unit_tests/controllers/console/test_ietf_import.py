@@ -40,8 +40,11 @@ def test_mailarchive_import_delegates_to_service(app, monkeypatch: pytest.Monkey
             "sent_before": "2024-02-01T00:00:00",
             "from_addr": None,
             "subject": "charter",
+            "search_in": ["subject"],
+            "offset": 0,
             "limit": 25,
-            "refresh": False,
+            "output_format": "jsonl",
+            "fetch_all": False,
         }
     )
 
@@ -81,5 +84,6 @@ def test_rfc_import_delegates_to_service(app, monkeypatch: pytest.MonkeyPatch) -
             "wg": None,
             "status": None,
             "limit": 2,
+            "format": "txt",
         }
     )
