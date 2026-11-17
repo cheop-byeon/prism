@@ -1,30 +1,84 @@
 name: Deploy Prism
 
-# Runs the production deploy on prism.uiocloud.no whenever this branch
-# changes, by invoking this repo's own deploy/rebuild script (pulls,
-# rebuilds, force-recreates, restarts nginx, runs migrations via the api
-# container's own entrypoint, waits for health). A dedicated, restricted
-# SSH key forces that exact command server-side (see authorized_keys) --
-# `script` below is only a label for the Actions log; the server ignores
-# whatever is actually sent and always runs that one fixed command.
+# Every push to main: test -> staging -> smoke test -> production -> smoke
+# test. A stage only runs if the one before it passed, so production only
+# ever gets a commit that passed the tests and is already up on staging.
+#
+# Each VM accepts a dedicated SSH key whose forced command is
+# deploy/ci-deploy (see that file): the key can do nothing but deploy the
+# commit sha sent below. Connection details are per-environment secrets
+# (Settings -> Environments -> staging / production): PRISM_SSH_HOST,
+# PRISM_SSH_USER, PRISM_SSH_PRIVATE_KEY, PRISM_SSH_FINGERPRINT (the VM's
+# host key, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`).
+#
+# Off switch: the deploy stages run only while the repository variable
+# PRISM_AUTODEPLOY is "true" (Settings -> Secrets and variables -> Actions
+# -> Variables); tests still run either way.
 on:
   push:
-    branches:
-      - "feature/ietf-mailarchive-import"
+    branches: ["main"]
+  workflow_dispatch:
 
+permissions:
+  contents: read
+
+# One pipeline at a time, never cancelled midway: a newer push waits until
+# the running deploy finishes.
 concurrency:
   group: deploy-prism
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  test:
+    uses: ./.github/workflows/prism-tests.yml
+
+  deploy-staging:
+    needs: test
+    if: vars.PRISM_AUTODEPLOY == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: staging
+      url: https://staging.prism.uiocloud.no
     steps:
-      - name: Deploy to prism.uiocloud.no
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Deploy ${{ github.sha }} to staging
         uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.PRISM_SSH_HOST }}
           username: ${{ secrets.PRISM_SSH_USER }}
           key: ${{ secrets.PRISM_SSH_PRIVATE_KEY }}
-          command_timeout: 30m
-          script: deploy
+          fingerprint: ${{ secrets.PRISM_SSH_FINGERPRINT }}
+          command_timeout: 60m
+          script: deploy ${{ github.sha }}
+
+      - name: Smoke test staging
+        run: .github/scripts/prism-smoke-test.sh https://staging.prism.uiocloud.no
+
+  deploy-production:
+    needs: deploy-staging
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://prism.uiocloud.no
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Deploy ${{ github.sha }} to production
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
+        with:
+          host: ${{ secrets.PRISM_SSH_HOST }}
+          username: ${{ secrets.PRISM_SSH_USER }}
+          key: ${{ secrets.PRISM_SSH_PRIVATE_KEY }}
+          fingerprint: ${{ secrets.PRISM_SSH_FINGERPRINT }}
+          command_timeout: 60m
+          script: deploy ${{ github.sha }}
+
+      - name: Smoke test production
+        run: .github/scripts/prism-smoke-test.sh https://prism.uiocloud.no

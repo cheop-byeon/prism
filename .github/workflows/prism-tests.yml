@@ -1,0 +1,55 @@
+name: Prism Tests
+
+# Prism's own unit tests -- the gate for merging into main (a required
+# status check on main's ruleset) and the first stage of deploy-prism.yml.
+# Deliberately separate from upstream Dify's Main CI Pipeline, which needs
+# services and secrets this fork doesn't have and isn't green here.
+on:
+  pull_request:
+    branches: ["main"]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prism-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Prism tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup UV and Python
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7.6.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          cache-dependency-glob: api/uv.lock
+
+      - name: Install dependencies
+        run: uv sync --project api --dev
+
+      - name: Run Prism unit tests
+        working-directory: api
+        # -o addopts='': pytest.ini's coverage flags are for the full suite
+        run: |
+          uv run pytest -q -o addopts='' \
+            tests/unit_tests/controllers/console/test_ietf_import.py \
+            tests/unit_tests/scripts/agentic_rag \
+            tests/unit_tests/services/test_email_quote_cleaning.py \
+            tests/unit_tests/services/test_email_threading.py \
+            tests/unit_tests/services/test_ietf_evolution_diff.py \
+            tests/unit_tests/services/test_ietf_local_resource_status.py \
+            tests/unit_tests/services/test_ietf_preprocess_mbox.py \
+            tests/unit_tests/services/test_ietf_rfc_graph.py \
+            tests/unit_tests/services/test_job_status_service.py \
+            tests/unit_tests/services/test_local_source_index_service.py \
+            tests/unit_tests/core/rag/extractor/test_jsonl_extractor.py \
+            tests/unit_tests/core/rag/datasource/keyword/test_bm25_load.py

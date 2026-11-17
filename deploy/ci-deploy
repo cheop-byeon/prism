@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Entry point for GitHub Actions' deploy (.github/workflows/deploy-prism.yml).
+# It is the *forced command* of a dedicated SSH key on each VM, so that key
+# can do nothing but this, whatever the client asks for. Install per VM, as
+# the user that owns the repo (one line in ~/.ssh/authorized_keys):
+#
+#   command="/home/ubuntu/prism/deploy/ci-deploy",restrict ssh-ed25519 AAAA... github-actions-deploy
+#
+# The client's requested command arrives in SSH_ORIGINAL_COMMAND and must be
+# exactly `deploy <40-hex commit sha>`. The sha is fast-forwarded to (never
+# merged or reset), so a VM only ever runs a commit that is on origin/main --
+# the one the workflow tested and, for production, already ran on staging.
+# git runs as this user (who holds the GitHub key); only deploy/rebuild,
+# which drives Docker, runs under sudo.
+set -euo pipefail
+
+# Everything is in main() so bash has parsed the whole script before the
+# fast-forward below rewrites this file on disk.
+main() {
+  local repo_dir verb sha extra branch
+  repo_dir="$(dirname "$(realpath "$0")")/.."
+  cd "$repo_dir"
+
+  read -r verb sha extra <<<"${SSH_ORIGINAL_COMMAND:-}" || true
+  if [ "${verb:-}" != deploy ] || ! [[ "${sha:-}" =~ ^[0-9a-f]{40}$ ]] || [ -n "${extra:-}" ]; then
+    echo "usage: deploy <40-hex commit sha>" >&2
+    exit 2
+  fi
+
+  branch="$(git rev-parse --abbrev-ref HEAD)"
+  if [ "$branch" != main ]; then
+    echo "error: this checkout is on '$branch'; CI deploys only a checkout of main (git switch main)" >&2
+    exit 1
+  fi
+  if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
+    echo "error: this checkout has local changes; CI deploys only a clean checkout" >&2
+    exit 1
+  fi
+
+  echo "==> Fetching origin/main"
+  git fetch --quiet origin main
+  if ! git merge-base --is-ancestor "$sha" origin/main; then
+    echo "error: $sha is not on origin/main" >&2
+    exit 1
+  fi
+  echo "==> Fast-forwarding to $sha"
+  git merge --ff-only --quiet "$sha"
+
+  PULL=false sudo --preserve-env=PULL "$repo_dir/deploy/rebuild"
+  echo "==> Deployed $(git rev-parse HEAD)"
+}
+
+main "$@"
