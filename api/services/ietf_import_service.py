@@ -313,6 +313,20 @@ class IetfImportService:
         "ietf-http-wg": "https://lists.w3.org/Archives/Public/ietf-http-wg/",
     }
 
+    # Mailing lists whose real IMAP mailbox name (what the sidecar's own
+    # archive actually indexes under) differs from the WG-facing name
+    # every caller here uses to key local files. Confirmed live: the
+    # sidecar's own /api/v1/mailarchive/lists listing has no "rmonmib" at
+    # all (returns 404 "Unknown mailing list"), but does have "rmon" --
+    # the mail server evidently archived this WG's list under its bare
+    # name rather than the WG-acronym-based one Datatracker's list_email
+    # (rmonmib@ietf.org) would suggest. Keyed by our WG-facing name -> the
+    # sidecar's real name, grows by hand as each one is found, same as
+    # _EXTERNALLY_HOSTED_MAIL_ARCHIVES above.
+    _MAILING_LIST_ALIASES: dict[str, str] = {
+        "rmonmib": "rmon",
+    }
+
     @staticmethod
     def download_mailarchive_as_mbox_to_local(payload: IetfMailarchiveImportPayload) -> tuple[dict, int]:
         """Download mbox export into local mounted storage and return local file metadata."""
@@ -323,7 +337,13 @@ class IetfImportService:
                 payload["mailing_list"], archive_base, payload["sent_after"], payload["sent_before"]
             )
 
-        sidecar_payload = IetfImportService._request_sidecar("/api/v1/import/mailarchive/mbox", payload)
+        wg_facing_name = payload["mailing_list"]
+        sidecar_name = IetfImportService._MAILING_LIST_ALIASES.get(wg_facing_name, wg_facing_name)
+        sidecar_request_payload = payload
+        if sidecar_name != wg_facing_name:
+            sidecar_request_payload = dict(payload)
+            sidecar_request_payload["mailing_list"] = sidecar_name
+        sidecar_payload = IetfImportService._request_sidecar("/api/v1/import/mailarchive/mbox", sidecar_request_payload)
         try:
             content = base64.b64decode(sidecar_payload.content_base64)
         except ValueError as exc:
@@ -332,7 +352,15 @@ class IetfImportService:
         local_dir = Path("/app/api/storage/ietf-downloads")
         local_dir.mkdir(parents=True, exist_ok=True)
 
+        # The sidecar names its file after whatever mailing_list name WE
+        # sent it, so an aliased request comes back named after the
+        # sidecar's own name (e.g. "ietf-mailarchive-rmon-...") -- swap
+        # that back to the WG-facing name so every downstream glob/lookup
+        # keyed on the WG name (get_local_download_status,
+        # get_mail_message_counts, resolve_wg_for_draft, etc.) still finds it.
         filename = sidecar_payload.filename
+        if sidecar_name != wg_facing_name:
+            filename = filename.replace(f"ietf-mailarchive-{sidecar_name}-", f"ietf-mailarchive-{wg_facing_name}-", 1)
         destination = local_dir / filename
         # Overwrite any previous download of the same list/date-range: the
         # fresh download supersedes it (filters and sidecar dedup fixes can
