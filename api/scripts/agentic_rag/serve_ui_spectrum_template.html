@@ -1913,6 +1913,16 @@ function loadSessionList(opts) {
   } else if (opts.lastId) {
     params.set('last_id', opts.lastId);
   }
+  // openSession(), rename, delete and share-toggle all call this with no
+  // args afterward just to refresh ordering/active-highlight on the SAME
+  // list the user was already scrolled through -- confirmed live: since
+  // .po-sessionlist IS the scrollable element (overflow-y:auto), wholesale
+  // replacing its innerHTML below resets scrollTop to 0 in every browser,
+  // throwing the user back to the top of a long list and losing the row
+  // they'd just clicked, along with its neighbors. Captured here (not on
+  // 'append', which uses insertAdjacentHTML and never disturbs scroll) and
+  // restored once the new rows are in.
+  const preservedScrollTop = opts.append ? null : poSessionListEl.scrollTop;
   fetch(`${PRISM_PREFIX}/api/sessions?${params}`).then((r) => r.json()).then((data) => {
     if (data.error) throw new Error(data.error);
     const sessions = data.sessions || [];
@@ -1929,6 +1939,7 @@ function loadSessionList(opts) {
     if (data.has_more) {
       poSessionListEl.insertAdjacentHTML('beforeend', '<button type="button" class="po-loadmore">Load more</button>');
     }
+    if (preservedScrollTop !== null) poSessionListEl.scrollTop = preservedScrollTop;
     // Sessions someone ELSE shared -- appended after this account's own
     // list, same merged-not-separate-page treatment the Sources tab
     // already gives shared local sources. Skipped while searching (the
