@@ -22,7 +22,7 @@ sys.path.insert(0, "/app/api")
 
 from app_factory import create_app
 
-app = create_app()
+_, app = create_app()
 
 # Edit this list to embed a different scope next -- see this module's own
 # docstring for why these two and not the full WG set (dns-security has

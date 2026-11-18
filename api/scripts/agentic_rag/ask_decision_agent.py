@@ -4187,7 +4187,7 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    app = create_app()
+    _, app = create_app()
     with app.app_context():
         answer = ask(
             query=args.query,

@@ -695,7 +695,7 @@ def main() -> None:
 
     from app_factory import create_app
 
-    app = create_app()
+    _, app = create_app()
     with app.test_request_context():
         from flask_login import login_user
 
