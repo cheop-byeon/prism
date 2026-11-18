@@ -50,7 +50,7 @@ sys.path.insert(0, "/app/api")
 
 from app_factory import create_app
 
-app = create_app()
+_, app = create_app()
 
 
 def _print_progress(event: dict) -> None:

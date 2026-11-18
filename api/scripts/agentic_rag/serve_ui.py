@@ -641,7 +641,7 @@ def _tenant_has_custom_credential(tenant_id: str, provider: str) -> bool:
 def main() -> None:
     from flask import g, jsonify, make_response, redirect, request
 
-    app = create_app()
+    _, app = create_app()
 
     @app.before_request
     def _require_console_login():
