@@ -161,8 +161,8 @@ services:
   web:
     image: dify-local-web:dev
     build:
-      context: ../web
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: web/Dockerfile
 EOF
 
 # ---------------------------------------------------------------------------
@@ -226,7 +226,7 @@ fi
 # A bare `docker compose` (ad-hoc commands) loads the same files as the
 # scripts, with Prism's additions on top of Dify's base file.
 if ! grep -q '^COMPOSE_FILE=' .env; then
-  echo 'COMPOSE_FILE=docker-compose.yaml:docker-compose.prism.yaml:docker-compose.override.yaml' >> .env
+  echo 'COMPOSE_FILE=docker-compose.yaml:docker-compose.override.yaml:docker-compose.prism.yaml' >> .env
 fi
 
 # ---------------------------------------------------------------------------
@@ -254,7 +254,7 @@ sudo chown -R 1001:1001 volumes/app/storage
 # inline env var instead of using --profile, to keep weaviate/postgresql
 # included alongside it.
 # ---------------------------------------------------------------------------
-COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.prism.yaml -f docker-compose.override.yaml)
+COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.override.yaml -f docker-compose.prism.yaml)
 
 echo ""
 echo "==> Building api, worker, worker_beat, web (several minutes)"

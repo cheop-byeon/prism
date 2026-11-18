@@ -96,7 +96,7 @@ def github_import_task(
     """
     from controllers.common.errors import RemoteFileUploadError
     from core.db.session_factory import session_factory
-    from dify_graph.file import helpers as file_helpers
+    from graphon.file import helpers as file_helpers
     from fields.file_fields import FileWithSignedUrl
     from models import Account, Tenant
     from services.file_service import FileService

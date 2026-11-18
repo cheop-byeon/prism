@@ -53,7 +53,7 @@ fi
 cd "${REPO_DIR}/docker"
 
 # docker-compose.prism.yaml: Prism's additions to Dify's untouched base file.
-COMPOSE_FILES=(-f docker-compose.yaml -f docker-compose.prism.yaml -f docker-compose.override.yaml)
+COMPOSE_FILES=(-f docker-compose.yaml -f docker-compose.override.yaml -f docker-compose.prism.yaml)
 DEFAULT_SERVICES=(api worker worker_beat web)
 
 # docker-compose.ietf-ui.yaml (Prism's ietf_decision_agent_ui) and

@@ -16,12 +16,12 @@ import type {
 } from '@/service/common'
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Button from '@/app/components/base/button'
+import { Button } from '@langgenius/dify-ui/button'
 import Input from '@/app/components/base/input'
-import SegmentedControl from '@/app/components/base/segmented-control'
-import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitle } from '@/app/components/base/ui/dialog'
-import { toast } from '@/app/components/base/ui/toast'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/app/components/base/ui/tooltip'
+import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitle } from '@langgenius/dify-ui/dialog'
+import { toast } from '@langgenius/dify-ui/toast'
+import { ToggleGroup, ToggleGroupItem } from '@langgenius/dify-ui/toggle-group'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@langgenius/dify-ui/tooltip'
 import {
   downloadAndPreprocessMailarchiveYears,
   fetchGithubImportStatus,
@@ -452,13 +452,13 @@ function IetfImporter({
           const result = await fetchIetfDraftFormats(selectedDraftMetadata.name)
           const formats = result.formats.length ? result.formats : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
           setAvailableFormats(formats)
-          setSelectedFormat(formats[0].key)
+          setSelectedFormat(formats[0]?.key ?? 'txt')
         }
         else if (importType === 'rfc') {
           const result = await fetchIetfRfcFormats(selectedRfc.doc_id)
           const formats = result.formats.length ? result.formats : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
           setAvailableFormats(formats)
-          setSelectedFormat(formats[0].key)
+          setSelectedFormat(formats[0]?.key ?? 'txt')
         }
       }
       catch {
@@ -931,7 +931,7 @@ function IetfImporter({
 
       <Dialog
         open={open}
-        onOpenChange={nextOpen => nextOpen ? setOpen(true) : closeDialog()}
+        onOpenChange={(nextOpen: boolean) => nextOpen ? setOpen(true) : closeDialog()}
       >
         <DialogContent className="w-[720px] max-w-[calc(100vw-2rem)] p-0">
           <div className="border-b border-divider-subtle px-6 py-5">
@@ -1351,9 +1351,8 @@ function IetfImporter({
                                 setRfcForm({ rfcId: item.doc_id })
                                 setSelectedRfc(item)
                                 setImportType('rfc')
-                                const latestVersion = item.draft_versions?.length
-                                  ? item.draft_versions[item.draft_versions.length - 1].version
-                                  : item.draft_max_version ?? null
+                                const latestVersion = item.draft_versions?.at(-1)?.version
+                                  ?? item.draft_max_version ?? null
                                 setSelectedDraftVersion(latestVersion)
                                 setShowRfcSuggestions(false)
                               }}
@@ -1389,19 +1388,17 @@ function IetfImporter({
                       <div className="text-xs font-medium text-text-secondary">
                         {t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
                       </div>
-                      <SegmentedControl
-                        options={[
-                          { value: 'rfc', text: selectedRfc.doc_id },
-                          {
-                            value: 'draft',
-                            text: t('stepOne.ietf.importTypeInternetDraft', { ns: 'datasetCreation' }),
-                            disabled: !availableDraftVersions.length,
-                          },
-                        ]}
-                        value={importType}
-                        onChange={value => setImportType(value as 'rfc' | 'draft')}
+                      <ToggleGroup
+                        value={[importType]}
+                        onValueChange={([value]) => value && setImportType(value as 'rfc' | 'draft')}
+                        aria-label={t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
                         className="w-fit"
-                      />
+                      >
+                        <ToggleGroupItem value="rfc">{selectedRfc.doc_id}</ToggleGroupItem>
+                        <ToggleGroupItem value="draft" disabled={!availableDraftVersions.length}>
+                          {t('stepOne.ietf.importTypeInternetDraft', { ns: 'datasetCreation' })}
+                        </ToggleGroupItem>
+                      </ToggleGroup>
                     </div>
 
                     {importType === 'draft' && selectedRfc.draft_base_name && availableDraftVersions.length > 0 && (

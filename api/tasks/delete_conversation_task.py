@@ -3,6 +3,7 @@ import time
 
 import click
 from celery import shared_task
+from sqlalchemy import delete, select
 
 from core.db.session_factory import session_factory
 from models import ConversationVariable
@@ -29,23 +30,17 @@ def delete_conversation_related_data(conversation_id: str):
 
     with session_factory.create_session() as session:
         try:
-            session.query(MessageAnnotation).where(MessageAnnotation.conversation_id == conversation_id).delete(
-                synchronize_session=False
+            session.execute(delete(MessageAnnotation).where(MessageAnnotation.conversation_id == conversation_id))
+
+            session.execute(delete(MessageFeedback).where(MessageFeedback.conversation_id == conversation_id))
+
+            session.execute(
+                delete(ToolConversationVariables).where(ToolConversationVariables.conversation_id == conversation_id)
             )
 
-            session.query(MessageFeedback).where(MessageFeedback.conversation_id == conversation_id).delete(
-                synchronize_session=False
-            )
+            session.execute(delete(ToolFile).where(ToolFile.conversation_id == conversation_id))
 
-            session.query(ToolConversationVariables).where(
-                ToolConversationVariables.conversation_id == conversation_id
-            ).delete(synchronize_session=False)
-
-            session.query(ToolFile).where(ToolFile.conversation_id == conversation_id).delete(synchronize_session=False)
-
-            session.query(ConversationVariable).where(ConversationVariable.conversation_id == conversation_id).delete(
-                synchronize_session=False
-            )
+            session.execute(delete(ConversationVariable).where(ConversationVariable.conversation_id == conversation_id))
 
             # Has no FK/ondelete relationship to Message at the DB level
             # (confirmed: MessageAgentThought.message_id is a bare column,
@@ -54,16 +49,12 @@ def delete_conversation_related_data(conversation_id: str):
             # producing one row per tool call. Must run before the Message
             # delete below -- the subquery needs those rows to still exist
             # to know which thoughts belong to this conversation at all.
-            message_ids_subquery = session.query(Message.id).where(Message.conversation_id == conversation_id)
-            session.query(MessageAgentThought).where(
-                MessageAgentThought.message_id.in_(message_ids_subquery)
-            ).delete(synchronize_session=False)
+            message_ids_subquery = select(Message.id).where(Message.conversation_id == conversation_id)
+            session.execute(delete(MessageAgentThought).where(MessageAgentThought.message_id.in_(message_ids_subquery)))
 
-            session.query(Message).where(Message.conversation_id == conversation_id).delete(synchronize_session=False)
+            session.execute(delete(Message).where(Message.conversation_id == conversation_id))
 
-            session.query(PinnedConversation).where(PinnedConversation.conversation_id == conversation_id).delete(
-                synchronize_session=False
-            )
+            session.execute(delete(PinnedConversation).where(PinnedConversation.conversation_id == conversation_id))
 
             session.commit()
 

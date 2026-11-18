@@ -19,7 +19,7 @@ from scripts.agentic_rag.ask_decision_agent import (
 
 
 def _fake_usage(*, prompt_tokens, completion_tokens, total_tokens, total_price, latency, currency="USD"):
-    """A duck-typed stand-in for dify_graph's LLMUsage -- _summarize_usage
+    """A duck-typed stand-in for graphon's LLMUsage -- _summarize_usage
     only ever reads these attributes, so a real LLMUsage (which needs
     Decimal fields and pydantic validation) isn't necessary here.
     """

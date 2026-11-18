@@ -1,15 +1,16 @@
 # Prism's additions to Dify's docker-compose.yaml, which stays exactly as
 # upstream ships it so that syncing a new Dify release doesn't conflict here.
-# Load this file right after the base file, for example:
+# Load this file last, after the base file and the machine's own
+# docker-compose.override.yaml, so its settings win:
 #
-#   docker compose -f docker-compose.yaml -f docker-compose.prism.yaml \
-#     -f docker-compose.override.yaml ...
+#   docker compose -f docker-compose.yaml -f docker-compose.override.yaml \
+#     -f docker-compose.prism.yaml ...
 #
 # deploy/rebuild, deploy/renew-cert and the dev/ scripts already do. For
 # ad-hoc commands, set COMPOSE_FILE in docker/.env so a bare `docker compose`
 # loads the same set:
 #
-#   COMPOSE_FILE=docker-compose.yaml:docker-compose.prism.yaml:docker-compose.override.yaml
+#   COMPOSE_FILE=docker-compose.yaml:docker-compose.override.yaml:docker-compose.prism.yaml
 #
 # Compose merges this file into the base one: environment entries and volumes
 # are added to (or replace) the base service's, and new services are added.
@@ -58,6 +59,15 @@ services:
 
   worker_beat:
     environment: *prism-env
+
+  # Since Dify 1.14 the web image builds from the repo root (it needs the
+  # pnpm workspace and packages/); web/Dockerfile.dockerignore keeps the
+  # rest of the repo, docker/volumes included, out of the build context.
+  # Set here rather than in each machine's override, which predates this.
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
 
   plugin_daemon:
     extra_hosts:

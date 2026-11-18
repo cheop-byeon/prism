@@ -48,7 +48,7 @@ export const defaultParentChildConfig: ParentChildConfig = {
   },
 }
 
-export type UseSegmentationStateOptions = {
+type UseSegmentationStateOptions = {
   initialSegmentationType?: ProcessMode
   initialSummaryIndexSetting?: SummaryIndexSettingType
 }
@@ -398,5 +398,3 @@ type Segmentation = {
   chunk_strategy?: ChunkStrategy
   strategy_params?: Record<string, unknown>
 }
-
-export type SegmentationState = ReturnType<typeof useSegmentationState>
