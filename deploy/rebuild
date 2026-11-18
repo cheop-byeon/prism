@@ -52,7 +52,8 @@ fi
 
 cd "${REPO_DIR}/docker"
 
-COMPOSE_FILES=(-f docker-compose.yaml -f docker-compose.override.yaml)
+# docker-compose.prism.yaml: Prism's additions to Dify's untouched base file.
+COMPOSE_FILES=(-f docker-compose.yaml -f docker-compose.prism.yaml -f docker-compose.override.yaml)
 DEFAULT_SERVICES=(api worker worker_beat web)
 
 # docker-compose.ietf-ui.yaml (Prism's ietf_decision_agent_ui) and
@@ -119,6 +120,11 @@ echo "==> Redeploying: ${SERVICES[*]}"
 # this flag it would keep running the stale container instead of picking
 # up the freshly built image.
 "${COMPOSE[@]}" up -d --no-deps --force-recreate "${SERVICES[@]}"
+
+# Services that aren't rebuilt still need recreating when their compose
+# config changed (a new mount or setting from docker-compose.prism.yaml);
+# a plain `up -d` recreates exactly those and leaves the rest running.
+"${COMPOSE[@]}" up -d --no-deps nginx ssrf_proxy plugin_daemon ietfdata_service
 
 echo "==> Restarting nginx (picks up new container IPs and any config template changes)"
 "${COMPOSE[@]}" restart --no-deps nginx

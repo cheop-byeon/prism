@@ -36,8 +36,6 @@ x-shared-env: &shared-api-worker-env
   FILES_ACCESS_TIMEOUT: ${FILES_ACCESS_TIMEOUT:-300}
   ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-60}
   REFRESH_TOKEN_EXPIRE_DAYS: ${REFRESH_TOKEN_EXPIRE_DAYS:-30}
-  ALLOW_REGISTER: ${ALLOW_REGISTER:-false}
-  ALLOW_CREATE_WORKSPACE: ${ALLOW_CREATE_WORKSPACE:-false}
   APP_DEFAULT_ACTIVE_REQUESTS: ${APP_DEFAULT_ACTIVE_REQUESTS:-0}
   APP_MAX_ACTIVE_REQUESTS: ${APP_MAX_ACTIVE_REQUESTS:-0}
   APP_MAX_EXECUTION_TIME: ${APP_MAX_EXECUTION_TIME:-1200}
@@ -407,8 +405,6 @@ x-shared-env: &shared-api-worker-env
   IRIS_TIMEZONE: ${IRIS_TIMEZONE:-UTC}
   UPLOAD_FILE_SIZE_LIMIT: ${UPLOAD_FILE_SIZE_LIMIT:-15}
   UPLOAD_FILE_BATCH_LIMIT: ${UPLOAD_FILE_BATCH_LIMIT:-5}
-  IETFDATA_SERVICE_URL: ${IETFDATA_SERVICE_URL:-http://ietfdata_service:8010}
-  IETFDATA_SERVICE_TIMEOUT: ${IETFDATA_SERVICE_TIMEOUT:-60}
   UPLOAD_FILE_EXTENSION_BLACKLIST: ${UPLOAD_FILE_EXTENSION_BLACKLIST:-}
   SINGLE_CHUNK_ATTACHMENT_LIMIT: ${SINGLE_CHUNK_ATTACHMENT_LIMIT:-10}
   IMAGE_FILE_BATCH_LIMIT: ${IMAGE_FILE_BATCH_LIMIT:-10}
@@ -737,8 +733,6 @@ services:
   api:
     image: langgenius/dify-api:1.13.3
     restart: always
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       # Use the shared environment variables.
       <<: *shared-api-worker-env
@@ -757,13 +751,21 @@ services:
         condition: service_completed_successfully
       db_postgres:
         condition: service_healthy
+        required: false
+      db_mysql:
+        condition: service_healthy
+        required: false
+      oceanbase:
+        condition: service_healthy
+        required: false
+      seekdb:
+        condition: service_healthy
+        required: false
       redis:
         condition: service_started
     volumes:
       # Mount the storage directory to the container, for storing user files.
       - ./volumes/app/storage:/app/api/storage
-      # Override vector_factory.py to apply local batch-size and batching fixes.
-      - ../api/core/rag/datasource/vdb/vector_factory.py:/app/api/core/rag/datasource/vdb/vector_factory.py:ro
     networks:
       - ssrf_proxy_network
       - default
@@ -773,8 +775,6 @@ services:
   worker:
     image: langgenius/dify-api:1.13.3
     restart: always
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       # Use the shared environment variables.
       <<: *shared-api-worker-env
@@ -790,13 +790,21 @@ services:
         condition: service_completed_successfully
       db_postgres:
         condition: service_healthy
+        required: false
+      db_mysql:
+        condition: service_healthy
+        required: false
+      oceanbase:
+        condition: service_healthy
+        required: false
+      seekdb:
+        condition: service_healthy
+        required: false
       redis:
         condition: service_started
     volumes:
       # Mount the storage directory to the container, for storing user files.
       - ./volumes/app/storage:/app/api/storage
-      # Override vector_factory.py to apply local batch-size and batching fixes.
-      - ../api/core/rag/datasource/vdb/vector_factory.py:/app/api/core/rag/datasource/vdb/vector_factory.py:ro
     networks:
       - ssrf_proxy_network
       - default
@@ -816,6 +824,16 @@ services:
         condition: service_completed_successfully
       db_postgres:
         condition: service_healthy
+        required: false
+      db_mysql:
+        condition: service_healthy
+        required: false
+      oceanbase:
+        condition: service_healthy
+        required: false
+      seekdb:
+        condition: service_healthy
+        required: false
       redis:
         condition: service_started
     networks:
@@ -849,17 +867,6 @@ services:
       ENABLE_WEBSITE_JINAREADER: ${ENABLE_WEBSITE_JINAREADER:-true}
       ENABLE_WEBSITE_FIRECRAWL: ${ENABLE_WEBSITE_FIRECRAWL:-true}
       ENABLE_WEBSITE_WATERCRAWL: ${ENABLE_WEBSITE_WATERCRAWL:-true}
-
-  ietfdata_service:
-    build:
-      context: ../tools/ietfdata_service
-    restart: always
-    environment:
-      IETFDATA_SQLITE_FILE: /data/ietfdata.sqlite
-      IETFDATA_RFC_CACHE_DIR: /data/cache
-      IETFDATA_LOGLEVEL: ${IETFDATA_LOGLEVEL:-INFO}
-    volumes:
-      - ./volumes/ietfdata:/data
 
   # The PostgreSQL database.
   db_postgres:
@@ -974,8 +981,6 @@ services:
   plugin_daemon:
     image: langgenius/dify-plugin-daemon:0.5.3-local
     restart: always
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     environment:
       # Use the shared environment variables.
       <<: *shared-api-worker-env
@@ -989,7 +994,7 @@ services:
       PLUGIN_REMOTE_INSTALLING_HOST: ${PLUGIN_DEBUGGING_HOST:-0.0.0.0}
       PLUGIN_REMOTE_INSTALLING_PORT: ${PLUGIN_DEBUGGING_PORT:-5003}
       PLUGIN_WORKING_PATH: ${PLUGIN_WORKING_PATH:-/app/storage/cwd}
-      FORCE_VERIFYING_SIGNATURE: "false"
+      FORCE_VERIFYING_SIGNATURE: ${FORCE_VERIFYING_SIGNATURE:-true}
       PYTHON_ENV_INIT_TIMEOUT: ${PLUGIN_PYTHON_ENV_INIT_TIMEOUT:-120}
       PLUGIN_MAX_EXECUTION_TIMEOUT: ${PLUGIN_MAX_EXECUTION_TIMEOUT:-600}
       PLUGIN_STDIO_BUFFER_SIZE: ${PLUGIN_STDIO_BUFFER_SIZE:-1024}
@@ -1032,6 +1037,16 @@ services:
     depends_on:
       db_postgres:
         condition: service_healthy
+        required: false
+      db_mysql:
+        condition: service_healthy
+        required: false
+      oceanbase:
+        condition: service_healthy
+        required: false
+      seekdb:
+        condition: service_healthy
+        required: false
 
   # ssrf_proxy server
   # for more information, please refer to
@@ -1039,8 +1054,6 @@ services:
   ssrf_proxy:
     image: ubuntu/squid:latest
     restart: always
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./ssrf_proxy/squid.conf.template:/etc/squid/squid.conf.template
       - ./ssrf_proxy/docker-entrypoint.sh:/docker-entrypoint-mount.sh
@@ -1152,8 +1165,6 @@ services:
       ENABLE_TOKENIZER_GSE: ${WEAVIATE_ENABLE_TOKENIZER_GSE:-false}
       ENABLE_TOKENIZER_KAGOME_JA: ${WEAVIATE_ENABLE_TOKENIZER_KAGOME_JA:-false}
       ENABLE_TOKENIZER_KAGOME_KR: ${WEAVIATE_ENABLE_TOKENIZER_KAGOME_KR:-false}
-      DISK_USE_READONLY_PERCENTAGE: ${WEAVIATE_DISK_USE_READONLY_PERCENTAGE:-99}
-      DISK_USE_WARNING_PERCENTAGE: ${WEAVIATE_DISK_USE_WARNING_PERCENTAGE:-98}
 
   # OceanBase vector database
   oceanbase:

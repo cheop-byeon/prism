@@ -1,7 +1,8 @@
+import { IS_DEV } from '@/config'
 import Script from '@/next/script'
 
 export function ReactScanLoader() {
-  if (process.env.NEXT_PUBLIC_ENABLE_REACT_SCAN !== 'true')
+  if (!IS_DEV)
     return null
 
   return (

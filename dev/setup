@@ -22,16 +22,7 @@ cp "$MIDDLEWARE_ENV_EXAMPLE" "$MIDDLEWARE_ENV"
 
 # 4) Install deps
 cd "$ROOT/api"
-UV_RUNNER=(uv)
-if ! command -v uv >/dev/null 2>&1; then
-	UV_RUNNER=("/opt/homebrew/bin/python3" -m uv)
-fi
-
-"${UV_RUNNER[@]}" sync --group dev
+uv sync --group dev
 
 cd "$ROOT/web"
-if command -v pnpm >/dev/null 2>&1; then
-	pnpm install
-else
-	corepack pnpm install
-fi
+pnpm install
