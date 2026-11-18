@@ -54,7 +54,7 @@ def detect_roadmap_candidate(topic_query: str, candidates: list[dict], model_ins
     this topic, the way RFC9364 does for DNSSEC. Returns that RFC's number
     (bare digits) if so, else None.
     """
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
     from scripts.agentic_rag.ask_decision_agent import _invoke_llm_with_retry
 
     if not candidates:
@@ -102,7 +102,7 @@ def extract_family_from_roadmap(rfc_number: str, model_instance) -> list[dict] |
     describes as part of its family, with a one-sentence role for each --
     returns [{rfc, role}], or None if the fetch or extraction failed.
     """
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
     from scripts.agentic_rag.ask_decision_agent import _invoke_llm_with_retry
 
     text = _fetch_rfc_full_text(rfc_number)

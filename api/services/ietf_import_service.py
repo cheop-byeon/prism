@@ -43,7 +43,7 @@ from yarl import URL
 import services
 from configs import dify_config
 from controllers.common.errors import FileTooLargeError, RemoteFileUploadError, UnsupportedFileTypeError
-from dify_graph.file import helpers as file_helpers
+from graphon.file import helpers as file_helpers
 from extensions.ext_database import db
 from extensions.ext_redis import redis_client
 from fields.file_fields import FileWithSignedUrl

@@ -28,7 +28,7 @@ vi.mock('@/service/use-common', () => ({
   }),
 }))
 
-vi.mock('@/app/components/base/ui/toast', () => ({
+vi.mock('@langgenius/dify-ui/toast', () => ({
   toast: {
     success: (...args: unknown[]) => mockToastSuccess(...args),
     error: (...args: unknown[]) => mockToastError(...args),
@@ -279,6 +279,8 @@ describe('IetfImporter', () => {
 
     expect(screen.queryByText('datasetCreation.stepOne.ietf.selectedDraftName')).not.toBeInTheDocument()
     expect(screen.queryByText('datasetCreation.stepOne.ietf.draftRangeHint')).not.toBeInTheDocument()
+    expect(screen.getAllByText('2018-03').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('2018-06').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByTestId('ietf-import-submit'))
 
@@ -288,9 +290,6 @@ describe('IetfImporter', () => {
         format: 'txt',
       })
     })
-
-    expect(screen.getAllByText('2018-03').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('2018-06').length).toBeGreaterThan(0)
   })
 
   it('should fetch and show RFC suggestions even when query is empty', async () => {

@@ -828,7 +828,7 @@ def main() -> None:
         run right now for this specific viewer.
         """
         from core.provider_manager import ProviderManager
-        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from graphon.model_runtime.entities.model_entities import ModelType
         from services.agentic_rag_session_service import get_data_tenant_id, get_owned_tenant_id
 
         admin_tenant_id = get_data_tenant_id()
@@ -2528,7 +2528,7 @@ def main() -> None:
         -> System Model, the same as every other caller.
         """
         from core.model_manager import ModelManager
-        from dify_graph.model_runtime.entities.model_entities import ModelType
+        from graphon.model_runtime.entities.model_entities import ModelType
         from services.agentic_rag_session_service import get_data_tenant_id
 
         tenant_id = get_data_tenant_id()

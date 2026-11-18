@@ -3,14 +3,14 @@
 import type { FC } from 'react'
 import type { ParentChildConfig } from '../hooks'
 import type { ChunkStrategy, ParentMode, PreProcessingRule, StrategyProvider, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
+import { Button } from '@langgenius/dify-ui/button'
+import { Checkbox } from '@langgenius/dify-ui/checkbox'
+import { ToggleGroup, ToggleGroupItem } from '@langgenius/dify-ui/toggle-group'
 import { RiSearchEyeLine } from '@remixicon/react'
 import { useTranslation } from 'react-i18next'
-import Button from '@/app/components/base/button'
-import Checkbox from '@/app/components/base/checkbox'
 import Divider from '@/app/components/base/divider'
 import { ParentChildChunk } from '@/app/components/base/icons/src/vender/knowledge'
 import RadioCard from '@/app/components/base/radio-card'
-import SegmentedControl from '@/app/components/base/segmented-control'
 import SummaryIndexSetting from '@/app/components/datasets/settings/summary-index-setting'
 import { IS_CE_EDITION } from '@/config'
 import {
@@ -35,7 +35,7 @@ type TextLabelProps = {
 }
 
 const TextLabel: FC<TextLabelProps> = ({ children }) => {
-  return <label className="text-text-secondary system-sm-semibold">{children}</label>
+  return <label className="system-sm-semibold text-text-secondary">{children}</label>
 }
 
 type LevelStrategyConfig = {
@@ -90,11 +90,15 @@ const LevelStrategySection: FC<LevelStrategySectionProps> = ({
     <div className="mt-2 flex flex-col gap-3">
       <div className="flex flex-col gap-2">
         <TextLabel>{t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}</TextLabel>
-        <SegmentedControl
-          options={providerOptions}
-          value={level.strategyProvider}
-          onChange={value => onStrategyProviderChange(value as StrategyProvider)}
-        />
+        <ToggleGroup
+          value={[level.strategyProvider]}
+          onValueChange={([value]) => value && onStrategyProviderChange(value as StrategyProvider)}
+          aria-label={t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}
+        >
+          {providerOptions.map(option => (
+            <ToggleGroupItem key={option.value} value={option.value}>{option.text}</ToggleGroupItem>
+          ))}
+        </ToggleGroup>
       </div>
 
       <div className="flex flex-col gap-1">
@@ -315,16 +319,18 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
           </div>
           <div className="mt-1">
             {rules.map(rule => (
-              <div
+              <label
                 key={rule.id}
-                className={s.ruleItem}
-                onClick={() => onRuleToggle(rule.id)}
+                className={`${s.ruleItem} cursor-pointer`}
               >
-                <Checkbox checked={rule.enabled} />
-                <label className="ml-2 cursor-pointer text-text-secondary system-sm-regular">
+                <Checkbox
+                  checked={rule.enabled}
+                  onCheckedChange={() => onRuleToggle(rule.id)}
+                />
+                <span className="ml-2 system-sm-regular text-text-secondary">
                   {getRuleName(rule.id)}
-                </label>
-              </div>
+                </span>
+              </label>
             ))}
             {
               showSummaryIndexSetting && IS_CE_EDITION && (

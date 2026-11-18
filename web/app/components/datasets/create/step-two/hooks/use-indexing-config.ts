@@ -25,7 +25,7 @@ const DEFAULT_RETRIEVAL_CONFIG: RetrievalConfig = {
 
 export type KeywordStoreType = 'bm25' | 'jieba'
 
-export type UseIndexingConfigOptions = {
+type UseIndexingConfigOptions = {
   initialIndexType?: IndexingType
   initialEmbeddingModel?: DefaultModel
   initialRetrievalConfig?: RetrievalConfig
@@ -152,5 +152,3 @@ export const useIndexingConfig = (options: UseIndexingConfigOptions) => {
     showMultiModalTip,
   }
 }
-
-export type IndexingConfig = ReturnType<typeof useIndexingConfig>

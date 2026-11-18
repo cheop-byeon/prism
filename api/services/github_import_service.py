@@ -26,7 +26,7 @@ import httpx
 
 import services
 from controllers.common.errors import FileTooLargeError, RemoteFileUploadError, UnsupportedFileTypeError
-from dify_graph.file import helpers as file_helpers
+from graphon.file import helpers as file_helpers
 from extensions.ext_database import db
 from fields.file_fields import FileWithSignedUrl
 from libs.login import current_account_with_tenant

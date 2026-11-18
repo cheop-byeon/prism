@@ -132,7 +132,7 @@ The easiest way to start the server is through [Docker Compose](/docker/docker-c
 cd dify
 cd docker
 cp .env.example .env
-echo 'COMPOSE_FILE=docker-compose.yaml:docker-compose.prism.yaml' >> .env
+echo 'COMPOSE_FILE=docker-compose.yaml:docker-compose.prism.yaml' >> .env  # add :docker-compose.override.yaml before prism.yaml if you have one
 docker compose up -d
 ```
 

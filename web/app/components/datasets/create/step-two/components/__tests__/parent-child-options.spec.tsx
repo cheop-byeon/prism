@@ -161,7 +161,7 @@ describe('ParentChildOptions', () => {
       )
       // Parent's paragraph section renders first, child's second.
       expect(strategySelects).toHaveLength(2)
-      const childSelect = strategySelects[1]
+      const childSelect = strategySelects[1] as HTMLElement
 
       fireEvent.change(childSelect, { target: { value: 'semantic' } })
 

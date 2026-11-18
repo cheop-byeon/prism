@@ -251,7 +251,7 @@ _OLLAMA_PROVIDER = "langgenius/ollama/ollama"
 
 def _invoke_llm_with_retry(model_instance, usage_sink: list | None = None, **kwargs):
     from core.plugin.impl.exc import PluginInvokeError
-    from dify_graph.model_runtime.errors.invoke import InvokeError
+    from graphon.model_runtime.errors.invoke import InvokeError
 
     if model_instance.provider == _OLLAMA_PROVIDER:
         model_parameters = dict(kwargs.get("model_parameters") or {})
@@ -927,8 +927,8 @@ def _suggest_passage_questions(
     _judge_lane_discussion follows for discussion-matching.
     """
     from core.model_manager import ModelManager
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
-    from dify_graph.model_runtime.entities.model_entities import ModelType
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities.model_entities import ModelType
 
     user_prompt = (
         f"Document: {draft_name}{f' (published as RFC {rfc_number})' if rfc_number else ''}\n"
@@ -1010,8 +1010,8 @@ def _judge_lane_discussion(
     callback rather than a hardcoded dataset lookup.
     """
     from core.model_manager import ModelManager
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
-    from dify_graph.model_runtime.entities.model_entities import ModelType
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities.model_entities import ModelType
 
     for edge in lane["edges"]:
         edge["has_discussion"] = False
@@ -2621,7 +2621,7 @@ def _cite_iddiff_url(draft_name: str, from_revision: str, to_revision: str, quer
 def _verify_answer(
     draft_answer: str, evidence_log: list[str], model_instance, usage_sink: list | None = None
 ) -> str:
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
 
     if not evidence_log:
         return (
@@ -2679,7 +2679,7 @@ def _parse_claim_labels(verify_response: str) -> dict[int, str]:
 
 
 def _tool(name: str, description: str, properties: dict, required: list[str]):
-    from dify_graph.model_runtime.entities import PromptMessageTool
+    from graphon.model_runtime.entities import PromptMessageTool
 
     return PromptMessageTool(
         name=name,
@@ -3218,13 +3218,13 @@ def ask(
     default) skips this entirely; every existing caller is unaffected.
     """
     from core.model_manager import ModelManager
-    from dify_graph.model_runtime.entities import (
+    from graphon.model_runtime.entities import (
         AssistantPromptMessage,
         SystemPromptMessage,
         ToolPromptMessage,
         UserPromptMessage,
     )
-    from dify_graph.model_runtime.entities.model_entities import ModelType
+    from graphon.model_runtime.entities.model_entities import ModelType
     from extensions.ext_database import db
     from models.dataset import Dataset
 

@@ -4,19 +4,20 @@ import type { DataSourceAuth } from '@/app/components/header/account-setting/dat
 import type { DataSourceProvider, NotionPage } from '@/models/common'
 import type { CrawlOptions, CrawlResultItem, CustomFile, FileItem } from '@/models/datasets'
 import type { IetfYearPreprocessResult, UploadedConsoleFile } from '@/service/common'
+import { cn } from '@langgenius/dify-ui/cn'
+import { RiFolder6Line } from '@remixicon/react'
 import { useBoolean } from 'ahooks'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import NotionConnector from '@/app/components/base/notion-connector'
 import { NotionPageSelector } from '@/app/components/base/notion-page-selector'
-import { toast } from '@/app/components/base/ui/toast'
+import { toast } from '@langgenius/dify-ui/toast'
 import { Plan } from '@/app/components/billing/type'
 import VectorSpaceFull from '@/app/components/billing/vector-space-full'
 import { useDatasetDetailContextWithSelector } from '@/context/dataset-detail'
 import { useProviderContext } from '@/context/provider-context'
 import { DataSourceType } from '@/models/datasets'
 import { uploadIetfPreprocessedFile } from '@/service/common'
-import { cn } from '@/utils/classnames'
 import EmptyDatasetCreationModal from '../empty-dataset-creation-modal'
 import FileUploader from '../file-uploader'
 import { PROGRESS_COMPLETE } from '../file-uploader/constants'
@@ -249,7 +250,7 @@ const StepOne = ({
                   />
                   <FileUploader
                     fileList={files}
-                    titleClassName={!shouldShowDataSourceTypeList ? 'mt-[30px] !mb-[44px] !text-lg' : undefined}
+                    titleClassName={!shouldShowDataSourceTypeList ? 'mt-[30px] mb-[44px]! text-lg!' : undefined}
                     prepareFileList={updateFileList}
                     onFileListUpdate={updateFileList}
                     onFileUpdate={updateFile}

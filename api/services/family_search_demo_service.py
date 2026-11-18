@@ -135,7 +135,7 @@ def check_mail_for_answer(rfc_id: str, query: str, model_instance) -> dict:
     result gets subjected to in the real agent loop, just against
     synthetic data instead of a real Dify dataset.
     """
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
     from scripts.agentic_rag.ask_decision_agent import _invoke_llm_with_retry
 
     mail_text = _format_emails(rfc_id)
@@ -171,7 +171,7 @@ def rank_candidates(query: str, candidate_ids: list[str], model_instance) -> lis
     title+abstract -- the cheap signal available before actually checking
     each one's mail (checking mail is the expensive step this ranking
     exists to avoid doing for every candidate blindly, in order)."""
-    from dify_graph.model_runtime.entities import SystemPromptMessage, UserPromptMessage
+    from graphon.model_runtime.entities import SystemPromptMessage, UserPromptMessage
     from scripts.agentic_rag.ask_decision_agent import _invoke_llm_with_retry
 
     listing = "\n".join(
