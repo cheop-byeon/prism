@@ -22,11 +22,11 @@ pkill -f "next dev" 2>/dev/null || true
 
 if [ "$NO_BUILD" = false ]; then
   echo "Building web image..."
-  docker compose build web
+  docker compose -f docker-compose.yaml -f docker-compose.prism.yaml -f docker-compose.override.yaml build web
 fi
 
 echo "Starting all services..."
-docker compose up -d api worker worker_beat ietfdata_service weaviate web nginx
+docker compose -f docker-compose.yaml -f docker-compose.prism.yaml -f docker-compose.override.yaml up -d api worker worker_beat ietfdata_service weaviate web nginx
 
 echo "Waiting for services to be ready..."
 sleep 5

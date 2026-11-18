@@ -223,6 +223,11 @@ else
   sed -i "s|^REDIS_PASSWORD=.*|REDIS_PASSWORD=${REDIS_PASS}|" .env
   sed -i "s|^CELERY_BROKER_URL=.*|CELERY_BROKER_URL=redis://:${REDIS_PASS}@redis:6379/1|" .env
 fi
+# A bare `docker compose` (ad-hoc commands) loads the same files as the
+# scripts, with Prism's additions on top of Dify's base file.
+if ! grep -q '^COMPOSE_FILE=' .env; then
+  echo 'COMPOSE_FILE=docker-compose.yaml:docker-compose.prism.yaml:docker-compose.override.yaml' >> .env
+fi
 
 # ---------------------------------------------------------------------------
 # Phase 7 -- storage directory ownership
@@ -249,7 +254,7 @@ sudo chown -R 1001:1001 volumes/app/storage
 # inline env var instead of using --profile, to keep weaviate/postgresql
 # included alongside it.
 # ---------------------------------------------------------------------------
-COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.override.yaml)
+COMPOSE=(docker compose -f docker-compose.yaml -f docker-compose.prism.yaml -f docker-compose.override.yaml)
 
 echo ""
 echo "==> Building api, worker, worker_beat, web (several minutes)"
@@ -311,19 +316,8 @@ PARAMETER num_thread ${OLLAMA_NUM_THREAD}
 EOF
   ollama create rfc-dralign-q8 -f "${DATA_DIR}/Models/Modelfile"
 
-  echo ""
-  echo "==> Adding host.docker.internal routing to api, worker, plugin_daemon (needed to reach Ollama)"
-  for svc in api worker plugin_daemon; do
-    if ! grep -A5 "^  ${svc}:\$" docker-compose.yaml | grep -q "host.docker.internal:host-gateway"; then
-      LINE=$(grep -n "^  ${svc}:\$" docker-compose.yaml | head -1 | cut -d: -f1)
-      RESTART_LINE=$((LINE + 2))
-      awk -v n="$RESTART_LINE" 'NR==n{print; print "    extra_hosts:"; print "      - \"host.docker.internal:host-gateway\""; next} {print}' \
-        docker-compose.yaml > /tmp/dc.yaml && mv /tmp/dc.yaml docker-compose.yaml
-      echo "    added to ${svc}"
-    fi
-  done
-  "${COMPOSE[@]}" config >/dev/null
-  "${COMPOSE[@]}" up -d --no-deps api worker plugin_daemon
+  # api, worker and plugin_daemon reach Ollama at host.docker.internal,
+  # which docker-compose.prism.yaml already maps to the host.
   echo "    Register it in the console afterward: Settings -> Model Provider -> Ollama,"
   echo "    base_url http://host.docker.internal:11434, model rfc-dralign-q8 (Text Embedding, 4096 dims)."
 fi

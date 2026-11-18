@@ -1,3 +1,4 @@
+/* eslint-disable next/no-img-element */
 import type { ExtraProps } from 'streamdown'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'

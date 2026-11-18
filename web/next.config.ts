@@ -4,23 +4,17 @@ import { codeInspectorPlugin } from 'code-inspector-plugin'
 import { env } from './env'
 
 const isDev = process.env.NODE_ENV === 'development'
-const enableCodeInspector = process.env.NEXT_PUBLIC_ENABLE_CODE_INSPECTOR === 'true'
 const withMDX = createMDX()
-
-const turbopackConfig: NonNullable<NextConfig['turbopack']> = {
-  root: process.cwd(),
-}
-
-if (isDev && enableCodeInspector) {
-  turbopackConfig.rules = codeInspectorPlugin({
-    bundler: 'turbopack',
-  })
-}
 
 const nextConfig: NextConfig = {
   basePath: env.NEXT_PUBLIC_BASE_PATH,
   transpilePackages: ['@t3-oss/env-core', '@t3-oss/env-nextjs', 'echarts', 'zrender'],
-  turbopack: turbopackConfig,
+  turbopack: {
+    root: process.cwd(),
+    rules: codeInspectorPlugin({
+      bundler: 'turbopack',
+    }),
+  },
   productionBrowserSourceMaps: false, // enable browser source map generation during the production build
   // Configure pageExtensions to include md and mdx
   pageExtensions: ['ts', 'tsx', 'js', 'jsx', 'md', 'mdx'],
