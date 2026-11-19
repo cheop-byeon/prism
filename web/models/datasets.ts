@@ -1,13 +1,18 @@
+import type { TagResponse as Tag } from '@dify/contracts/api/console/tags/types.gen'
 import type { DataSourceNotionPage, DataSourceProvider } from './common'
 import type { DatasourceType } from './pipeline'
 import type { IndexingType } from '@/app/components/datasets/create/step-two'
 import type { MetadataItemWithValue } from '@/app/components/datasets/metadata/types'
 import type { MetadataFilteringVariableType } from '@/app/components/workflow/nodes/knowledge-retrieval/types'
-import type { Tag } from '@/contract/console/tags'
 import type { AppIconType, AppModeEnum, RetrievalConfig, TransferMethod } from '@/types/app'
 import type { SegmentImportStatus } from '@/types/dataset'
-import type { I18nKeysByPrefix } from '@/types/i18n'
-import { ExternalKnowledgeBase, General, ParentChild, Qa } from '@/app/components/base/icons/src/public/knowledge/dataset-card'
+import type { I18nKeysByPrefix, I18nKeysWithPrefix } from '@/types/i18n'
+import {
+  ExternalKnowledgeBase,
+  General,
+  ParentChild,
+  Qa,
+} from '@/app/components/base/icons/src/public/knowledge/dataset-card'
 import { PermissionLevel } from './permission'
 
 export enum DataSourceType {
@@ -111,7 +116,7 @@ export type ExternalAPIItem = {
     endpoint: string
     api_key: string
   }
-  dataset_bindings: { id: string, name: string }[]
+  dataset_bindings: { id: string; name: string }[]
   created_by: string
   created_at: string
 }
@@ -237,7 +242,7 @@ type IndexingEstimateResponse = {
   total_price: number
   currency: string
   total_segments: number
-  preview: Array<{ content: string, child_chunks: string[], summary?: string }>
+  preview: Array<{ content: string; child_chunks: string[]; summary?: string }>
   qa_preview?: QA[]
 }
 
@@ -301,35 +306,35 @@ type Segmentation = {
   strategy_params?: Record<string, unknown>
 }
 
-export type CustomChunkStrategy
-  = | 'recursive'
-    | 'paragraph'
-    | 'sentence'
-    | 'markdown'
-    | 'html'
-    | 'json'
-    | 'code'
-    | 'latex'
-    | 'token'
-    | 'semantic'
+export type CustomChunkStrategy =
+  | 'recursive'
+  | 'paragraph'
+  | 'sentence'
+  | 'markdown'
+  | 'html'
+  | 'json'
+  | 'code'
+  | 'latex'
+  | 'token'
+  | 'semantic'
 
-export type LlamaIndexChunkStrategy
-  = | 'li_sentence'
-    | 'li_token'
-    | 'li_fixed'
-    | 'li_semantic'
-    | 'li_markdown'
-    | 'li_html'
-    | 'li_code'
+export type LlamaIndexChunkStrategy =
+  | 'li_sentence'
+  | 'li_token'
+  | 'li_fixed'
+  | 'li_semantic'
+  | 'li_markdown'
+  | 'li_html'
+  | 'li_code'
 
-export type LangChainChunkStrategy
-  = | 'lc_recursive'
-    | 'lc_character'
-    | 'lc_token'
-    | 'lc_markdown_header'
-    | 'lc_html_header'
-    | 'lc_semantic'
-    | 'lc_python'
+export type LangChainChunkStrategy =
+  | 'lc_recursive'
+  | 'lc_character'
+  | 'lc_token'
+  | 'lc_markdown_header'
+  | 'lc_html_header'
+  | 'lc_semantic'
+  | 'lc_python'
 
 export type ChunkStrategy = CustomChunkStrategy | LlamaIndexChunkStrategy | LangChainChunkStrategy
 
@@ -409,10 +414,8 @@ export function getStrategyCategory(strategy: ChunkStrategy): StrategyCategory {
 }
 
 export function getStrategyProvider(strategy: ChunkStrategy): StrategyProvider {
-  if ((LLAMAINDEX_STRATEGIES as ChunkStrategy[]).includes(strategy))
-    return 'llamaindex'
-  if ((LANGCHAIN_STRATEGIES as ChunkStrategy[]).includes(strategy))
-    return 'langchain'
+  if ((LLAMAINDEX_STRATEGIES as ChunkStrategy[]).includes(strategy)) return 'llamaindex'
+  if ((LANGCHAIN_STRATEGIES as ChunkStrategy[]).includes(strategy)) return 'langchain'
   return 'custom'
 }
 
@@ -423,7 +426,7 @@ export type StrategyParamType = 'int' | 'float' | 'string' | 'select'
 export type StrategyParamSchema = {
   key: string
   type: StrategyParamType
-  labelKey: string
+  labelKey: I18nKeysWithPrefix<'datasetCreation', 'stepTwo.'>
   defaultValue: number | string
   required: boolean
   options?: string[]
@@ -439,60 +442,176 @@ export const STRATEGY_PARAM_SCHEMAS: Partial<Record<ChunkStrategy, StrategySchem
   // LlamaIndex
   li_sentence: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
-      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1024,
+        required: true,
+        min: 1,
+      },
+      {
+        key: 'chunk_overlap',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkOverlap',
+        defaultValue: 200,
+        required: false,
+        min: 0,
+      },
     ],
   },
   li_token: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
-      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 20, required: false, min: 0 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1024,
+        required: true,
+        min: 1,
+      },
+      {
+        key: 'chunk_overlap',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkOverlap',
+        defaultValue: 20,
+        required: false,
+        min: 0,
+      },
     ],
   },
   li_fixed: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1024,
+        required: true,
+        min: 1,
+      },
     ],
   },
   li_semantic: {
     params: [
-      { key: 'buffer_size', type: 'int', labelKey: 'stepTwo.paramBufferSize', defaultValue: 1, required: false, min: 1 },
-      { key: 'breakpoint_percentile', type: 'int', labelKey: 'stepTwo.paramBreakpointPercentile', defaultValue: 95, required: false, min: 1, max: 100 },
+      {
+        key: 'buffer_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramBufferSize',
+        defaultValue: 1,
+        required: false,
+        min: 1,
+      },
+      {
+        key: 'breakpoint_percentile',
+        type: 'int',
+        labelKey: 'stepTwo.paramBreakpointPercentile',
+        defaultValue: 95,
+        required: false,
+        min: 1,
+        max: 100,
+      },
     ],
   },
   li_markdown: { params: [] },
   li_html: { params: [] },
   li_code: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1024, required: true, min: 1 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1024,
+        required: true,
+        min: 1,
+      },
       {
         key: 'language',
         type: 'select',
         labelKey: 'stepTwo.paramLanguage',
         defaultValue: 'python',
         required: true,
-        options: ['python', 'javascript', 'typescript', 'java', 'c', 'cpp', 'go', 'rust', 'ruby', 'php'],
+        options: [
+          'python',
+          'javascript',
+          'typescript',
+          'java',
+          'c',
+          'cpp',
+          'go',
+          'rust',
+          'ruby',
+          'php',
+        ],
       },
     ],
   },
   // LangChain
   lc_recursive: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
-      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1000,
+        required: true,
+        min: 1,
+      },
+      {
+        key: 'chunk_overlap',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkOverlap',
+        defaultValue: 200,
+        required: false,
+        min: 0,
+      },
     ],
   },
   lc_character: {
     params: [
-      { key: 'separator', type: 'string', labelKey: 'stepTwo.delimiter', defaultValue: '\\n\\n', required: false },
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
-      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+      {
+        key: 'separator',
+        type: 'string',
+        labelKey: 'stepTwo.separator',
+        defaultValue: '\\n\\n',
+        required: false,
+      },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1000,
+        required: true,
+        min: 1,
+      },
+      {
+        key: 'chunk_overlap',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkOverlap',
+        defaultValue: 200,
+        required: false,
+        min: 0,
+      },
     ],
   },
   lc_token: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
-      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 0, required: false, min: 0 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1000,
+        required: true,
+        min: 1,
+      },
+      {
+        key: 'chunk_overlap',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkOverlap',
+        defaultValue: 0,
+        required: false,
+        min: 0,
+      },
     ],
   },
   lc_markdown_header: { params: [] },
@@ -507,26 +626,47 @@ export const STRATEGY_PARAM_SCHEMAS: Partial<Record<ChunkStrategy, StrategySchem
         required: false,
         options: ['percentile', 'standard_deviation', 'interquartile', 'gradient'],
       },
-      { key: 'breakpoint_threshold_amount', type: 'float', labelKey: 'stepTwo.paramBreakpointThresholdAmount', defaultValue: 95, required: false, min: 0 },
+      {
+        key: 'breakpoint_threshold_amount',
+        type: 'float',
+        labelKey: 'stepTwo.paramBreakpointThresholdAmount',
+        defaultValue: 95,
+        required: false,
+        min: 0,
+      },
     ],
   },
   lc_python: {
     params: [
-      { key: 'chunk_size', type: 'int', labelKey: 'stepTwo.paramChunkSize', defaultValue: 1000, required: true, min: 1 },
-      { key: 'chunk_overlap', type: 'int', labelKey: 'stepTwo.paramChunkOverlap', defaultValue: 200, required: false, min: 0 },
+      {
+        key: 'chunk_size',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkSize',
+        defaultValue: 1000,
+        required: true,
+        min: 1,
+      },
+      {
+        key: 'chunk_overlap',
+        type: 'int',
+        labelKey: 'stepTwo.paramChunkOverlap',
+        defaultValue: 200,
+        required: false,
+        min: 0,
+      },
     ],
   },
 }
 
-export type DocumentIndexingStatus
-  = | 'waiting'
-    | 'parsing'
-    | 'cleaning'
-    | 'splitting'
-    | 'indexing'
-    | 'paused'
-    | 'error'
-    | 'completed'
+export type DocumentIndexingStatus =
+  | 'waiting'
+  | 'parsing'
+  | 'cleaning'
+  | 'splitting'
+  | 'indexing'
+  | 'paused'
+  | 'error'
+  | 'completed'
 
 export const DisplayStatusList = [
   'queuing',
@@ -539,7 +679,7 @@ export const DisplayStatusList = [
   'archived',
 ] as const
 
-export type DocumentDisplayStatus = typeof DisplayStatusList[number]
+export type DocumentDisplayStatus = (typeof DisplayStatusList)[number]
 
 export type LegacyDataSourceInfo = {
   upload_file: {
@@ -605,7 +745,12 @@ export type UploadFileIdInfo = {
   upload_file_id: string
 }
 
-export type DataSourceInfo = LegacyDataSourceInfo | LocalFileInfo | OnlineDocumentInfo | WebsiteCrawlInfo | UploadFileIdInfo
+export type DataSourceInfo =
+  | LegacyDataSourceInfo
+  | LocalFileInfo
+  | OnlineDocumentInfo
+  | WebsiteCrawlInfo
+  | UploadFileIdInfo
 
 type InitialDocumentDetail = {
   id: string
@@ -670,9 +815,10 @@ export type CreateDocumentReq = DocumentReq & {
   keyword_store?: 'bm25' | 'jieba'
 }
 
-export type IndexingEstimateParams = DocumentReq & Partial<DataSource> & {
-  dataset_id: string
-}
+export type IndexingEstimateParams = DocumentReq &
+  Partial<DataSource> & {
+    dataset_id: string
+  }
 
 type DataSource = {
   type: DataSourceType
@@ -746,14 +892,14 @@ type DocMetadata = {
   [key: string]: string
 }
 
-type CustomizableDocType
-  = | 'book'
-    | 'web_page'
-    | 'paper'
-    | 'social_media_post'
-    | 'personal_document'
-    | 'business_document'
-    | 'im_chat_log'
+type CustomizableDocType =
+  | 'book'
+  | 'web_page'
+  | 'paper'
+  | 'social_media_post'
+  | 'personal_document'
+  | 'business_document'
+  | 'im_chat_log'
 type FixedDocType = 'synced_from_github' | 'synced_from_notion' | 'wikipedia_entry'
 export type DocType = CustomizableDocType | FixedDocType
 
@@ -1012,7 +1158,10 @@ export type BatchImportResponse = {
   job_status: SegmentImportStatus
 }
 
-export const DOC_FORM_ICON_WITH_BG: Record<ChunkingMode | 'external', React.ComponentType<{ className: string }>> = {
+export const DOC_FORM_ICON_WITH_BG: Record<
+  ChunkingMode | 'external',
+  React.ComponentType<{ className: string }>
+> = {
   [ChunkingMode.text]: General,
   [ChunkingMode.qa]: Qa,
   [ChunkingMode.parentChild]: ParentChild,

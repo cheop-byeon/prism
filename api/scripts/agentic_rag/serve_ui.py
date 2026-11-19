@@ -552,6 +552,7 @@ def _authenticate_console_request(request):
     """
     from werkzeug.exceptions import Unauthorized
 
+    from extensions.ext_database import db
     from libs.passport import PassportService
     from libs.token import extract_access_token
     from services.account_service import AccountService
@@ -568,7 +569,7 @@ def _authenticate_console_request(request):
     user_id = decoded.get("user_id")
     if not user_id:
         return None
-    return AccountService.load_logged_in_account(account_id=user_id)
+    return AccountService.load_logged_in_account(account_id=user_id, session=db.session())
 
 
 # Formerly gated every mail-sync/draft-download/local-sync/topic-pull route
@@ -632,9 +633,9 @@ def _tenant_has_custom_credential(tenant_id: str, provider: str) -> bool:
     create_provider_credential has actually validated and stored one;
     never a claim this session invents on its own.
     """
-    from core.provider_manager import ProviderManager
+    from core.plugin.impl.model_runtime_factory import create_plugin_provider_manager
 
-    configuration = ProviderManager().get_configurations(tenant_id).get(provider)
+    configuration = create_plugin_provider_manager(tenant_id=tenant_id).get_configurations(tenant_id).get(provider)
     return configuration is not None and configuration.is_custom_configuration_available()
 
 
@@ -756,6 +757,7 @@ def main() -> None:
                     name=normalized_email,
                     password=password,
                     interface_language=languages[0],
+                    session=db.session(),
                 )
             except AccountRegisterError:
                 return jsonify(
@@ -766,7 +768,9 @@ def main() -> None:
                         )
                     }
                 ), 400
-            token_pair = AccountService.login(account=account, ip_address=extract_remote_ip(request))
+            token_pair = AccountService.login(
+                account=account, session=db.session(), ip_address=extract_remote_ip(request)
+            )
             AccountService.reset_login_error_rate_limit(normalized_email)
 
         response = make_response(jsonify({"result": "success"}))
@@ -827,7 +831,7 @@ def main() -> None:
         picker always shows and pre-selects whatever model would actually
         run right now for this specific viewer.
         """
-        from core.provider_manager import ProviderManager
+        from core.plugin.impl.model_runtime_factory import create_plugin_provider_manager
         from graphon.model_runtime.entities.model_entities import ModelType
         from services.agentic_rag_session_service import get_data_tenant_id, get_owned_tenant_id
 
@@ -838,21 +842,22 @@ def main() -> None:
         # theoretical case of an account with no tenant join row at all.
         owned_tenant_id = get_owned_tenant_id(g.account) or admin_tenant_id
 
-        active_models = ProviderManager().get_configurations(owned_tenant_id).get_models(
+        provider_manager = create_plugin_provider_manager(tenant_id=owned_tenant_id)
+        active_models = provider_manager.get_configurations(owned_tenant_id).get_models(
             model_type=ModelType.LLM, only_active=True
         )
         entries: dict[tuple[str, str], dict] = {
             (m.provider.provider, m.model): {
                 "provider": m.provider.provider,
-                "provider_label": m.provider.label.en_US,
+                "provider_label": m.provider.label.en_us,
                 "model": m.model,
-                "label": m.label.en_US,
+                "label": m.label.en_us,
                 "byok": owned_tenant_id != admin_tenant_id,
             }
             for m in active_models
         }
 
-        default_model_entity = ProviderManager().get_default_model(tenant_id=owned_tenant_id, model_type=ModelType.LLM)
+        default_model_entity = provider_manager.get_default_model(tenant_id=owned_tenant_id, model_type=ModelType.LLM)
         default_entry = (
             {"provider": default_model_entity.provider.provider, "model": default_model_entity.model}
             if default_model_entity
@@ -2532,7 +2537,7 @@ def main() -> None:
         from services.agentic_rag_session_service import get_data_tenant_id
 
         tenant_id = get_data_tenant_id()
-        return ModelManager().get_model_instance(
+        return ModelManager.for_tenant(tenant_id=tenant_id).get_model_instance(
             tenant_id=tenant_id,
             provider="",
             model_type=ModelType.LLM,

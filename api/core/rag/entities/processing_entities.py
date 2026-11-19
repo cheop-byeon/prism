@@ -1,7 +1,7 @@
 from enum import StrEnum
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, WithJsonSchema
+from pydantic import AliasChoices, BaseModel, Field, WithJsonSchema
 
 
 class ParentMode(StrEnum):
@@ -29,7 +29,14 @@ class Segmentation(BaseModel):
     # Prism: separator and max_tokens are optional because boundary and
     # framework chunk strategies (see core.rag.splitter.chunk_strategy) don't
     # split by size.
-    separator: str | None = Field(default=None, description="Custom separator for splitting text.")
+    # TODO: there are internally mismatched / inconsistent naming
+    # between `separator` and `delimiter` across the codebase.
+    # Taking `separator` as the canonical.
+    separator: str | None = Field(
+        default=None,
+        description="Custom separator for splitting text.",
+        validation_alias=AliasChoices("separator", "delimiter"),
+    )
     max_tokens: int | None = Field(default=None, description="Maximum token count per chunk.")
     chunk_overlap: int | None = Field(default=None, description="Token overlap between chunks.")
     chunk_strategy: str = "recursive"

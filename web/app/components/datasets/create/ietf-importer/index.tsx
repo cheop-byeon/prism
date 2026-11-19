@@ -14,14 +14,20 @@ import type {
   IetfYearPreprocessResult,
   UploadedConsoleFile,
 } from '@/service/common'
+import { Button } from '@langgenius/dify-ui/button'
+import {
+  Dialog,
+  DialogCloseButton,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from '@langgenius/dify-ui/dialog'
+import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
+import { toast } from '@langgenius/dify-ui/toast'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@langgenius/dify-ui/tooltip'
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Button } from '@langgenius/dify-ui/button'
 import Input from '@/app/components/base/input'
-import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitle } from '@langgenius/dify-ui/dialog'
-import { toast } from '@langgenius/dify-ui/toast'
-import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@langgenius/dify-ui/tooltip'
 import {
   downloadAndPreprocessMailarchiveYears,
   fetchGithubImportStatus,
@@ -122,12 +128,9 @@ const trimOrUndefined = (value: string) => {
 
 const normalizeRfcToken = (value: string): string => {
   const trimmed = value.trim()
-  if (!trimmed)
-    return ''
-  if (/^\d+$/.test(trimmed))
-    return `RFC${trimmed}`
-  if (/^rfc\d+$/i.test(trimmed))
-    return `RFC${trimmed.slice(3)}`
+  if (!trimmed) return ''
+  if (/^\d+$/.test(trimmed)) return `RFC${trimmed}`
+  if (/^rfc\d+$/i.test(trimmed)) return `RFC${trimmed.slice(3)}`
   return trimmed
 }
 
@@ -137,40 +140,33 @@ const getCurrentRfcQuery = (value: string): string => {
 
 const isNoResultsMessage = (message: string) => /No messages matched/i.test(message)
 
-const isFileTooLargeMessage = (message: string) => /file too large|file size exceeded|maximum is \d+mb|filetoolarge|max(?:imum)? file size/i.test(message)
+const isFileTooLargeMessage = (message: string) =>
+  /file too large|file size exceeded|maximum is \d+mb|filetoolarge|max(?:imum)? file size/i.test(
+    message,
+  )
 
 const extractErrorMessage = async (error: unknown): Promise<string> => {
-  if (error instanceof Error && error.message)
-    return error.message
+  if (error instanceof Error && error.message) return error.message
 
-  if (typeof error === 'string')
-    return error
+  if (typeof error === 'string') return error
 
   if (error instanceof Response) {
     try {
-      const data = await error.clone().json() as { message?: unknown, detail?: unknown }
-      if (typeof data.message === 'string' && data.message)
-        return data.message
-      if (typeof data.detail === 'string' && data.detail)
-        return data.detail
-    }
-    catch {
+      const data = (await error.clone().json()) as { message?: unknown; detail?: unknown }
+      if (typeof data.message === 'string' && data.message) return data.message
+      if (typeof data.detail === 'string' && data.detail) return data.detail
+    } catch {
       try {
         const text = await error.clone().text()
-        if (text)
-          return text
-      }
-      catch {
-      }
+        if (text) return text
+      } catch {}
     }
   }
 
   if (error && typeof error === 'object') {
-    const maybeError = error as { message?: unknown, detail?: unknown }
-    if (typeof maybeError.message === 'string' && maybeError.message)
-      return maybeError.message
-    if (typeof maybeError.detail === 'string' && maybeError.detail)
-      return maybeError.detail
+    const maybeError = error as { message?: unknown; detail?: unknown }
+    if (typeof maybeError.message === 'string' && maybeError.message) return maybeError.message
+    if (typeof maybeError.detail === 'string' && maybeError.detail) return maybeError.detail
   }
 
   return ''
@@ -196,7 +192,8 @@ function IetfImporter({
   const [mode, setMode] = useState<IetfImportMode>('mailarchive')
   const [githubForm, setGithubForm] = useState<GithubFormState>(() => ({
     ...DEFAULT_GITHUB_FORM,
-    githubToken: (typeof window !== 'undefined' ? localStorage.getItem(GITHUB_TOKEN_STORAGE_KEY) : null) ?? '',
+    githubToken:
+      (typeof window !== 'undefined' ? localStorage.getItem(GITHUB_TOKEN_STORAGE_KEY) : null) ?? '',
   }))
   const [showWgDropdown, setShowWgDropdown] = useState(false)
   const [showDraftDropdown, setShowDraftDropdown] = useState(false)
@@ -226,7 +223,9 @@ function IetfImporter({
   const [selectedDraftVersion, setSelectedDraftVersion] = useState<number | null>(null)
   const [isImportingEvolution, setIsImportingEvolution] = useState(false)
   const [isImportingAnnotatedRfc, setIsImportingAnnotatedRfc] = useState(false)
-  const [preprocessResults, setPreprocessResults] = useState<IetfYearPreprocessResult[] | null>(null)
+  const [preprocessResults, setPreprocessResults] = useState<IetfYearPreprocessResult[] | null>(
+    null,
+  )
   const [selectedPreprocessYears, setSelectedPreprocessYears] = useState<number[]>([])
   const [availableFormats, setAvailableFormats] = useState<IetfFormatInfo[]>([])
   const [selectedFormat, setSelectedFormat] = useState<string>('txt')
@@ -242,7 +241,7 @@ function IetfImporter({
   const rfcDropdownRef = useRef<HTMLDivElement>(null)
   const dropdownRef = mailingListDropdownRef
   const selectedPreprocessResults = useMemo(
-    () => preprocessResults?.filter(item => selectedPreprocessYears.includes(item.year)) ?? [],
+    () => preprocessResults?.filter((item) => selectedPreprocessYears.includes(item.year)) ?? [],
     [preprocessResults, selectedPreprocessYears],
   )
 
@@ -252,7 +251,10 @@ function IetfImporter({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (mailingListDropdownRef.current && !mailingListDropdownRef.current.contains(event.target as Node))
+      if (
+        mailingListDropdownRef.current &&
+        !mailingListDropdownRef.current.contains(event.target as Node)
+      )
         setShowMailingListDropdown(false)
       if (wgDocDropdownRef.current && !wgDocDropdownRef.current.contains(event.target as Node))
         setShowWgDocDropdown(false)
@@ -268,13 +270,11 @@ function IetfImporter({
       try {
         const result = await fetchIetfMailingLists()
         setAvailableMailingLists(result.lists)
-      }
-      catch (error) {
+      } catch (error) {
         console.error('Failed to fetch mailing lists:', error)
       }
     }
-    if (open)
-      loadMailingLists()
+    if (open) loadMailingLists()
   }, [open])
 
   // Fetch I-D/RFC documents for the selected WG
@@ -287,24 +287,20 @@ function IetfImporter({
       setWgDocRelations(null)
       setWgDocRelationsLoading(false)
     })
-    if (!wg || mode !== 'mailarchive')
-      return
+    if (!wg || mode !== 'mailarchive') return
 
     let cancelled = false
     startTransition(() => setWgDocumentsLoading(true))
 
     fetchIetfWgDocuments(wg)
       .then((result) => {
-        if (!cancelled)
-          setWgDocuments(result.documents)
+        if (!cancelled) setWgDocuments(result.documents)
       })
       .catch(() => {
-        if (!cancelled)
-          setWgDocuments([])
+        if (!cancelled) setWgDocuments([])
       })
       .finally(() => {
-        if (!cancelled)
-          setWgDocumentsLoading(false)
+        if (!cancelled) setWgDocumentsLoading(false)
       })
 
     return () => {
@@ -332,18 +328,15 @@ function IetfImporter({
       setSyncStatus('checking')
       try {
         const result = await fetchIetfMailarchiveSyncStatus(listName)
-        if (cancelled)
-          return
+        if (cancelled) return
         setSyncStatus(result.status)
         setSyncMessageCount(result.message_count ?? 0)
         if (result.status === 'ready' && syncPollRef.current) {
           clearInterval(syncPollRef.current)
           syncPollRef.current = null
         }
-      }
-      catch {
-        if (!cancelled)
-          setSyncStatus(null)
+      } catch {
+        if (!cancelled) setSyncStatus(null)
       }
     }
 
@@ -369,11 +362,9 @@ function IetfImporter({
     }
 
     const listName = mailarchiveForm.mailingList.trim()
-    if (!listName)
-      return
+    if (!listName) return
 
-    if (syncPollRef.current)
-      return // already polling
+    if (syncPollRef.current) return // already polling
 
     syncPollRef.current = setInterval(async () => {
       try {
@@ -384,8 +375,7 @@ function IetfImporter({
           clearInterval(syncPollRef.current)
           syncPollRef.current = null
         }
-      }
-      catch {
+      } catch {
         // ignore transient errors during polling
       }
     }, 10000)
@@ -396,12 +386,11 @@ function IetfImporter({
         syncPollRef.current = null
       }
     }
-  // eslint-disable-next-line react/exhaustive-deps
+    // eslint-disable-next-line react/exhaustive-deps
   }, [syncStatus])
 
   useEffect(() => {
-    if (!open || mode !== 'rfcs')
-      return
+    if (!open || mode !== 'rfcs') return
 
     const query = getCurrentRfcQuery(rfcForm.rfcId)
 
@@ -409,8 +398,7 @@ function IetfImporter({
       try {
         const result = await fetchIetfRfcSuggestions({ query, limit: 20 })
         setRfcSuggestions(result.suggestions)
-      }
-      catch {
+      } catch {
         setRfcSuggestions([])
       }
     }, 250)
@@ -419,8 +407,7 @@ function IetfImporter({
   }, [mode, open, rfcForm.rfcId])
 
   const availableDraftVersions = useMemo(() => {
-    if (!selectedRfc)
-      return []
+    if (!selectedRfc) return []
     if (selectedRfc.draft_versions?.length)
       return [...selectedRfc.draft_versions].sort((a, b) => a.version - b.version)
     if (selectedRfc.draft_base_name && selectedRfc.draft_max_version != null) {
@@ -435,13 +422,12 @@ function IetfImporter({
   }, [selectedRfc])
 
   const selectedDraftMetadata = useMemo(
-    () => availableDraftVersions.find(item => item.version === selectedDraftVersion) ?? null,
+    () => availableDraftVersions.find((item) => item.version === selectedDraftVersion) ?? null,
     [availableDraftVersions, selectedDraftVersion],
   )
 
   useEffect(() => {
-    if (!selectedRfc)
-      return
+    if (!selectedRfc) return
 
     const fetchFormats = async () => {
       setIsFetchingFormats(true)
@@ -450,23 +436,24 @@ function IetfImporter({
       try {
         if (importType === 'draft' && selectedDraftMetadata) {
           const result = await fetchIetfDraftFormats(selectedDraftMetadata.name)
-          const formats = result.formats.length ? result.formats : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
+          const formats = result.formats.length
+            ? result.formats
+            : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
           setAvailableFormats(formats)
           setSelectedFormat(formats[0]?.key ?? 'txt')
-        }
-        else if (importType === 'rfc') {
+        } else if (importType === 'rfc') {
           const result = await fetchIetfRfcFormats(selectedRfc.doc_id)
-          const formats = result.formats.length ? result.formats : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
+          const formats = result.formats.length
+            ? result.formats
+            : [{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }]
           setAvailableFormats(formats)
           setSelectedFormat(formats[0]?.key ?? 'txt')
         }
-      }
-      catch {
-        toast.error(t('stepOne.ietf.docFormatFetchError', { ns: 'datasetCreation' }))
+      } catch {
+        toast.error(t(($) => $['stepOne.ietf.docFormatFetchError'], { ns: 'datasetCreation' }))
         setAvailableFormats([{ key: 'txt', label: 'Plain Text', mime_type: 'text/plain' }])
         setSelectedFormat('txt')
-      }
-      finally {
+      } finally {
         setIsFetchingFormats(false)
       }
     }
@@ -475,8 +462,7 @@ function IetfImporter({
   }, [selectedRfc, importType, selectedDraftMetadata, t])
 
   const selectedMetadata = useMemo(() => {
-    if (!selectedRfc)
-      return null
+    if (!selectedRfc) return null
     if (importType === 'draft' && selectedDraftMetadata) {
       return {
         since: selectedDraftMetadata.since,
@@ -499,8 +485,7 @@ function IetfImporter({
   }, [importType, selectedDraftMetadata, selectedRfc])
 
   const fileLimit = useMemo(() => {
-    if (!supportBatchUpload)
-      return 1
+    if (!supportBatchUpload) return 1
     return Math.max(fileUploadConfig?.file_upload_limit ?? 5, IETF_IMPORT_FILE_LIMIT)
   }, [fileUploadConfig?.file_upload_limit, supportBatchUpload])
 
@@ -508,21 +493,21 @@ function IetfImporter({
   const openDisabled = disabled || isLimitReached
 
   const closeDialog = () => {
-    if (isSubmitting)
-      return
+    if (isSubmitting) return
     setOpen(false)
   }
 
   const handleImportedFile = (file: UploadedConsoleFile) => {
     onFileListUpdate([...fileList, toFileItem(file)])
-    toast.success(t('stepOne.ietf.importSuccess', { ns: 'datasetCreation', fileName: file.name }))
+    toast.success(
+      t(($) => $['stepOne.ietf.importSuccess'], { ns: 'datasetCreation', fileName: file.name }),
+    )
     setOpen(false)
   }
 
   // Poll GitHub background job status every 2 s while running/pending
   useEffect(() => {
-    if (!githubJobId)
-      return
+    if (!githubJobId) return
     const poll = async () => {
       try {
         const state = await fetchGithubImportStatus(githubJobId)
@@ -534,25 +519,20 @@ function IetfImporter({
           }
           localStorage.removeItem(GITHUB_JOB_STORAGE_KEY)
           setIsSubmitting(false)
-          if (state.file)
-            handleImportedFile(state.file)
-        }
-        else if (state.status === 'error') {
+          if (state.file) handleImportedFile(state.file)
+        } else if (state.status === 'error') {
           if (githubPollRef.current) {
             clearInterval(githubPollRef.current)
             githubPollRef.current = null
           }
-          if (!state.resumable)
-            localStorage.removeItem(GITHUB_JOB_STORAGE_KEY)
+          if (!state.resumable) localStorage.removeItem(GITHUB_JOB_STORAGE_KEY)
           setIsSubmitting(false)
         }
-      }
-      catch {
+      } catch {
         // ignore transient poll errors
       }
     }
-    if (githubPollRef.current)
-      clearInterval(githubPollRef.current)
+    if (githubPollRef.current) clearInterval(githubPollRef.current)
     poll()
     githubPollRef.current = setInterval(poll, 2000)
     return () => {
@@ -561,18 +541,16 @@ function IetfImporter({
         githubPollRef.current = null
       }
     }
-  // eslint-disable-next-line react/exhaustive-deps
+    // eslint-disable-next-line react/exhaustive-deps
   }, [githubJobId])
 
   // Auto-reconnect: when the dialog opens on the GitHub tab, check localStorage for a
   // previously started job and resume polling it if it is still active.
   useEffect(() => {
-    if (!open || mode !== 'github' || githubJobId)
-      return
+    if (!open || mode !== 'github' || githubJobId) return
     try {
       const saved = localStorage.getItem(GITHUB_JOB_STORAGE_KEY)
-      if (!saved)
-        return
+      if (!saved) return
       const { job_id } = JSON.parse(saved) as { job_id: string }
       if (job_id) {
         startTransition(() => {
@@ -580,22 +558,21 @@ function IetfImporter({
           setIsSubmitting(true)
         })
       }
-    }
-    catch {
+    } catch {
       // ignore corrupt localStorage entry
     }
-  // eslint-disable-next-line react/exhaustive-deps
+    // eslint-disable-next-line react/exhaustive-deps
   }, [open, mode])
 
   const handleRequestError = async (error: unknown) => {
-    const fallbackMessage = t('stepOne.ietf.importFailed', { ns: 'datasetCreation' })
+    const fallbackMessage = t(($) => $['stepOne.ietf.importFailed'], { ns: 'datasetCreation' })
     const parsedMessage = await extractErrorMessage(error)
     if (isNoResultsMessage(parsedMessage)) {
-      toast.error(t('stepOne.ietf.importNoResults', { ns: 'datasetCreation' }))
+      toast.error(t(($) => $['stepOne.ietf.importNoResults'], { ns: 'datasetCreation' }))
       return
     }
     if (isFileTooLargeMessage(parsedMessage)) {
-      toast.error(t('stepOne.ietf.importFileTooLarge', { ns: 'datasetCreation' }))
+      toast.error(t(($) => $['stepOne.ietf.importFileTooLarge'], { ns: 'datasetCreation' }))
       return
     }
     const errorMessage = parsedMessage || fallbackMessage
@@ -604,8 +581,7 @@ function IetfImporter({
 
   const buildKeyword = (doc: IetfWgDocument, relations: IetfDraftRelations): string => {
     const parts = [doc.name, ...relations.replaces, ...relations.replaced_by]
-    if (doc.rfc_number)
-      parts.push(`RFC${doc.rfc_number}`)
+    if (doc.rfc_number) parts.push(`RFC${doc.rfc_number}`)
     return [...new Set(parts)].join(' OR ')
   }
 
@@ -615,7 +591,7 @@ function IetfImporter({
       updates.sentAfter = `${relations.first_rev_date.split('T')[0]}T00:00:00`
     if (relations.last_rev_date)
       updates.sentBefore = `${relations.last_rev_date.split('T')[0]}T23:59:59`
-    setMailarchiveForm(prev => ({ ...prev, ...updates }))
+    setMailarchiveForm((prev) => ({ ...prev, ...updates }))
   }
 
   const handleWgDocSelect = (doc: IetfWgDocument) => {
@@ -633,34 +609,37 @@ function IetfImporter({
     }
 
     setWgDocRelations(null)
-    setMailarchiveForm(prev => ({ ...prev, subject: doc.name }))
+    setMailarchiveForm((prev) => ({ ...prev, subject: doc.name }))
 
     setWgDocRelationsLoading(true)
     fetchIetfDraftRelations(doc.name)
       .then((result) => {
         wgDocRelationsCacheRef.current.set(doc.name, result)
         setWgDocRelations(result)
-        if (keywordAutoFilledRef.current)
-          applyRelations(doc, result)
+        if (keywordAutoFilledRef.current) applyRelations(doc, result)
       })
-      .catch(() => setWgDocRelations({ replaces: [], replaced_by: [], first_rev_date: null, last_rev_date: null }))
+      .catch(() =>
+        setWgDocRelations({
+          replaces: [],
+          replaced_by: [],
+          first_rev_date: null,
+          last_rev_date: null,
+        }),
+      )
       .finally(() => setWgDocRelationsLoading(false))
   }
 
   const handleStartSync = async () => {
     const listName = mailarchiveForm.mailingList.trim()
-    if (!listName)
-      return
+    if (!listName) return
     setIsTriggeringSync(true)
     try {
       await triggerIetfMailarchiveSync(listName)
       setSyncStatus('syncing')
-    }
-    catch (error) {
+    } catch (error) {
       const msg = await extractErrorMessage(error)
-      toast.error(msg || t('stepOne.ietf.importFailed', { ns: 'datasetCreation' }))
-    }
-    finally {
+      toast.error(msg || t(($) => $['stepOne.ietf.importFailed'], { ns: 'datasetCreation' }))
+    } finally {
       setIsTriggeringSync(false)
     }
   }
@@ -668,7 +647,9 @@ function IetfImporter({
   const submitMailarchiveImport = async () => {
     const mailingList = mailarchiveForm.mailingList.trim()
     if (!mailingList) {
-      toast.error(t('stepOne.ietf.validation.mailarchiveRequired', { ns: 'datasetCreation' }))
+      toast.error(
+        t(($) => $['stepOne.ietf.validation.mailarchiveRequired'], { ns: 'datasetCreation' }),
+      )
       return
     }
 
@@ -692,11 +673,9 @@ function IetfImporter({
       })
       setPreprocessResults(result.years)
       setOpen(false)
-    }
-    catch (error) {
+    } catch (error) {
       await handleRequestError(error)
-    }
-    finally {
+    } finally {
       setIsSubmitting(false)
     }
   }
@@ -704,20 +683,22 @@ function IetfImporter({
   const submitRfcs = async () => {
     if (importType === 'draft') {
       if (!selectedRfc?.draft_base_name || selectedDraftVersion == null) {
-        toast.error(t('stepOne.ietf.validation.draftVersionRequired', { ns: 'datasetCreation' }))
+        toast.error(
+          t(($) => $['stepOne.ietf.validation.draftVersionRequired'], { ns: 'datasetCreation' }),
+        )
         return
       }
-      const draftNames = [`${selectedRfc.draft_base_name}-${String(selectedDraftVersion).padStart(2, '0')}`]
+      const draftNames = [
+        `${selectedRfc.draft_base_name}-${String(selectedDraftVersion).padStart(2, '0')}`,
+      ]
       const payload: IetfDraftImportRequest = { draft_names: draftNames, format: selectedFormat }
       setIsSubmitting(true)
       try {
         const file = await importIetfDraftFile(payload)
         handleImportedFile(file)
-      }
-      catch (error) {
+      } catch (error) {
         await handleRequestError(error)
-      }
-      finally {
+      } finally {
         setIsSubmitting(false)
       }
       return
@@ -732,7 +713,9 @@ function IetfImporter({
     }
 
     if (!payload.rfc_ids.length) {
-      toast.error(t('stepOne.ietf.validation.rfcQueryRequired', { ns: 'datasetCreation' }))
+      toast.error(
+        t(($) => $['stepOne.ietf.validation.rfcQueryRequired'], { ns: 'datasetCreation' }),
+      )
       return
     }
 
@@ -740,11 +723,9 @@ function IetfImporter({
     try {
       const file = await importIetfRfcFile(payload)
       handleImportedFile(file)
-    }
-    catch (error) {
+    } catch (error) {
       await handleRequestError(error)
-    }
-    finally {
+    } finally {
       setIsSubmitting(false)
     }
   }
@@ -754,34 +735,32 @@ function IetfImporter({
 
   const handleImportEvolution = async () => {
     const draftName = selectedRfc?.draft_base_name
-    if (!draftName)
-      return
+    if (!draftName) return
     setIsImportingEvolution(true)
     try {
-      const file = await importIetfDraftEvolution(draftName, evolutionDiffFormat, evolutionSkipMinorEdits)
+      const file = await importIetfDraftEvolution(
+        draftName,
+        evolutionDiffFormat,
+        evolutionSkipMinorEdits,
+      )
       handleImportedFile(file)
-    }
-    catch (error) {
+    } catch (error) {
       await handleRequestError(error)
-    }
-    finally {
+    } finally {
       setIsImportingEvolution(false)
     }
   }
 
   const handleImportAnnotatedRfc = async () => {
     const draftName = selectedRfc?.draft_base_name
-    if (!draftName)
-      return
+    if (!draftName) return
     setIsImportingAnnotatedRfc(true)
     try {
       const file = await importIetfDraftAnnotatedRfc(draftName)
       handleImportedFile(file)
-    }
-    catch (error) {
+    } catch (error) {
       await handleRequestError(error)
-    }
-    finally {
+    } finally {
       setIsImportingAnnotatedRfc(false)
     }
   }
@@ -789,16 +768,22 @@ function IetfImporter({
   const submitGithub = async () => {
     const repo = githubForm.repo.trim()
     if (!repo || !repo.includes('/')) {
-      toast.error(t('stepOne.ietf.validation.githubRepoRequired', { ns: 'datasetCreation' }))
+      toast.error(
+        t(($) => $['stepOne.ietf.validation.githubRepoRequired'], { ns: 'datasetCreation' }),
+      )
       return
     }
     if (!githubForm.includeIssues && !githubForm.includePRs) {
-      toast.error(t('stepOne.ietf.validation.githubAtLeastOne', { ns: 'datasetCreation' }))
+      toast.error(
+        t(($) => $['stepOne.ietf.validation.githubAtLeastOne'], { ns: 'datasetCreation' }),
+      )
       return
     }
     const token = githubForm.githubToken.trim()
     if (!token) {
-      toast.error(t('stepOne.ietf.validation.githubTokenRequired', { ns: 'datasetCreation' }))
+      toast.error(
+        t(($) => $['stepOne.ietf.validation.githubTokenRequired'], { ns: 'datasetCreation' }),
+      )
       return
     }
     localStorage.setItem(GITHUB_TOKEN_STORAGE_KEY, token)
@@ -815,21 +800,24 @@ function IetfImporter({
         loader: githubForm.loader,
       })
       setGithubJobId(job_id)
-      localStorage.setItem(GITHUB_JOB_STORAGE_KEY, JSON.stringify({ job_id, repo, loader: githubForm.loader }))
+      localStorage.setItem(
+        GITHUB_JOB_STORAGE_KEY,
+        JSON.stringify({ job_id, repo, loader: githubForm.loader }),
+      )
       // isSubmitting stays true until the polling effect resolves the job
-    }
-    catch (error) {
+    } catch (error) {
       await handleRequestError(error)
       setIsSubmitting(false)
     }
   }
 
   const handleGithubResume = async () => {
-    if (!githubJobId)
-      return
+    if (!githubJobId) return
     const token = githubForm.githubToken.trim()
     if (!token) {
-      toast.error(t('stepOne.ietf.validation.githubTokenRequired', { ns: 'datasetCreation' }))
+      toast.error(
+        t(($) => $['stepOne.ietf.validation.githubTokenRequired'], { ns: 'datasetCreation' }),
+      )
       return
     }
     setIsSubmitting(true)
@@ -837,9 +825,11 @@ function IetfImporter({
     try {
       const { job_id } = await resumeGithubImport(githubJobId, token)
       setGithubJobId(job_id)
-      localStorage.setItem(GITHUB_JOB_STORAGE_KEY, JSON.stringify({ job_id, repo: githubForm.repo, loader: githubForm.loader }))
-    }
-    catch (error) {
+      localStorage.setItem(
+        GITHUB_JOB_STORAGE_KEY,
+        JSON.stringify({ job_id, repo: githubForm.repo, loader: githubForm.loader }),
+      )
+    } catch (error) {
       await handleRequestError(error)
       setIsSubmitting(false)
     }
@@ -849,15 +839,15 @@ function IetfImporter({
     <>
       <div className="mb-5 flex max-w-[640px] items-center justify-between gap-4 rounded-2xl border border-divider-subtle bg-background-default-subtle px-4 py-3">
         <div className="min-w-0">
-          <div className="text-sm font-semibold leading-5 text-text-secondary">
-            {t('stepOne.ietf.title', { ns: 'datasetCreation' })}
+          <div className="text-sm leading-5 font-semibold text-text-secondary">
+            {t(($) => $['stepOne.ietf.title'], { ns: 'datasetCreation' })}
           </div>
           <div className="mt-1 text-xs leading-4 text-text-tertiary">
-            {t('stepOne.ietf.description', { ns: 'datasetCreation' })}
+            {t(($) => $['stepOne.ietf.description'], { ns: 'datasetCreation' })}
           </div>
           {isLimitReached && (
             <div className="mt-1 text-xs leading-4 text-text-warning">
-              {t('stepOne.ietf.limitReached', { ns: 'datasetCreation' })}
+              {t(($) => $['stepOne.ietf.limitReached'], { ns: 'datasetCreation' })}
             </div>
           )}
         </div>
@@ -867,80 +857,92 @@ function IetfImporter({
           disabled={openDisabled}
           data-testid="ietf-import-open"
         >
-          {t('stepOne.ietf.open', { ns: 'datasetCreation' })}
+          {t(($) => $['stepOne.ietf.open'], { ns: 'datasetCreation' })}
         </Button>
       </div>
 
       {preprocessResults && preprocessResults.length > 0 && (
-        <div className="mb-5 max-w-[720px] rounded-2xl border border-divider-subtle bg-background-default-subtle p-4" data-testid="ietf-preprocess-results-panel">
-          <div className="flex items-center gap-1 text-sm font-semibold leading-5 text-text-secondary">
-            {t('stepOne.ietf.preprocessResults', { ns: 'datasetCreation' })}
+        <div
+          className="mb-5 max-w-[720px] rounded-2xl border border-divider-subtle bg-background-default-subtle p-4"
+          data-testid="ietf-preprocess-results-panel"
+        >
+          <div className="flex items-center gap-1 text-sm leading-5 font-semibold text-text-secondary">
+            {t(($) => $['stepOne.ietf.preprocessResults'], { ns: 'datasetCreation' })}
             <Tooltip>
-              <TooltipTrigger render={(
-                <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-              )}
+              <TooltipTrigger
+                render={
+                  <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                }
               />
               <TooltipContent>
                 <div className="max-w-[300px] space-y-1">
-                  <div>{t('stepOne.ietf.preprocessResultsHint', { ns: 'datasetCreation' })}</div>
-                  <div>{t('stepOne.ietf.discardedExplanation', { ns: 'datasetCreation' })}</div>
+                  <div>
+                    {t(($) => $['stepOne.ietf.preprocessResultsHint'], { ns: 'datasetCreation' })}
+                  </div>
+                  <div>
+                    {t(($) => $['stepOne.ietf.discardedExplanation'], { ns: 'datasetCreation' })}
+                  </div>
                 </div>
               </TooltipContent>
             </Tooltip>
           </div>
           <div className="mt-1 text-xs leading-4 text-text-tertiary">
-            {t('stepOne.ietf.preprocessSelectedCount', {
+            {t(($) => $['stepOne.ietf.preprocessSelectedCount'], {
               ns: 'datasetCreation',
               count: selectedPreprocessYears.length,
             })}
           </div>
-          {preprocessResults.every(item => item.total_emails === 0) && (
-            <div className="mt-3 text-xs leading-5 text-text-warning" data-testid="ietf-preprocess-all-discarded">
-              {t('stepOne.ietf.preprocessAllDiscarded', {
+          {preprocessResults.every((item) => item.total_emails === 0) && (
+            <div
+              className="mt-3 text-xs leading-5 text-text-warning"
+              data-testid="ietf-preprocess-all-discarded"
+            >
+              {t(($) => $['stepOne.ietf.preprocessAllDiscarded'], {
                 ns: 'datasetCreation',
                 discarded: preprocessResults.reduce((sum, item) => sum + item.discarded_emails, 0),
               })}
             </div>
           )}
           <div className="mt-4 flex flex-wrap gap-2">
-            {preprocessResults.filter(item => item.total_emails > 0).map(item => (
-              <button
-                key={item.year}
-                type="button"
-                className={`rounded-xl border px-3 py-2 text-left text-xs transition-colors ${selectedPreprocessYears.includes(item.year) ? 'border-primary-600 bg-primary-50 text-text-primary' : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'}`}
-                onClick={() => {
-                  setSelectedPreprocessYears((prev) => {
-                    if (prev.includes(item.year))
-                      return prev.filter(year => year !== item.year)
-                    return [...prev, item.year].sort((a, b) => a - b)
-                  })
-                }}
-                data-testid={`ietf-preprocess-year-${item.year}`}
-              >
-                {t('stepOne.ietf.preprocessYearSummary', {
-                  ns: 'datasetCreation',
-                  year: item.year,
-                  count: item.total_emails,
-                  discarded: item.discarded_emails,
-                })}
-              </button>
-            ))}
+            {preprocessResults
+              .filter((item) => item.total_emails > 0)
+              .map((item) => (
+                <button
+                  key={item.year}
+                  type="button"
+                  className={`rounded-xl border px-3 py-2 text-left text-xs transition-colors ${selectedPreprocessYears.includes(item.year) ? 'border-primary-600 bg-primary-50 text-text-primary' : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'}`}
+                  onClick={() => {
+                    setSelectedPreprocessYears((prev) => {
+                      if (prev.includes(item.year)) return prev.filter((year) => year !== item.year)
+                      return [...prev, item.year].sort((a, b) => a - b)
+                    })
+                  }}
+                  data-testid={`ietf-preprocess-year-${item.year}`}
+                >
+                  {t(($) => $['stepOne.ietf.preprocessYearSummary'], {
+                    ns: 'datasetCreation',
+                    year: item.year,
+                    count: item.total_emails,
+                    discarded: item.discarded_emails,
+                  })}
+                </button>
+              ))}
           </div>
         </div>
       )}
 
       <Dialog
         open={open}
-        onOpenChange={(nextOpen: boolean) => nextOpen ? setOpen(true) : closeDialog()}
+        onOpenChange={(nextOpen: boolean) => (nextOpen ? setOpen(true) : closeDialog())}
       >
         <DialogContent className="w-[720px] max-w-[calc(100vw-2rem)] p-0">
           <div className="border-b border-divider-subtle px-6 py-5">
-            <DialogCloseButton data-testid="ietf-import-close" className="right-5 top-5" />
-            <DialogTitle className="pr-10 text-text-primary title-2xl-semi-bold">
-              {t('stepOne.ietf.open', { ns: 'datasetCreation' })}
+            <DialogCloseButton data-testid="ietf-import-close" className="top-5 right-5" />
+            <DialogTitle className="pr-10 title-2xl-semi-bold text-text-primary">
+              {t(($) => $['stepOne.ietf.open'], { ns: 'datasetCreation' })}
             </DialogTitle>
             <DialogDescription className="mt-2 pr-10 text-sm leading-5 text-text-tertiary">
-              {t('stepOne.ietf.modeDescription', { ns: 'datasetCreation' })}
+              {t(($) => $['stepOne.ietf.modeDescription'], { ns: 'datasetCreation' })}
             </DialogDescription>
           </div>
 
@@ -952,7 +954,7 @@ function IetfImporter({
               >
                 <span className="flex items-center gap-1.5">
                   <span className="i-ri-mail-download-line size-4" />
-                  {t('stepOne.ietf.mailarchive', { ns: 'datasetCreation' })}
+                  {t(($) => $['stepOne.ietf.mailarchive'], { ns: 'datasetCreation' })}
                 </span>
               </Button>
               <Button
@@ -965,7 +967,7 @@ function IetfImporter({
                 {' '}
                 <span className="flex items-center gap-1.5">
                   <span className="i-ri-article-line size-4" />
-                  {t('stepOne.ietf.rfcs', { ns: 'datasetCreation' })}
+                  {t(($) => $['stepOne.ietf.rfcs'], { ns: 'datasetCreation' })}
                 </span>
               </Button>
               <Button
@@ -974,7 +976,7 @@ function IetfImporter({
               >
                 <span className="flex items-center gap-1.5">
                   <span className="i-ri-github-line size-4" />
-                  {t('stepOne.ietf.github', { ns: 'datasetCreation' })}
+                  {t(($) => $['stepOne.ietf.github'], { ns: 'datasetCreation' })}
                 </span>
               </Button>
             </div>
@@ -984,14 +986,19 @@ function IetfImporter({
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2">
                     <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.mailingList', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.mailingList'], { ns: 'datasetCreation' })}
                       <Tooltip>
-                        <TooltipTrigger render={(
-                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                        )}
+                        <TooltipTrigger
+                          render={
+                            <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                          }
                         />
                         <TooltipContent>
-                          <div className="max-w-[280px]">{t('stepOne.ietf.preprocessImportHint', { ns: 'datasetCreation' })}</div>
+                          <div className="max-w-[280px]">
+                            {t(($) => $['stepOne.ietf.preprocessImportHint'], {
+                              ns: 'datasetCreation',
+                            })}
+                          </div>
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -999,21 +1006,28 @@ function IetfImporter({
                       <Input
                         value={mailarchiveForm.mailingList}
                         onChange={(e) => {
-                          setMailarchiveForm(prev => ({ ...prev, mailingList: e.target.value }))
+                          setMailarchiveForm((prev) => ({ ...prev, mailingList: e.target.value }))
                           setShowMailingListDropdown(true)
                         }}
                         onFocus={() => setShowMailingListDropdown(true)}
-                        placeholder={t('stepOne.ietf.mailarchiveHint', { ns: 'datasetCreation' }) || ''}
+                        placeholder={
+                          t(($) => $['stepOne.ietf.mailarchiveHint'], { ns: 'datasetCreation' }) ||
+                          ''
+                        }
                       />
                       {showMailingListDropdown && availableMailingLists.length > 0 && (
-                        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
+                        <div className="absolute top-full right-0 left-0 z-10 mt-1 max-h-48 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
                           {availableMailingLists
-                            .filter(list => list.toLowerCase().includes(mailarchiveForm.mailingList.toLowerCase()))
-                            .map(list => (
+                            .filter((list) =>
+                              list
+                                .toLowerCase()
+                                .includes(mailarchiveForm.mailingList.toLowerCase()),
+                            )
+                            .map((list) => (
                               <div
                                 key={list}
                                 onClick={() => {
-                                  setMailarchiveForm(prev => ({ ...prev, mailingList: list }))
+                                  setMailarchiveForm((prev) => ({ ...prev, mailingList: list }))
                                   setShowMailingListDropdown(false)
                                 }}
                                 className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-components-panel-border"
@@ -1030,7 +1044,7 @@ function IetfImporter({
                   {mailarchiveForm.mailingList.trim() && (
                     <div className="col-span-2">
                       <div className="mb-1 text-xs font-medium text-text-secondary">
-                        {t('stepOne.ietf.wgDoc', { ns: 'datasetCreation' })}
+                        {t(($) => $['stepOne.ietf.wgDoc'], { ns: 'datasetCreation' })}
                       </div>
                       <div ref={wgDocDropdownRef} className="relative">
                         <Input
@@ -1042,28 +1056,36 @@ function IetfImporter({
                           onFocus={() => setShowWgDocDropdown(true)}
                           placeholder={
                             wgDocumentsLoading
-                              ? (t('stepOne.ietf.wgDocLoading', { ns: 'datasetCreation' }) || '')
-                              : (t('stepOne.ietf.wgDocPlaceholder', { ns: 'datasetCreation' }) || '')
+                              ? t(($) => $['stepOne.ietf.wgDocLoading'], {
+                                  ns: 'datasetCreation',
+                                }) || ''
+                              : t(($) => $['stepOne.ietf.wgDocPlaceholder'], {
+                                  ns: 'datasetCreation',
+                                }) || ''
                           }
                           readOnly={wgDocumentsLoading}
                         />
                         {showWgDocDropdown && wgDocuments.length > 0 && (
-                          <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
+                          <div className="absolute top-full right-0 left-0 z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
                             {wgDocuments
                               .filter((doc) => {
                                 const q = wgDocFilter.toLowerCase()
-                                if (!q)
-                                  return true
-                                return doc.name.toLowerCase().includes(q) || doc.title.toLowerCase().includes(q)
+                                if (!q) return true
+                                return (
+                                  doc.name.toLowerCase().includes(q) ||
+                                  doc.title.toLowerCase().includes(q)
+                                )
                               })
-                              .map(doc => (
+                              .map((doc) => (
                                 <div
                                   key={doc.name}
                                   onClick={() => handleWgDocSelect(doc)}
                                   className="cursor-pointer px-3 py-2 text-sm hover:bg-components-panel-border"
                                 >
                                   <div className="font-medium text-text-primary">{doc.name}</div>
-                                  <div className="truncate text-xs text-text-tertiary">{doc.title}</div>
+                                  <div className="truncate text-xs text-text-tertiary">
+                                    {doc.title}
+                                  </div>
                                 </div>
                               ))}
                           </div>
@@ -1073,42 +1095,53 @@ function IetfImporter({
                           <div className="mt-2 flex flex-col gap-1.5 rounded-lg border border-divider-subtle bg-background-section-burn p-2">
                             <div className="flex min-w-0 gap-2 text-xs">
                               <span className="shrink-0 text-text-tertiary">
-                                {t('stepOne.ietf.wgDocSelectedDraft', { ns: 'datasetCreation' })}
+                                {t(($) => $['stepOne.ietf.wgDocSelectedDraft'], {
+                                  ns: 'datasetCreation',
+                                })}
                                 :
                               </span>
-                              <span title={selectedWgDoc.name} className="truncate font-medium text-text-secondary">
+                              <span
+                                title={selectedWgDoc.name}
+                                className="truncate font-medium text-text-secondary"
+                              >
                                 {selectedWgDoc.name}
                               </span>
                             </div>
                             <div className="flex min-w-0 gap-2 text-xs">
                               <span className="shrink-0 text-text-tertiary">
-                                {t('stepOne.ietf.wgDocReplaces', { ns: 'datasetCreation' })}
+                                {t(($) => $['stepOne.ietf.wgDocReplaces'], {
+                                  ns: 'datasetCreation',
+                                })}
                                 :
                               </span>
                               <span className="font-medium text-text-secondary">
                                 {wgDocRelationsLoading
                                   ? '…'
-                                  : (wgDocRelations?.replaces.length
-                                      ? wgDocRelations.replaces.join(', ')
-                                      : '—')}
+                                  : wgDocRelations?.replaces.length
+                                    ? wgDocRelations.replaces.join(', ')
+                                    : '—'}
                               </span>
                             </div>
                             <div className="flex min-w-0 gap-2 text-xs">
                               <span className="shrink-0 text-text-tertiary">
-                                {t('stepOne.ietf.wgDocReplacedBy', { ns: 'datasetCreation' })}
+                                {t(($) => $['stepOne.ietf.wgDocReplacedBy'], {
+                                  ns: 'datasetCreation',
+                                })}
                                 :
                               </span>
                               <span className="font-medium text-text-secondary">
                                 {wgDocRelationsLoading
                                   ? '…'
-                                  : (wgDocRelations?.replaced_by.length
-                                      ? wgDocRelations.replaced_by.join(', ')
-                                      : '—')}
+                                  : wgDocRelations?.replaced_by.length
+                                    ? wgDocRelations.replaced_by.join(', ')
+                                    : '—'}
                               </span>
                             </div>
                             <div className="flex min-w-0 gap-2 text-xs">
                               <span className="shrink-0 text-text-tertiary">
-                                {t('stepOne.ietf.wgDocPublishedAs', { ns: 'datasetCreation' })}
+                                {t(($) => $['stepOne.ietf.wgDocPublishedAs'], {
+                                  ns: 'datasetCreation',
+                                })}
                                 :
                               </span>
                               <span className="font-medium text-text-secondary">
@@ -1122,49 +1155,57 @@ function IetfImporter({
                   )}
                   <div>
                     <div className="mb-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.sentAfter', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.sentAfter'], { ns: 'datasetCreation' })}
                     </div>
                     <Input
                       value={mailarchiveForm.sentAfter}
-                      onChange={e => setMailarchiveForm(prev => ({ ...prev, sentAfter: e.target.value }))}
+                      onChange={(e) =>
+                        setMailarchiveForm((prev) => ({ ...prev, sentAfter: e.target.value }))
+                      }
                     />
                   </div>
                   <div>
                     <div className="mb-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.sentBefore', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.sentBefore'], { ns: 'datasetCreation' })}
                     </div>
                     <Input
                       value={mailarchiveForm.sentBefore}
-                      onChange={e => setMailarchiveForm(prev => ({ ...prev, sentBefore: e.target.value }))}
+                      onChange={(e) =>
+                        setMailarchiveForm((prev) => ({ ...prev, sentBefore: e.target.value }))
+                      }
                     />
                   </div>
                   <div>
                     <div className="mb-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.fromAddr', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.fromAddr'], { ns: 'datasetCreation' })}
                     </div>
                     <Input
                       value={mailarchiveForm.fromAddr}
-                      onChange={e => setMailarchiveForm(prev => ({ ...prev, fromAddr: e.target.value }))}
+                      onChange={(e) =>
+                        setMailarchiveForm((prev) => ({ ...prev, fromAddr: e.target.value }))
+                      }
                     />
                   </div>
                   <div className="col-span-2">
                     <div className="mb-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.subject', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.subject'], { ns: 'datasetCreation' })}
                     </div>
                     <Input
                       value={mailarchiveForm.subject}
                       onChange={(e) => {
                         keywordAutoFilledRef.current = false
-                        setMailarchiveForm(prev => ({ ...prev, subject: e.target.value }))
+                        setMailarchiveForm((prev) => ({ ...prev, subject: e.target.value }))
                       }}
                     />
                     <div className="mt-2 flex items-center gap-4">
                       <span className="text-xs text-text-tertiary">
-                        {t('stepOne.ietf.searchIn', { ns: 'datasetCreation' })}
-                        :
+                        {t(($) => $['stepOne.ietf.searchIn'], { ns: 'datasetCreation' })}:
                       </span>
-                      {(['subject', 'body'] as const).map(scope => (
-                        <label key={scope} className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
+                      {(['subject', 'body'] as const).map((scope) => (
+                        <label
+                          key={scope}
+                          className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary"
+                        >
                           <input
                             type="checkbox"
                             checked={mailarchiveForm.searchIn.includes(scope)}
@@ -1172,15 +1213,15 @@ function IetfImporter({
                               setMailarchiveForm((prev) => {
                                 const next = e.target.checked
                                   ? [...prev.searchIn, scope]
-                                  : prev.searchIn.filter(s => s !== scope)
+                                  : prev.searchIn.filter((s) => s !== scope)
                                 // require at least one option
                                 return { ...prev, searchIn: next.length ? next : prev.searchIn }
                               })
                             }}
                           />
                           {scope === 'subject'
-                            ? t('stepOne.ietf.searchInSubject', { ns: 'datasetCreation' })
-                            : t('stepOne.ietf.searchInBody', { ns: 'datasetCreation' })}
+                            ? t(($) => $['stepOne.ietf.searchInSubject'], { ns: 'datasetCreation' })
+                            : t(($) => $['stepOne.ietf.searchInBody'], { ns: 'datasetCreation' })}
                         </label>
                       ))}
                     </div>
@@ -1190,46 +1231,78 @@ function IetfImporter({
                       <input
                         type="checkbox"
                         checked={mailarchiveForm.filterEmails}
-                        onChange={e => setMailarchiveForm(prev => ({ ...prev, filterEmails: e.target.checked }))}
+                        onChange={(e) =>
+                          setMailarchiveForm((prev) => ({
+                            ...prev,
+                            filterEmails: e.target.checked,
+                          }))
+                        }
                       />
-                      {t('stepOne.ietf.filterEmails', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.filterEmails'], { ns: 'datasetCreation' })}
                     </label>
                     <Tooltip>
-                      <TooltipTrigger render={(
-                        <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                      )}
+                      <TooltipTrigger
+                        render={
+                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                        }
                       />
                       <TooltipContent>
-                        <div className="max-w-[280px]">{t('stepOne.ietf.discardedExplanation', { ns: 'datasetCreation' })}</div>
+                        <div className="max-w-[280px]">
+                          {t(($) => $['stepOne.ietf.discardedExplanation'], {
+                            ns: 'datasetCreation',
+                          })}
+                        </div>
                       </TooltipContent>
                     </Tooltip>
                   </div>
                   <div data-testid="ietf-quote-handling">
                     <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.quoteHandling', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.quoteHandling'], { ns: 'datasetCreation' })}
                       <Tooltip>
-                        <TooltipTrigger render={(
-                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                        )}
+                        <TooltipTrigger
+                          render={
+                            <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                          }
                         />
                         <TooltipContent>
-                          <div className="max-w-[280px]">{t('stepOne.ietf.quoteHandlingHint', { ns: 'datasetCreation' })}</div>
+                          <div className="max-w-[280px]">
+                            {t(($) => $['stepOne.ietf.quoteHandlingHint'], {
+                              ns: 'datasetCreation',
+                            })}
+                          </div>
                         </TooltipContent>
                       </Tooltip>
                     </div>
                     <div className="flex gap-2">
                       {(
                         [
-                          ['none', t('stepOne.ietf.quoteHandlingNone', { ns: 'datasetCreation' })],
-                          ['naive', t('stepOne.ietf.quoteHandlingNaive', { ns: 'datasetCreation' })],
-                          ['advanced', t('stepOne.ietf.quoteHandlingAdvanced', { ns: 'datasetCreation' })],
+                          [
+                            'none',
+                            t(($) => $['stepOne.ietf.quoteHandlingNone'], {
+                              ns: 'datasetCreation',
+                            }),
+                          ],
+                          [
+                            'naive',
+                            t(($) => $['stepOne.ietf.quoteHandlingNaive'], {
+                              ns: 'datasetCreation',
+                            }),
+                          ],
+                          [
+                            'advanced',
+                            t(($) => $['stepOne.ietf.quoteHandlingAdvanced'], {
+                              ns: 'datasetCreation',
+                            }),
+                          ],
                         ] as [QuoteHandlingMode, string][]
                       ).map(([modeOption, label]) => (
                         <button
                           key={modeOption}
                           type="button"
                           data-testid={`ietf-quote-handling-${modeOption}`}
-                          onClick={() => setMailarchiveForm(prev => ({ ...prev, quoteHandling: modeOption }))}
+                          onClick={() =>
+                            setMailarchiveForm((prev) => ({ ...prev, quoteHandling: modeOption }))
+                          }
                           className={`rounded-md border px-3 py-1 text-xs transition-colors ${
                             mailarchiveForm.quoteHandling === modeOption
                               ? 'border-components-button-primary-bg bg-components-button-primary-bg text-components-button-primary-text'
@@ -1247,17 +1320,25 @@ function IetfImporter({
                         type="checkbox"
                         data-testid="ietf-group-threads"
                         checked={mailarchiveForm.groupThreads}
-                        onChange={e => setMailarchiveForm(prev => ({ ...prev, groupThreads: e.target.checked }))}
+                        onChange={(e) =>
+                          setMailarchiveForm((prev) => ({
+                            ...prev,
+                            groupThreads: e.target.checked,
+                          }))
+                        }
                       />
-                      {t('stepOne.ietf.groupThreads', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.groupThreads'], { ns: 'datasetCreation' })}
                     </label>
                     <Tooltip>
-                      <TooltipTrigger render={(
-                        <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                      )}
+                      <TooltipTrigger
+                        render={
+                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                        }
                       />
                       <TooltipContent>
-                        <div className="max-w-[320px]">{t('stepOne.ietf.groupThreadsHint', { ns: 'datasetCreation' })}</div>
+                        <div className="max-w-[320px]">
+                          {t(($) => $['stepOne.ietf.groupThreadsHint'], { ns: 'datasetCreation' })}
+                        </div>
                       </TooltipContent>
                     </Tooltip>
                   </div>
@@ -1277,21 +1358,40 @@ function IetfImporter({
                   >
                     <div className="flex-1">
                       {syncStatus === 'checking' && (
-                        <span>{t('stepOne.ietf.syncCheckingStatus', { ns: 'datasetCreation' })}</span>
+                        <span>
+                          {t(($) => $['stepOne.ietf.syncCheckingStatus'], {
+                            ns: 'datasetCreation',
+                          })}
+                        </span>
                       )}
                       {syncStatus === 'ready' && (
-                        <span>{t('stepOne.ietf.syncReady', { ns: 'datasetCreation', count: syncMessageCount })}</span>
+                        <span>
+                          {t(($) => $['stepOne.ietf.syncReady'], {
+                            ns: 'datasetCreation',
+                            count: syncMessageCount,
+                          })}
+                        </span>
                       )}
                       {syncStatus === 'syncing' && (
                         <div>
-                          <div className="font-medium">{t('stepOne.ietf.syncSyncing', { ns: 'datasetCreation' })}</div>
-                          <div className="mt-0.5 text-text-tertiary">{t('stepOne.ietf.syncSyncingHint', { ns: 'datasetCreation' })}</div>
+                          <div className="font-medium">
+                            {t(($) => $['stepOne.ietf.syncSyncing'], { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-0.5 text-text-tertiary">
+                            {t(($) => $['stepOne.ietf.syncSyncingHint'], { ns: 'datasetCreation' })}
+                          </div>
                         </div>
                       )}
                       {syncStatus === 'not_found' && (
                         <div>
-                          <div className="font-medium">{t('stepOne.ietf.syncRequired', { ns: 'datasetCreation' })}</div>
-                          <div className="mt-0.5 text-text-tertiary">{t('stepOne.ietf.syncRequiredHint', { ns: 'datasetCreation' })}</div>
+                          <div className="font-medium">
+                            {t(($) => $['stepOne.ietf.syncRequired'], { ns: 'datasetCreation' })}
+                          </div>
+                          <div className="mt-0.5 text-text-tertiary">
+                            {t(($) => $['stepOne.ietf.syncRequiredHint'], {
+                              ns: 'datasetCreation',
+                            })}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1303,7 +1403,7 @@ function IetfImporter({
                         onClick={handleStartSync}
                         data-testid="ietf-sync-start-button"
                       >
-                        {t('stepOne.ietf.syncStartButton', { ns: 'datasetCreation' })}
+                        {t(($) => $['stepOne.ietf.syncStartButton'], { ns: 'datasetCreation' })}
                       </Button>
                     )}
                   </div>
@@ -1316,14 +1416,17 @@ function IetfImporter({
                 <div className="space-y-4">
                   <div>
                     <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
-                      {t('stepOne.ietf.rfcId', { ns: 'datasetCreation' })}
+                      {t(($) => $['stepOne.ietf.rfcId'], { ns: 'datasetCreation' })}
                       <Tooltip>
-                        <TooltipTrigger render={(
-                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                        )}
+                        <TooltipTrigger
+                          render={
+                            <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                          }
                         />
                         <TooltipContent>
-                          <div className="max-w-[280px]">{t('stepOne.ietf.rfcFiltersHint', { ns: 'datasetCreation' })}</div>
+                          <div className="max-w-[280px]">
+                            {t(($) => $['stepOne.ietf.rfcFiltersHint'], { ns: 'datasetCreation' })}
+                          </div>
                         </TooltipContent>
                       </Tooltip>
                     </div>
@@ -1338,11 +1441,13 @@ function IetfImporter({
                           setShowRfcSuggestions(true)
                         }}
                         onFocus={() => setShowRfcSuggestions(true)}
-                        placeholder={t('stepOne.ietf.rfcIdHint', { ns: 'datasetCreation' }) || ''}
+                        placeholder={
+                          t(($) => $['stepOne.ietf.rfcIdHint'], { ns: 'datasetCreation' }) || ''
+                        }
                       />
                       {showRfcSuggestions && rfcSuggestions.length > 0 && (
-                        <div className="absolute left-0 right-0 top-full z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
-                          {rfcSuggestions.map(item => (
+                        <div className="absolute top-full right-0 left-0 z-10 mt-1 max-h-56 overflow-y-auto rounded-lg border border-components-panel-border bg-components-panel-bg shadow-lg">
+                          {rfcSuggestions.map((item) => (
                             <button
                               key={item.doc_id}
                               type="button"
@@ -1351,8 +1456,10 @@ function IetfImporter({
                                 setRfcForm({ rfcId: item.doc_id })
                                 setSelectedRfc(item)
                                 setImportType('rfc')
-                                const latestVersion = item.draft_versions?.at(-1)?.version
-                                  ?? item.draft_max_version ?? null
+                                const latestVersion =
+                                  item.draft_versions?.at(-1)?.version ??
+                                  item.draft_max_version ??
+                                  null
                                 setSelectedDraftVersion(latestVersion)
                                 setShowRfcSuggestions(false)
                               }}
@@ -1378,141 +1485,159 @@ function IetfImporter({
                       <div className="text-xs font-medium text-text-tertiary">
                         {selectedRfc.doc_id}
                       </div>
-                      <div className="text-base font-semibold leading-6 text-text-primary">
-                        {t('stepOne.ietf.selectedRfcTitle', { ns: 'datasetCreation' })}
+                      <div className="text-base leading-6 font-semibold text-text-primary">
+                        {t(($) => $['stepOne.ietf.selectedRfcTitle'], { ns: 'datasetCreation' })}
                       </div>
-                      <div className="text-sm leading-5 text-text-secondary">{selectedRfc.title}</div>
+                      <div className="text-sm leading-5 text-text-secondary">
+                        {selectedRfc.title}
+                      </div>
                     </div>
 
                     <div className="space-y-2">
                       <div className="text-xs font-medium text-text-secondary">
-                        {t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
+                        {t(($) => $['stepOne.ietf.importType'], { ns: 'datasetCreation' })}
                       </div>
                       <SegmentedControl
                         value={[importType]}
-                        onValueChange={([value]) => value && setImportType(value as 'rfc' | 'draft')}
-                        aria-label={t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
+                        onValueChange={([value]) =>
+                          value && setImportType(value as 'rfc' | 'draft')
+                        }
+                        aria-label={t(($) => $['stepOne.ietf.importType'], {
+                          ns: 'datasetCreation',
+                        })}
                         className="w-fit"
                       >
-                        <SegmentedControlItem value="rfc">{selectedRfc.doc_id}</SegmentedControlItem>
-                        <SegmentedControlItem value="draft" disabled={!availableDraftVersions.length}>
-                          {t('stepOne.ietf.importTypeInternetDraft', { ns: 'datasetCreation' })}
+                        <SegmentedControlItem value="rfc">
+                          {selectedRfc.doc_id}
+                        </SegmentedControlItem>
+                        <SegmentedControlItem
+                          value="draft"
+                          disabled={!availableDraftVersions.length}
+                        >
+                          {t(($) => $['stepOne.ietf.importTypeInternetDraft'], {
+                            ns: 'datasetCreation',
+                          })}
                         </SegmentedControlItem>
                       </SegmentedControl>
                     </div>
 
-                    {importType === 'draft' && selectedRfc.draft_base_name && availableDraftVersions.length > 0 && (
-                      <div className="space-y-3 rounded-xl border border-divider-subtle bg-background-default p-3">
-                        <div>
-                          <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.draftBaseName', { ns: 'datasetCreation' })}
+                    {importType === 'draft' &&
+                      selectedRfc.draft_base_name &&
+                      availableDraftVersions.length > 0 && (
+                        <div className="space-y-3 rounded-xl border border-divider-subtle bg-background-default p-3">
+                          <div>
+                            <div className="text-xs font-medium text-text-secondary">
+                              {t(($) => $['stepOne.ietf.draftBaseName'], { ns: 'datasetCreation' })}
+                            </div>
+                            <div className="mt-1 text-sm text-text-primary">
+                              {selectedRfc.draft_base_name}
+                            </div>
                           </div>
-                          <div className="mt-1 text-sm text-text-primary">
-                            {selectedRfc.draft_base_name}
-                          </div>
-                        </div>
-                        <div>
-                          <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.draftVersion', { ns: 'datasetCreation' })}
-                          </div>
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {availableDraftVersions.map(item => (
-                              <button
-                                key={item.version}
-                                type="button"
-                                onClick={() => setSelectedDraftVersion(item.version)}
-                                className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs transition-colors ${
-                                  selectedDraftVersion === item.version
-                                    ? 'border-primary-600 bg-primary-50 text-primary-700'
-                                    : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'
-                                }`}
-                              >
-                                {String(item.version).padStart(2, '0')}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                      </div>
-                    )}
-
-                    {/* Format picker — shown once formats are loaded */}
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium text-text-secondary">
-                        {t('stepOne.ietf.docFormat', { ns: 'datasetCreation' })}
-                      </div>
-                      {isFetchingFormats
-                        ? (
-                            <div className="text-xs text-text-tertiary">…</div>
-                          )
-                        : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {availableFormats.map(fmt => (
+                          <div>
+                            <div className="text-xs font-medium text-text-secondary">
+                              {t(($) => $['stepOne.ietf.draftVersion'], { ns: 'datasetCreation' })}
+                            </div>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              {availableDraftVersions.map((item) => (
                                 <button
-                                  key={fmt.key}
+                                  key={item.version}
                                   type="button"
-                                  onClick={() => setSelectedFormat(fmt.key)}
-                                  className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
-                                    selectedFormat === fmt.key
+                                  onClick={() => setSelectedDraftVersion(item.version)}
+                                  className={`rounded-lg border px-2.5 py-1.5 font-mono text-xs transition-colors ${
+                                    selectedDraftVersion === item.version
                                       ? 'border-primary-600 bg-primary-50 text-primary-700'
                                       : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'
                                   }`}
                                 >
-                                  {fmt.label}
+                                  {String(item.version).padStart(2, '0')}
                                 </button>
                               ))}
                             </div>
-                          )}
+                          </div>
+                        </div>
+                      )}
+
+                    {/* Format picker — shown once formats are loaded */}
+                    <div className="space-y-2">
+                      <div className="text-xs font-medium text-text-secondary">
+                        {t(($) => $['stepOne.ietf.docFormat'], { ns: 'datasetCreation' })}
+                      </div>
+                      {isFetchingFormats ? (
+                        <div className="text-xs text-text-tertiary">…</div>
+                      ) : (
+                        <div className="flex flex-wrap gap-1.5">
+                          {availableFormats.map((fmt) => (
+                            <button
+                              key={fmt.key}
+                              type="button"
+                              onClick={() => setSelectedFormat(fmt.key)}
+                              className={`rounded-lg border px-2.5 py-1.5 text-xs transition-colors ${
+                                selectedFormat === fmt.key
+                                  ? 'border-primary-600 bg-primary-50 text-primary-700'
+                                  : 'border-divider-subtle bg-background-default text-text-secondary hover:bg-background-default-hover'
+                              }`}
+                            >
+                              {fmt.label}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {selectedMetadata && (
                       <div className="grid grid-cols-2 gap-3">
                         <div>
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.since', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.since'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
-                            {selectedMetadata.since || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                            {selectedMetadata.since ||
+                              t(($) => $['stepOne.ietf.notAvailable'], { ns: 'datasetCreation' })}
                           </div>
                         </div>
                         <div>
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.until', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.until'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
-                            {selectedMetadata.until || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                            {selectedMetadata.until ||
+                              t(($) => $['stepOne.ietf.notAvailable'], { ns: 'datasetCreation' })}
                           </div>
                         </div>
                         <div>
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.stream', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.stream'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
-                            {selectedMetadata.stream || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                            {selectedMetadata.stream ||
+                              t(($) => $['stepOne.ietf.notAvailable'], { ns: 'datasetCreation' })}
                           </div>
                         </div>
                         <div>
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.wg', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.wg'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
-                            {selectedMetadata.wg || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                            {selectedMetadata.wg ||
+                              t(($) => $['stepOne.ietf.notAvailable'], { ns: 'datasetCreation' })}
                           </div>
                         </div>
                         <div>
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.status', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.status'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
-                            {selectedMetadata.status || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                            {selectedMetadata.status ||
+                              t(($) => $['stepOne.ietf.notAvailable'], { ns: 'datasetCreation' })}
                           </div>
                         </div>
                         <div>
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.area', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.area'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="mt-1 rounded-lg border border-divider-subtle bg-background-default px-3 py-2 text-sm text-text-primary">
-                            {selectedMetadata.area || t('stepOne.ietf.notAvailable', { ns: 'datasetCreation' })}
+                            {selectedMetadata.area ||
+                              t(($) => $['stepOne.ietf.notAvailable'], { ns: 'datasetCreation' })}
                           </div>
                         </div>
                       </div>
@@ -1523,31 +1648,46 @@ function IetfImporter({
                       <div className="space-y-4 border-t border-divider-subtle pt-4">
                         <div className="space-y-2">
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.evolution', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.evolution'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="text-xs text-text-tertiary">
-                            {t('stepOne.ietf.evolutionDesc', {
+                            {t(($) => $['stepOne.ietf.evolutionDesc'], {
                               ns: 'datasetCreation',
                               draft: selectedRfc.draft_base_name,
                             })}
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="flex items-center gap-1 text-xs text-text-secondary">
-                              {t('stepOne.ietf.evolutionDiffFormat', { ns: 'datasetCreation' })}
+                              {t(($) => $['stepOne.ietf.evolutionDiffFormat'], {
+                                ns: 'datasetCreation',
+                              })}
                               <Tooltip>
-                                <TooltipTrigger render={(
-                                  <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                                )}
+                                <TooltipTrigger
+                                  render={
+                                    <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                                  }
                                 />
                                 <TooltipContent>
-                                  {t('stepOne.ietf.evolutionDiffFormatHint', { ns: 'datasetCreation' })}
+                                  {t(($) => $['stepOne.ietf.evolutionDiffFormatHint'], {
+                                    ns: 'datasetCreation',
+                                  })}
                                 </TooltipContent>
                               </Tooltip>
                             </span>
                             {(
                               [
-                                ['prose', t('stepOne.ietf.evolutionDiffFormatProse', { ns: 'datasetCreation' })],
-                                ['patch', t('stepOne.ietf.evolutionDiffFormatPatch', { ns: 'datasetCreation' })],
+                                [
+                                  'prose',
+                                  t(($) => $['stepOne.ietf.evolutionDiffFormatProse'], {
+                                    ns: 'datasetCreation',
+                                  }),
+                                ],
+                                [
+                                  'patch',
+                                  t(($) => $['stepOne.ietf.evolutionDiffFormatPatch'], {
+                                    ns: 'datasetCreation',
+                                  }),
+                                ],
                               ] as ['prose' | 'patch', string][]
                             ).map(([formatOption, label]) => (
                               <button
@@ -1571,37 +1711,48 @@ function IetfImporter({
                                 type="checkbox"
                                 data-testid="ietf-evolution-skip-minor"
                                 checked={evolutionSkipMinorEdits}
-                                onChange={e => setEvolutionSkipMinorEdits(e.target.checked)}
+                                onChange={(e) => setEvolutionSkipMinorEdits(e.target.checked)}
                               />
-                              {t('stepOne.ietf.evolutionSkipMinor', { ns: 'datasetCreation' })}
+                              {t(($) => $['stepOne.ietf.evolutionSkipMinor'], {
+                                ns: 'datasetCreation',
+                              })}
                             </label>
                             <Tooltip>
-                              <TooltipTrigger render={(
-                                <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                              )}
+                              <TooltipTrigger
+                                render={
+                                  <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                                }
                               />
                               <TooltipContent>
-                                {t('stepOne.ietf.evolutionSkipMinorHint', { ns: 'datasetCreation' })}
+                                {t(($) => $['stepOne.ietf.evolutionSkipMinorHint'], {
+                                  ns: 'datasetCreation',
+                                })}
                               </TooltipContent>
                             </Tooltip>
                           </div>
                           <Button
                             size="small"
                             loading={isImportingEvolution}
-                            disabled={isImportingEvolution || isImportingAnnotatedRfc || isSubmitting}
+                            disabled={
+                              isImportingEvolution || isImportingAnnotatedRfc || isSubmitting
+                            }
                             onClick={handleImportEvolution}
                           >
                             {isImportingEvolution
-                              ? t('stepOne.ietf.evolutionImporting', { ns: 'datasetCreation' })
-                              : t('stepOne.ietf.importEvolution', { ns: 'datasetCreation' })}
+                              ? t(($) => $['stepOne.ietf.evolutionImporting'], {
+                                  ns: 'datasetCreation',
+                                })
+                              : t(($) => $['stepOne.ietf.importEvolution'], {
+                                  ns: 'datasetCreation',
+                                })}
                           </Button>
                         </div>
                         <div className="space-y-2">
                           <div className="text-xs font-medium text-text-secondary">
-                            {t('stepOne.ietf.annotatedRfc', { ns: 'datasetCreation' })}
+                            {t(($) => $['stepOne.ietf.annotatedRfc'], { ns: 'datasetCreation' })}
                           </div>
                           <div className="text-xs text-text-tertiary">
-                            {t('stepOne.ietf.annotatedRfcDesc', {
+                            {t(($) => $['stepOne.ietf.annotatedRfcDesc'], {
                               ns: 'datasetCreation',
                               draft: selectedRfc.draft_base_name,
                             })}
@@ -1609,12 +1760,18 @@ function IetfImporter({
                           <Button
                             size="small"
                             loading={isImportingAnnotatedRfc}
-                            disabled={isImportingEvolution || isImportingAnnotatedRfc || isSubmitting}
+                            disabled={
+                              isImportingEvolution || isImportingAnnotatedRfc || isSubmitting
+                            }
                             onClick={handleImportAnnotatedRfc}
                           >
                             {isImportingAnnotatedRfc
-                              ? t('stepOne.ietf.annotatedRfcImporting', { ns: 'datasetCreation' })
-                              : t('stepOne.ietf.importAnnotatedRfc', { ns: 'datasetCreation' })}
+                              ? t(($) => $['stepOne.ietf.annotatedRfcImporting'], {
+                                  ns: 'datasetCreation',
+                                })
+                              : t(($) => $['stepOne.ietf.importAnnotatedRfc'], {
+                                  ns: 'datasetCreation',
+                                })}
                           </Button>
                         </div>
                       </div>
@@ -1628,14 +1785,17 @@ function IetfImporter({
                 {/* WG combobox */}
                 <div>
                   <div className="mb-1 flex items-center gap-1 text-xs font-medium text-text-secondary">
-                    {t('stepOne.ietf.githubWg', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubWg'], { ns: 'datasetCreation' })}
                     <Tooltip>
-                      <TooltipTrigger render={(
-                        <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
-                      )}
+                      <TooltipTrigger
+                        render={
+                          <span className="i-ri-question-line size-3.5 shrink-0 cursor-help text-text-quaternary hover:text-text-tertiary" />
+                        }
                       />
                       <TooltipContent>
-                        <div className="max-w-[280px]">{t('stepOne.ietf.githubFiltersHint', { ns: 'datasetCreation' })}</div>
+                        <div className="max-w-[280px]">
+                          {t(($) => $['stepOne.ietf.githubFiltersHint'], { ns: 'datasetCreation' })}
+                        </div>
                       </TooltipContent>
                     </Tooltip>
                   </div>
@@ -1648,26 +1808,30 @@ function IetfImporter({
                       }}
                       onFocus={() => setShowWgDropdown(true)}
                       onBlur={() => setTimeout(() => setShowWgDropdown(false), 150)}
-                      placeholder={t('stepOne.ietf.githubWgPlaceholder', { ns: 'datasetCreation' }) || ''}
+                      placeholder={
+                        t(($) => $['stepOne.ietf.githubWgPlaceholder'], {
+                          ns: 'datasetCreation',
+                        }) || ''
+                      }
                     />
                     {showWgDropdown && (
                       <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-divider-subtle bg-components-panel-bg shadow-lg">
-                        {WG_NAMES
-                          .filter(wg => !wgFilter || wg.toLowerCase().includes(wgFilter.toLowerCase()))
-                          .map(wg => (
-                            <div
-                              key={wg}
-                              className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-state-base-hover"
-                              onMouseDown={() => {
-                                setGithubForm(prev => ({ ...prev, wg, repo: '' }))
-                                setWgFilter('')
-                                setDraftFilter('')
-                                setShowWgDropdown(false)
-                              }}
-                            >
-                              {wg}
-                            </div>
-                          ))}
+                        {WG_NAMES.filter(
+                          (wg) => !wgFilter || wg.toLowerCase().includes(wgFilter.toLowerCase()),
+                        ).map((wg) => (
+                          <div
+                            key={wg}
+                            className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-state-base-hover"
+                            onMouseDown={() => {
+                              setGithubForm((prev) => ({ ...prev, wg, repo: '' }))
+                              setWgFilter('')
+                              setDraftFilter('')
+                              setShowWgDropdown(false)
+                            }}
+                          >
+                            {wg}
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
@@ -1676,30 +1840,37 @@ function IetfImporter({
                 {/* Draft / repo combobox */}
                 <div>
                   <div className="mb-1 text-xs font-medium text-text-secondary">
-                    {t('stepOne.ietf.githubDraft', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubDraft'], { ns: 'datasetCreation' })}
                   </div>
                   <div className="relative" ref={draftDropdownRef}>
                     <Input
                       value={draftFilter || githubForm.repo}
                       onChange={(e) => {
                         setDraftFilter(e.target.value)
-                        setGithubForm(prev => ({ ...prev, repo: e.target.value }))
+                        setGithubForm((prev) => ({ ...prev, repo: e.target.value }))
                         setShowDraftDropdown(true)
                       }}
                       onFocus={() => setShowDraftDropdown(true)}
                       onBlur={() => setTimeout(() => setShowDraftDropdown(false), 150)}
-                      placeholder={t('stepOne.ietf.githubDraftPlaceholder', { ns: 'datasetCreation' }) || ''}
+                      placeholder={
+                        t(($) => $['stepOne.ietf.githubDraftPlaceholder'], {
+                          ns: 'datasetCreation',
+                        }) || ''
+                      }
                     />
                     {showDraftDropdown && githubForm.wg && (
                       <div className="absolute z-50 mt-1 max-h-48 w-full overflow-y-auto rounded-lg border border-divider-subtle bg-components-panel-bg shadow-lg">
                         {getReposForWg(githubForm.wg)
-                          .filter(r => !draftFilter || r.toLowerCase().includes(draftFilter.toLowerCase()))
-                          .map(r => (
+                          .filter(
+                            (r) =>
+                              !draftFilter || r.toLowerCase().includes(draftFilter.toLowerCase()),
+                          )
+                          .map((r) => (
                             <div
                               key={r}
                               className="cursor-pointer px-3 py-2 text-sm text-text-primary hover:bg-state-base-hover"
                               onMouseDown={() => {
-                                setGithubForm(prev => ({ ...prev, repo: r }))
+                                setGithubForm((prev) => ({ ...prev, repo: r }))
                                 setDraftFilter('')
                                 setShowDraftDropdown(false)
                               }}
@@ -1718,45 +1889,66 @@ function IetfImporter({
                     <input
                       type="checkbox"
                       checked={githubForm.includeIssues}
-                      onChange={e => setGithubForm(prev => ({ ...prev, includeIssues: e.target.checked }))}
+                      onChange={(e) =>
+                        setGithubForm((prev) => ({ ...prev, includeIssues: e.target.checked }))
+                      }
                     />
-                    {t('stepOne.ietf.githubIncludeIssues', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubIncludeIssues'], { ns: 'datasetCreation' })}
                   </label>
                   <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
                     <input
                       type="checkbox"
                       checked={githubForm.includePRs}
-                      onChange={e => setGithubForm(prev => ({ ...prev, includePRs: e.target.checked }))}
+                      onChange={(e) =>
+                        setGithubForm((prev) => ({ ...prev, includePRs: e.target.checked }))
+                      }
                     />
-                    {t('stepOne.ietf.githubIncludePRs', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubIncludePRs'], { ns: 'datasetCreation' })}
                   </label>
                   <label className="flex cursor-pointer items-center gap-1.5 text-xs text-text-secondary">
                     <input
                       type="checkbox"
                       checked={githubForm.includeClosed}
-                      onChange={e => setGithubForm(prev => ({ ...prev, includeClosed: e.target.checked }))}
+                      onChange={(e) =>
+                        setGithubForm((prev) => ({ ...prev, includeClosed: e.target.checked }))
+                      }
                     />
-                    {t('stepOne.ietf.githubIncludeClosed', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubIncludeClosed'], { ns: 'datasetCreation' })}
                   </label>
                 </div>
 
                 {/* Loader selector */}
                 <div>
                   <div className="mb-1 text-xs font-medium text-text-secondary">
-                    {t('stepOne.ietf.githubLoader', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubLoader'], { ns: 'datasetCreation' })}
                   </div>
                   <div className="flex gap-2">
                     {(
                       [
-                        ['graphql', t('stepOne.ietf.githubLoaderGraphql', { ns: 'datasetCreation' })],
-                        ['langchain', t('stepOne.ietf.githubLoaderLangchain', { ns: 'datasetCreation' })],
-                        ['llamaindex', t('stepOne.ietf.githubLoaderLlamaindex', { ns: 'datasetCreation' })],
+                        [
+                          'graphql',
+                          t(($) => $['stepOne.ietf.githubLoaderGraphql'], {
+                            ns: 'datasetCreation',
+                          }),
+                        ],
+                        [
+                          'langchain',
+                          t(($) => $['stepOne.ietf.githubLoaderLangchain'], {
+                            ns: 'datasetCreation',
+                          }),
+                        ],
+                        [
+                          'llamaindex',
+                          t(($) => $['stepOne.ietf.githubLoaderLlamaindex'], {
+                            ns: 'datasetCreation',
+                          }),
+                        ],
                       ] as [GithubLoader, string][]
                     ).map(([l, label]) => (
                       <button
                         key={l}
                         type="button"
-                        onClick={() => setGithubForm(prev => ({ ...prev, loader: l }))}
+                        onClick={() => setGithubForm((prev) => ({ ...prev, loader: l }))}
                         className={`rounded-md border px-3 py-1 text-xs transition-colors ${
                           githubForm.loader === l
                             ? 'border-components-button-primary-bg bg-components-button-primary-bg text-components-button-primary-text'
@@ -1772,13 +1964,17 @@ function IetfImporter({
                 {/* Token */}
                 <div>
                   <div className="mb-1 text-xs font-medium text-text-secondary">
-                    {t('stepOne.ietf.githubToken', { ns: 'datasetCreation' })}
+                    {t(($) => $['stepOne.ietf.githubToken'], { ns: 'datasetCreation' })}
                   </div>
                   <Input
                     type="password"
                     value={githubForm.githubToken}
-                    onChange={e => setGithubForm(prev => ({ ...prev, githubToken: e.target.value }))}
-                    placeholder={t('stepOne.ietf.githubTokenHint', { ns: 'datasetCreation' }) || ''}
+                    onChange={(e) =>
+                      setGithubForm((prev) => ({ ...prev, githubToken: e.target.value }))
+                    }
+                    placeholder={
+                      t(($) => $['stepOne.ietf.githubTokenHint'], { ns: 'datasetCreation' }) || ''
+                    }
                   />
                 </div>
               </div>
@@ -1788,51 +1984,69 @@ function IetfImporter({
           {/* GitHub background import progress */}
           {mode === 'github' && githubJobState && (
             <div className="mx-6 mb-2 rounded-lg border border-divider-subtle bg-background-default-subtle px-4 py-3 text-xs">
-              {githubJobState.status === 'error'
-                ? (
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-text-warning">{githubJobState.error}</span>
-                      {githubJobState.resumable && (
-                        <Button variant="secondary" size="small" onClick={handleGithubResume}>
-                          {t('stepOne.ietf.githubImportResume', { ns: 'datasetCreation' })}
-                        </Button>
-                      )}
-                    </div>
-                  )
-                : (
-                    <div className="space-y-1">
-                      <div className="flex items-center justify-between text-text-secondary">
-                        <span>
-                          {githubJobState.phase === 'pending' && t('stepOne.ietf.githubImportPending', { ns: 'datasetCreation' })}
-                          {githubJobState.phase === 'fetching' && t('stepOne.ietf.githubImportFetching', { ns: 'datasetCreation', count: githubJobState.fetched })}
-                          {githubJobState.phase === 'fetching_comments' && t('stepOne.ietf.githubImportFetchingComments', { ns: 'datasetCreation', count: githubJobState.fetched })}
-                          {githubJobState.phase === 'uploading' && t('stepOne.ietf.githubImportUploading', { ns: 'datasetCreation' })}
-                        </span>
-                        <span className="text-text-tertiary">
-                          {githubJobState.elapsed_seconds}
-                          s
-                        </span>
-                      </div>
-                      {githubJobState.elapsed_seconds >= 30 && (
-                        <p className="text-text-tertiary">{t('stepOne.ietf.githubImportSlow', { ns: 'datasetCreation' })}</p>
-                      )}
-                    </div>
+              {githubJobState.status === 'error' ? (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-text-warning">{githubJobState.error}</span>
+                  {githubJobState.resumable && (
+                    <Button variant="secondary" size="small" onClick={handleGithubResume}>
+                      {t(($) => $['stepOne.ietf.githubImportResume'], { ns: 'datasetCreation' })}
+                    </Button>
                   )}
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between text-text-secondary">
+                    <span>
+                      {githubJobState.phase === 'pending' &&
+                        t(($) => $['stepOne.ietf.githubImportPending'], { ns: 'datasetCreation' })}
+                      {githubJobState.phase === 'fetching' &&
+                        t(($) => $['stepOne.ietf.githubImportFetching'], {
+                          ns: 'datasetCreation',
+                          count: githubJobState.fetched,
+                        })}
+                      {githubJobState.phase === 'fetching_comments' &&
+                        t(($) => $['stepOne.ietf.githubImportFetchingComments'], {
+                          ns: 'datasetCreation',
+                          count: githubJobState.fetched,
+                        })}
+                      {githubJobState.phase === 'uploading' &&
+                        t(($) => $['stepOne.ietf.githubImportUploading'], {
+                          ns: 'datasetCreation',
+                        })}
+                    </span>
+                    <span className="text-text-tertiary">{githubJobState.elapsed_seconds}s</span>
+                  </div>
+                  {githubJobState.elapsed_seconds >= 30 && (
+                    <p className="text-text-tertiary">
+                      {t(($) => $['stepOne.ietf.githubImportSlow'], { ns: 'datasetCreation' })}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
           <div className="flex justify-end gap-2 border-t border-divider-subtle px-6 py-4">
             <Button variant="secondary" onClick={closeDialog} disabled={isSubmitting}>
-              {t('stepOne.ietf.cancel', { ns: 'datasetCreation' })}
+              {t(($) => $['stepOne.ietf.cancel'], { ns: 'datasetCreation' })}
             </Button>
             <Button
               variant="primary"
               loading={isSubmitting}
-              disabled={isSubmitting || (mode === 'mailarchive' && syncStatus !== null && syncStatus !== 'ready')}
-              onClick={mode === 'mailarchive' ? submitMailarchiveImport : mode === 'rfcs' ? submitRfcs : submitGithub}
+              disabled={
+                isSubmitting ||
+                (mode === 'mailarchive' && syncStatus !== null && syncStatus !== 'ready')
+              }
+              onClick={
+                mode === 'mailarchive'
+                  ? submitMailarchiveImport
+                  : mode === 'rfcs'
+                    ? submitRfcs
+                    : submitGithub
+              }
               data-testid="ietf-import-submit"
             >
-              {t('stepOne.ietf.import', { ns: 'datasetCreation' })}
+              {t(($) => $['stepOne.ietf.import'], { ns: 'datasetCreation' })}
             </Button>
           </div>
         </DialogContent>

@@ -119,6 +119,7 @@ def _change_window(record: dict, months: dict[str, tuple[str | None, str | None]
 
 
 def _retrieve(dataset_id: str, query: str, top_k: int) -> list[dict]:
+    from core.db.session_factory import session_factory
     from core.rag.datasource.retrieval_service import RetrievalService
     from core.rag.retrieval.retrieval_methods import RetrievalMethod
 
@@ -128,7 +129,8 @@ def _retrieve(dataset_id: str, query: str, top_k: int) -> list[dict]:
         query=query,
         top_k=top_k,
     )
-    results = RetrievalService.format_retrieval_documents(documents)
+    with session_factory.create_session() as session:
+        results = RetrievalService.format_retrieval_documents(session, documents)
     matches: list[dict] = []
     for result in results[:top_k]:
         segment = result["segment"] if isinstance(result, dict) else result.segment

@@ -1,11 +1,7 @@
 import type { FC } from 'react'
 import type { ChildChunkDetail, ChunkingMode } from '@/models/datasets'
 import { cn } from '@langgenius/dify-ui/cn'
-import {
-  RiCloseLine,
-  RiCollapseDiagonalLine,
-  RiExpandDiagonalLine,
-} from '@remixicon/react'
+import { RiCloseLine, RiCollapseDiagonalLine, RiExpandDiagonalLine } from '@remixicon/react'
 import * as React from 'react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -15,7 +11,7 @@ import { useChildChunkMetadata } from '@/service/knowledge/use-segment'
 import { formatNumber } from '@/utils/format'
 import { formatTime } from '@/utils/time'
 import { useDocumentContext } from '../context'
-import ActionButtons from './common/action-buttons'
+import { ActionButtons } from './common/action-buttons'
 import ChunkContent from './common/chunk-content'
 import Dot from './common/dot'
 import { SegmentIndexTag } from './common/segment-index-tag'
@@ -29,7 +25,15 @@ type IChildSegmentDetailProps = {
   docForm: ChunkingMode
 }
 
-const SKIP_METADATA_KEYS = new Set(['source', 'line', 'content', 'body', 'record_type', 'subject_line', 'email_id'])
+const SKIP_METADATA_KEYS = new Set([
+  'source',
+  'line',
+  'content',
+  'body',
+  'record_type',
+  'subject_line',
+  'email_id',
+])
 
 /**
  * Show all the contents of the segment
@@ -45,10 +49,10 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
   const [content, setContent] = useState(childChunkInfo?.content || '')
   const { eventEmitter } = useEventEmitterContextContext()
   const [loading, setLoading] = useState(false)
-  const fullScreen = useSegmentListContext(s => s.fullScreen)
-  const toggleFullScreen = useSegmentListContext(s => s.toggleFullScreen)
-  const datasetId = useDocumentContext(s => s.datasetId)
-  const documentId = useDocumentContext(s => s.documentId)
+  const fullScreen = useSegmentListContext((s) => s.fullScreen)
+  const toggleFullScreen = useSegmentListContext((s) => s.toggleFullScreen)
+  const datasetId = useDocumentContext((s) => s.datasetId)
+  const documentId = useDocumentContext((s) => s.documentId)
 
   const { data: metadataResponse } = useChildChunkMetadata(
     {
@@ -67,34 +71,33 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
     ...(metadata.email_id && !metadata.id ? { id: metadata.email_id } : {}),
   }
   const metadataFieldLabels: Record<string, string> = {
-    url: t('segment.metadataUrl', { ns: 'datasetDocuments' }),
-    subject: t('segment.metadataSubject', { ns: 'datasetDocuments' }),
-    id: t('segment.metadataId', { ns: 'datasetDocuments' }),
-    date: t('segment.metadataDate', { ns: 'datasetDocuments' }),
-    draft_name: t('segment.metadataDraftName', { ns: 'datasetDocuments' }),
-    from_rev: t('segment.metadataFromRev', { ns: 'datasetDocuments' }),
-    to_rev: t('segment.metadataToRev', { ns: 'datasetDocuments' }),
-    section_id: t('segment.metadataSectionId', { ns: 'datasetDocuments' }),
-    section_title: t('segment.metadataSectionTitle', { ns: 'datasetDocuments' }),
-    change_type: t('segment.metadataChangeType', { ns: 'datasetDocuments' }),
-    final_rev: t('segment.metadataFinalRev', { ns: 'datasetDocuments' }),
-    first_seen_rev: t('segment.metadataFirstSeenRev', { ns: 'datasetDocuments' }),
-    last_changed_rev: t('segment.metadataLastChangedRev', { ns: 'datasetDocuments' }),
-    change_count: t('segment.metadataChangeCount', { ns: 'datasetDocuments' }),
+    url: t(($) => $['segment.metadataUrl'], { ns: 'datasetDocuments' }),
+    subject: t(($) => $['segment.metadataSubject'], { ns: 'datasetDocuments' }),
+    id: t(($) => $['segment.metadataId'], { ns: 'datasetDocuments' }),
+    date: t(($) => $['segment.metadataDate'], { ns: 'datasetDocuments' }),
+    draft_name: t(($) => $['segment.metadataDraftName'], { ns: 'datasetDocuments' }),
+    from_rev: t(($) => $['segment.metadataFromRev'], { ns: 'datasetDocuments' }),
+    to_rev: t(($) => $['segment.metadataToRev'], { ns: 'datasetDocuments' }),
+    section_id: t(($) => $['segment.metadataSectionId'], { ns: 'datasetDocuments' }),
+    section_title: t(($) => $['segment.metadataSectionTitle'], { ns: 'datasetDocuments' }),
+    change_type: t(($) => $['segment.metadataChangeType'], { ns: 'datasetDocuments' }),
+    final_rev: t(($) => $['segment.metadataFinalRev'], { ns: 'datasetDocuments' }),
+    first_seen_rev: t(($) => $['segment.metadataFirstSeenRev'], { ns: 'datasetDocuments' }),
+    last_changed_rev: t(($) => $['segment.metadataLastChangedRev'], { ns: 'datasetDocuments' }),
+    change_count: t(($) => $['segment.metadataChangeCount'], { ns: 'datasetDocuments' }),
   }
   const metadataItems = Object.entries(normalizedMetadata)
     .filter(([key, value]) => !SKIP_METADATA_KEYS.has(key) && value != null && value !== '')
     .map(([key, value]) => ({
       key,
-      label: metadataFieldLabels[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+      label:
+        metadataFieldLabels[key] ?? key.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
       value: String(value),
     }))
 
   eventEmitter?.useSubscription((v) => {
-    if (v === 'update-child-segment')
-      setLoading(true)
-    if (v === 'update-child-segment-done')
-      setLoading(false)
+    if (v === 'update-child-segment') setLoading(true)
+    if (v === 'update-child-segment-done') setLoading(false)
   })
 
   const handleCancel = () => {
@@ -107,30 +110,38 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
 
   const wordCountText = useMemo(() => {
     const count = content.length
-    return `${formatNumber(count)} ${t('segment.characters', { ns: 'datasetDocuments', count })}`
-  }, [content.length, t])
+    return `${formatNumber(count)} ${t(($) => $['segment.characters'], { ns: 'datasetDocuments', count })}`
+  }, [content.length])
 
   const EditTimeText = useMemo(() => {
     const timeText = formatTime({
       date: (childChunkInfo?.updated_at ?? 0) * 1000,
-      dateFormat: `${t('segment.dateTimeFormat', { ns: 'datasetDocuments' })}`,
+      dateFormat: `${t(($) => $['segment.dateTimeFormat'], { ns: 'datasetDocuments' })}`,
     })
-    return `${t('segment.editedAt', { ns: 'datasetDocuments' })} ${timeText}`
-  }, [childChunkInfo?.updated_at, t])
+    return `${t(($) => $['segment.editedAt'], { ns: 'datasetDocuments' })} ${timeText}`
+  }, [childChunkInfo?.updated_at])
 
   return (
     <div className="flex h-full flex-col">
-      <div className={cn('flex items-center justify-between', fullScreen ? 'border border-divider-subtle py-3 pr-4 pl-6' : 'pt-3 pr-3 pl-4')}>
+      <div
+        className={cn(
+          'flex items-center justify-between',
+          fullScreen ? 'border border-divider-subtle py-3 pr-4 pl-6' : 'pt-3 pr-3 pl-4',
+        )}
+      >
         <div className="flex flex-col">
-          <div className="text-text-primary system-xl-semibold">{t('segment.editChildChunk', { ns: 'datasetDocuments' })}</div>
+          <div className="system-xl-semibold text-text-primary">
+            {t(($) => $['segment.editChildChunk'], { ns: 'datasetDocuments' })}
+          </div>
           <div className="flex items-center gap-x-2">
-            <SegmentIndexTag positionId={childChunkInfo?.position || ''} labelPrefix={t('segment.childChunk', { ns: 'datasetDocuments' }) as string} />
+            <SegmentIndexTag
+              positionId={childChunkInfo?.position || ''}
+              labelPrefix={t(($) => $['segment.childChunk'], { ns: 'datasetDocuments' }) as string}
+            />
             <Dot />
-            <span className="text-text-tertiary system-xs-medium">{wordCountText}</span>
+            <span className="system-xs-medium text-text-tertiary">{wordCountText}</span>
             <Dot />
-            <span className="text-text-tertiary system-xs-medium">
-              {EditTimeText}
-            </span>
+            <span className="system-xs-medium text-text-tertiary">{EditTimeText}</span>
           </div>
         </div>
         <div className="flex items-center">
@@ -147,17 +158,21 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
           )}
           <button
             type="button"
-            aria-label={t(fullScreen ? 'operation.zoomOut' : 'operation.zoomIn', { ns: 'common' })}
+            aria-label={t(($) => $[fullScreen ? 'operation.zoomOut' : 'operation.zoomIn'], {
+              ns: 'common',
+            })}
             className="mr-1 flex size-8 cursor-pointer items-center justify-center border-none bg-transparent p-1.5"
             onClick={toggleFullScreen}
           >
-            {fullScreen
-              ? <RiCollapseDiagonalLine className="size-4 text-text-tertiary" aria-hidden="true" />
-              : <RiExpandDiagonalLine className="size-4 text-text-tertiary" aria-hidden="true" />}
+            {fullScreen ? (
+              <RiCollapseDiagonalLine className="size-4 text-text-tertiary" aria-hidden="true" />
+            ) : (
+              <RiExpandDiagonalLine className="size-4 text-text-tertiary" aria-hidden="true" />
+            )}
           </button>
           <button
             type="button"
-            aria-label={t('operation.close', { ns: 'common' })}
+            aria-label={t(($) => $['operation.close'], { ns: 'common' })}
             className="flex size-8 cursor-pointer items-center justify-center border-none bg-transparent p-1.5"
             onClick={onCancel}
           >
@@ -165,27 +180,45 @@ const ChildSegmentDetail: FC<IChildSegmentDetailProps> = ({
           </button>
         </div>
       </div>
-      <div className={cn('flex w-full grow', fullScreen ? 'flex-row justify-center gap-x-8 px-6 pt-6' : 'flex-col gap-y-3 px-4 py-3')}>
-        <div className={cn('overflow-hidden break-all whitespace-pre-line', fullScreen ? 'h-full w-1/2' : 'h-0 grow')}>
+      <div
+        className={cn(
+          'flex w-full grow',
+          fullScreen ? 'flex-row justify-center gap-x-8 px-6 pt-6' : 'flex-col gap-y-3 px-4 py-3',
+        )}
+      >
+        <div
+          className={cn(
+            'overflow-hidden break-all whitespace-pre-line',
+            fullScreen ? 'h-full w-1/2' : 'h-0 grow',
+          )}
+        >
           <ChunkContent
             docForm={docForm}
             question={content}
-            onQuestionChange={content => setContent(content)}
+            onQuestionChange={(content) => setContent(content)}
             isEditMode={true}
           />
         </div>
         <div className={cn('shrink-0', fullScreen ? 'w-[320px]' : 'w-full')}>
           <div className="rounded-xl border border-components-panel-border bg-components-panel-bg px-3 py-2">
-            <div className="mb-2 text-text-tertiary system-xs-semibold-uppercase">{t('segment.metadata', { ns: 'datasetDocuments' })}</div>
+            <div className="mb-2 system-xs-semibold-uppercase text-text-tertiary">
+              {t(($) => $['segment.metadata'], { ns: 'datasetDocuments' })}
+            </div>
             <div className="space-y-2">
-              {metadataItems.length === 0
-                ? <div className="text-text-tertiary system-xs-regular">-</div>
-                : metadataItems.map(item => (
-                    <div key={item.key} className="space-y-1">
-                      <div className="text-text-tertiary system-2xs-medium-uppercase">{item.label}</div>
-                      <div className="break-all text-text-primary system-xs-regular">{item.value}</div>
+              {metadataItems.length === 0 ? (
+                <div className="system-xs-regular text-text-tertiary">-</div>
+              ) : (
+                metadataItems.map((item) => (
+                  <div key={item.key} className="space-y-1">
+                    <div className="system-2xs-medium-uppercase text-text-tertiary">
+                      {item.label}
                     </div>
-                  ))}
+                    <div className="system-xs-regular break-all text-text-primary">
+                      {item.value}
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>

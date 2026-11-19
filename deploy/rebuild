@@ -101,6 +101,26 @@ fi
 
 COMPOSE=(docker compose "${COMPOSE_FILES[@]}")
 
+# Dify 1.16's agent services fall back to development secrets published in
+# .env.example. Give this machine its own the first time one is missing or
+# still the published default; the values stay in docker/.env and are never
+# printed.
+ensure_env_secret() {
+  local name="$1" dev_default="${2:-}" current value
+  current="$(sed -n "s/^${name}=//p" .env | tail -n 1)"
+  if [ -z "$current" ] || [ "$current" = "$dev_default" ]; then
+    value="$(openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n')"
+    sed -i "/^${name}=/d" .env
+    echo "${name}=${value}" >> .env
+    echo "==> Generated ${name} in docker/.env"
+  fi
+}
+if [ -f .env ]; then
+  ensure_env_secret DIFY_AGENT_API_TOKEN dify-agent-run-token-for-dev-only
+  ensure_env_secret DIFY_AGENT_SERVER_SECRET_KEY MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
+  ensure_env_secret DIFY_AGENT_SHELLCTL_AUTH_TOKEN
+fi
+
 echo "==> Removing stale dify-local-api:dev / dify-local-web:dev images and build cache..."
 docker rmi dify-local-api:dev dify-local-web:dev 2>/dev/null || true
 docker image prune -f
@@ -124,7 +144,8 @@ echo "==> Redeploying: ${SERVICES[*]}"
 # Services that aren't rebuilt still need recreating when their compose
 # config changed (a new mount or setting from docker-compose.prism.yaml);
 # a plain `up -d` recreates exactly those and leaves the rest running.
-"${COMPOSE[@]}" up -d --no-deps nginx ssrf_proxy plugin_daemon ietfdata_service
+"${COMPOSE[@]}" up -d --no-deps nginx ssrf_proxy plugin_daemon ietfdata_service \
+  agent_ssrf_proxy local_sandbox agent_backend
 
 echo "==> Restarting nginx (picks up new container IPs and any config template changes)"
 "${COMPOSE[@]}" restart --no-deps nginx

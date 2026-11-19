@@ -1,6 +1,7 @@
 'use client'
 
 import type { FC } from 'react'
+import type { StrategyParamSchema } from '@/models/datasets'
 import { useTranslation } from 'react-i18next'
 
 type TextLabelProps = {
@@ -8,13 +9,13 @@ type TextLabelProps = {
 }
 
 const TextLabel: FC<TextLabelProps> = ({ children }) => {
-  return <label className="text-text-secondary system-sm-semibold">{children}</label>
+  return <label className="system-sm-semibold text-text-secondary">{children}</label>
 }
 
 export type FrameworkParamInputProps = {
   paramKey: string
   type: 'int' | 'float' | 'string' | 'select'
-  labelKey: string
+  labelKey: StrategyParamSchema['labelKey']
   value: unknown
   options?: string[]
   min?: number
@@ -36,7 +37,7 @@ export const FrameworkParamInput: FC<FrameworkParamInputProps> = ({
   onChange,
 }) => {
   const { t } = useTranslation()
-  const label = t(labelKey, { ns: 'datasetCreation', defaultValue: labelKey })
+  const label = t(($) => $[labelKey], { ns: 'datasetCreation' })
 
   if (type === 'select' && options) {
     return (
@@ -45,10 +46,12 @@ export const FrameworkParamInput: FC<FrameworkParamInputProps> = ({
         <select
           className="h-9 rounded-lg border border-components-panel-border bg-components-panel-bg px-3 text-sm text-text-primary"
           value={String(value ?? options[0])}
-          onChange={e => onChange(paramKey, e.target.value)}
+          onChange={(e) => onChange(paramKey, e.target.value)}
         >
-          {options.map(opt => (
-            <option key={opt} value={opt}>{opt}</option>
+          {options.map((opt) => (
+            <option key={opt} value={opt}>
+              {opt}
+            </option>
           ))}
         </select>
       </div>
@@ -65,7 +68,14 @@ export const FrameworkParamInput: FC<FrameworkParamInputProps> = ({
         min={min}
         max={max}
         step={type === 'float' ? 0.01 : 1}
-        onChange={e => onChange(paramKey, type === 'float' ? Number.parseFloat(e.target.value) : Number.parseInt(e.target.value, 10))}
+        onChange={(e) =>
+          onChange(
+            paramKey,
+            type === 'float'
+              ? Number.parseFloat(e.target.value)
+              : Number.parseInt(e.target.value, 10),
+          )
+        }
       />
     </div>
   )

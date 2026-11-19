@@ -277,6 +277,7 @@ def _update_in_place(app_id: str, account, model_config: dict) -> str:
         tenant_id=account.current_tenant_id,
         config=model_config,
         app_mode=app_model.mode,
+        session=db.session(),
     )
     new_config = AppModelConfig(app_id=app_model.id, created_by=account.id, updated_by=account.id)
     new_config = new_config.from_model_config_dict(validated)

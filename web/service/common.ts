@@ -9,7 +9,6 @@ import type {
   CommonResponse,
   ICurrentWorkspace,
   InitValidateStatusResponse,
-  InvitationResponse,
   SetupStatusResponse,
 } from '@/models/common'
 import { del, get, patch, post } from './base'
@@ -25,10 +24,22 @@ type LoginFail = {
   message: string
 }
 type LoginResponse = LoginSuccess | LoginFail
-export const login = ({ url, body }: { url: string, body: Record<string, any> }): Promise<LoginResponse> => {
+export const login = ({
+  url,
+  body,
+}: {
+  url: string
+  body: Record<string, any>
+}): Promise<LoginResponse> => {
   return post<LoginResponse>(url, { body })
 }
-export const webAppLogin = ({ url, body }: { url: string, body: Record<string, any> }): Promise<LoginResponse> => {
+export const webAppLogin = ({
+  url,
+  body,
+}: {
+  url: string
+  body: Record<string, any>
+}): Promise<LoginResponse> => {
   return post<LoginResponse>(url, { body }, { isPublicAPI: true })
 }
 
@@ -47,34 +58,70 @@ export const fetchInitValidateStatus = (): Promise<InitValidateStatusResponse> =
 export const fetchSetupStatus = (): Promise<SetupStatusResponse> => {
   return get<SetupStatusResponse>('/setup')
 }
-export const updateUserProfile = ({ url, body }: { url: string, body: Record<string, any> }): Promise<CommonResponse> => {
+export const updateUserProfile = ({
+  url,
+  body,
+}: {
+  url: string
+  body: Record<string, any>
+}): Promise<CommonResponse> => {
   return post<CommonResponse>(url, { body })
 }
 
-export const inviteMember = ({ url, body }: { url: string, body: Record<string, any> }): Promise<InvitationResponse> => {
-  return post<InvitationResponse>(url, { body })
-}
-export const deleteMemberOrCancelInvitation = ({ url }: { url: string }): Promise<CommonResponse> => {
+export const deleteMemberOrCancelInvitation = ({
+  url,
+}: {
+  url: string
+}): Promise<CommonResponse> => {
   return del<CommonResponse>(url)
 }
 
-export const sendOwnerEmail = (body: { language?: string }): Promise<CommonResponse & { data: string }> =>
-  post<CommonResponse & { data: string }>('/workspaces/current/members/send-owner-transfer-confirm-email', { body })
+export const sendOwnerEmail = (body: {
+  language?: string
+}): Promise<CommonResponse & { data: string }> =>
+  post<CommonResponse & { data: string }>(
+    '/workspaces/current/members/send-owner-transfer-confirm-email',
+    { body },
+  )
 
-export const verifyOwnerEmail = (body: { code: string, token: string }): Promise<CommonResponse & { is_valid: boolean, email: string, token: string }> =>
-  post<CommonResponse & { is_valid: boolean, email: string, token: string }>('/workspaces/current/members/owner-transfer-check', { body })
+export const verifyOwnerEmail = (body: {
+  code: string
+  token: string
+}): Promise<CommonResponse & { is_valid: boolean; email: string; token: string }> =>
+  post<CommonResponse & { is_valid: boolean; email: string; token: string }>(
+    '/workspaces/current/members/owner-transfer-check',
+    { body },
+  )
 
-export const ownershipTransfer = (memberID: string, body: { token: string }): Promise<CommonResponse & { is_valid: boolean, email: string, token: string }> =>
-  post<CommonResponse & { is_valid: boolean, email: string, token: string }>(`/workspaces/current/members/${memberID}/owner-transfer`, { body })
+export const ownershipTransfer = (
+  memberID: string,
+  body: { token: string },
+): Promise<CommonResponse & { is_valid: boolean; email: string; token: string }> =>
+  post<CommonResponse & { is_valid: boolean; email: string; token: string }>(
+    `/workspaces/current/members/${memberID}/owner-transfer`,
+    { body },
+  )
 
 export const fetchFilePreview = ({ fileID }: { fileID: string }): Promise<{ content: string }> => {
   return get<{ content: string }>(`/files/${fileID}/preview`)
 }
-export const updateCurrentWorkspace = ({ url, body }: { url: string, body: Record<string, any> }): Promise<ICurrentWorkspace> => {
+export const updateCurrentWorkspace = ({
+  url,
+  body,
+}: {
+  url: string
+  body: Record<string, any>
+}): Promise<ICurrentWorkspace> => {
   return post<ICurrentWorkspace>(url, { body })
 }
 
-export const updateWorkspaceInfo = ({ url, body }: { url: string, body: Record<string, any> }): Promise<ICurrentWorkspace> => {
+export const updateWorkspaceInfo = ({
+  url,
+  body,
+}: {
+  url: string
+  body: Record<string, any>
+}): Promise<ICurrentWorkspace> => {
   return post<ICurrentWorkspace>(url, { body })
 }
 
@@ -93,11 +140,23 @@ type ActivateMemberBody = {
   timezone?: string
 }
 
-export const invitationCheck = ({ url, params }: { url: string, params: { workspace_id?: string, email?: string, token: string } }): Promise<CommonResponse & { is_valid: boolean, data: InvitationCheckData }> => {
-  return get<CommonResponse & { is_valid: boolean, data: InvitationCheckData }>(url, { params })
+export const invitationCheck = ({
+  url,
+  params,
+}: {
+  url: string
+  params: { workspace_id?: string; email?: string; token: string }
+}): Promise<CommonResponse & { is_valid: boolean; data: InvitationCheckData }> => {
+  return get<CommonResponse & { is_valid: boolean; data: InvitationCheckData }>(url, { params })
 }
 
-export const activateMember = ({ url, body }: { url: string, body: ActivateMemberBody }): Promise<LoginResponse> => {
+export const activateMember = ({
+  url,
+  body,
+}: {
+  url: string
+  body: ActivateMemberBody
+}): Promise<LoginResponse> => {
   return post<LoginResponse>(url, { body })
 }
 
@@ -113,7 +172,13 @@ export const fetchDefaultModal = (url: string): Promise<{ data: DefaultModelResp
   return get<{ data: DefaultModelResponse }>(url)
 }
 
-export const updateDefaultModel = ({ url, body }: { url: string, body: any }): Promise<CommonResponse> => {
+export const updateDefaultModel = ({
+  url,
+  body,
+}: {
+  url: string
+  body: any
+}): Promise<CommonResponse> => {
   return post<CommonResponse>(url, { body })
 }
 
@@ -121,21 +186,50 @@ export const fetchModelParameterRules = (url: string): Promise<{ data: ModelPara
   return get<{ data: ModelParameterRule[] }>(url)
 }
 
-export const enableModel = (url: string, body: { model: string, model_type: ModelTypeEnum }): Promise<CommonResponse> =>
-  patch<CommonResponse>(url, { body })
+export const enableModel = (
+  url: string,
+  body: { model: string; model_type: ModelTypeEnum },
+): Promise<CommonResponse> => patch<CommonResponse>(url, { body })
 
-export const disableModel = (url: string, body: { model: string, model_type: ModelTypeEnum }): Promise<CommonResponse> =>
-  patch<CommonResponse>(url, { body })
+export const disableModel = (
+  url: string,
+  body: { model: string; model_type: ModelTypeEnum },
+): Promise<CommonResponse> => patch<CommonResponse>(url, { body })
 
-export const sendForgotPasswordEmail = ({ url, body }: { url: string, body: { email: string } }): Promise<CommonResponse & { data: string }> =>
+export const sendForgotPasswordEmail = ({
+  url,
+  body,
+}: {
+  url: string
+  body: { email: string }
+}): Promise<CommonResponse & { data: string }> =>
   post<CommonResponse & { data: string }>(url, { body })
-export const changePasswordWithToken = ({ url, body }: { url: string, body: { token: string, new_password: string, password_confirm: string } }): Promise<CommonResponse> =>
-  post<CommonResponse>(url, { body })
-export const changeWebAppPasswordWithToken = ({ url, body }: { url: string, body: { token: string, new_password: string, password_confirm: string } }): Promise<CommonResponse> =>
-  post<CommonResponse>(url, { body }, { isPublicAPI: true })
+export const changePasswordWithToken = ({
+  url,
+  body,
+}: {
+  url: string
+  body: { token: string; new_password: string; password_confirm: string }
+}): Promise<CommonResponse> => post<CommonResponse>(url, { body })
+export const changeWebAppPasswordWithToken = ({
+  url,
+  body,
+}: {
+  url: string
+  body: { token: string; new_password: string; password_confirm: string }
+}): Promise<CommonResponse> => post<CommonResponse>(url, { body }, { isPublicAPI: true })
 
-export const uploadRemoteFileInfo = (url: string, isPublic?: boolean, silent?: boolean): Promise<{ id: string, name: string, size: number, mime_type: string, url: string }> => {
-  return post<{ id: string, name: string, size: number, mime_type: string, url: string }>('/remote-files/upload', { body: { url } }, { isPublicAPI: isPublic, silent })
+export const uploadRemoteFileInfo = (
+  url: string,
+  isPublic?: boolean,
+  silent?: boolean,
+  uploadEndpoint?: string,
+): Promise<{ id: string; name: string; size: number; mime_type: string; url: string }> => {
+  return post<{ id: string; name: string; size: number; mime_type: string; url: string }>(
+    uploadEndpoint || '/remote-files/upload',
+    { body: { url } },
+    { isPublicAPI: isPublic, silent },
+  )
 }
 
 export type UploadedConsoleFile = {
@@ -247,18 +341,24 @@ export type IetfPreprocessedUploadRequest = {
   processed_path: string
 }
 
-export const importIetfMailarchiveFile = (body: IetfMailarchiveImportRequest): Promise<UploadedConsoleFile> => {
+export const importIetfMailarchiveFile = (
+  body: IetfMailarchiveImportRequest,
+): Promise<UploadedConsoleFile> => {
   return post<UploadedConsoleFile>('/ietf/imports/mailarchive', { body })
 }
 
-export const importIetfMailarchiveAsMbox = (body: IetfMailarchiveImportRequest): Promise<UploadedConsoleFile> => {
+export const importIetfMailarchiveAsMbox = (
+  body: IetfMailarchiveImportRequest,
+): Promise<UploadedConsoleFile> => {
   return post<UploadedConsoleFile>('/ietf/imports/mailarchive/mbox', { body })
 }
 
 export const downloadIetfMailarchiveAsMboxToLocal = (
   body: IetfMailarchiveImportRequest,
 ): Promise<IetfMailarchiveLocalDownloadResponse> => {
-  return post<IetfMailarchiveLocalDownloadResponse>('/ietf/imports/mailarchive/mbox/download', { body })
+  return post<IetfMailarchiveLocalDownloadResponse>('/ietf/imports/mailarchive/mbox/download', {
+    body,
+  })
 }
 
 export const downloadAndPreprocessMailarchiveYears = (
@@ -267,7 +367,9 @@ export const downloadAndPreprocessMailarchiveYears = (
   return post<IetfPreprocessResponse>('/ietf/imports/mailarchive/mbox/preprocess', { body })
 }
 
-export const uploadIetfPreprocessedFile = (body: IetfPreprocessedUploadRequest): Promise<UploadedConsoleFile> => {
+export const uploadIetfPreprocessedFile = (
+  body: IetfPreprocessedUploadRequest,
+): Promise<UploadedConsoleFile> => {
   return post<UploadedConsoleFile>('/ietf/imports/mailarchive/preprocessed/upload', { body })
 }
 
@@ -308,7 +410,9 @@ export type GithubJobState = {
   error?: string
 }
 
-export const startGithubImport = (body: GithubImportRequest): Promise<{ job_id: string, status: GithubJobStatus }> => {
+export const startGithubImport = (
+  body: GithubImportRequest,
+): Promise<{ job_id: string; status: GithubJobStatus }> => {
   return post('/ietf/imports/github', { body })
 }
 
@@ -316,7 +420,10 @@ export const fetchGithubImportStatus = (jobId: string): Promise<GithubJobState> 
   return get(`/ietf/imports/github/${jobId}/status`)
 }
 
-export const resumeGithubImport = (jobId: string, github_token: string): Promise<{ job_id: string, status: GithubJobStatus }> => {
+export const resumeGithubImport = (
+  jobId: string,
+  github_token: string,
+): Promise<{ job_id: string; status: GithubJobStatus }> => {
   return post(`/ietf/imports/github/${jobId}/resume`, { body: { github_token } })
 }
 
@@ -345,7 +452,9 @@ export type IetfDraftRelations = {
   last_rev_date: string | null
 }
 
-export const fetchIetfWgDocuments = (wgAcronym: string): Promise<{ documents: IetfWgDocument[] }> => {
+export const fetchIetfWgDocuments = (
+  wgAcronym: string,
+): Promise<{ documents: IetfWgDocument[] }> => {
   return get<{ documents: IetfWgDocument[] }>(`/ietf/wg/${encodeURIComponent(wgAcronym)}/documents`)
 }
 
@@ -353,15 +462,25 @@ export const fetchIetfDraftRelations = (draftName: string): Promise<IetfDraftRel
   return get<IetfDraftRelations>('/ietf/draft/relations', { params: { draft_name: draftName } })
 }
 
-export const importIetfDraftEvolution = (draftName: string, diffFormat: 'prose' | 'patch' = 'prose', skipMinorEdits = false): Promise<UploadedConsoleFile> => {
-  return post<UploadedConsoleFile>('/ietf/imports/draft-evolution', { body: { draft_name: draftName, diff_format: diffFormat, skip_minor_edits: skipMinorEdits } })
+export const importIetfDraftEvolution = (
+  draftName: string,
+  diffFormat: 'prose' | 'patch' = 'prose',
+  skipMinorEdits = false,
+): Promise<UploadedConsoleFile> => {
+  return post<UploadedConsoleFile>('/ietf/imports/draft-evolution', {
+    body: { draft_name: draftName, diff_format: diffFormat, skip_minor_edits: skipMinorEdits },
+  })
 }
 
 export const importIetfDraftAnnotatedRfc = (draftName: string): Promise<UploadedConsoleFile> => {
-  return post<UploadedConsoleFile>('/ietf/imports/draft-annotated-rfc', { body: { draft_name: draftName } })
+  return post<UploadedConsoleFile>('/ietf/imports/draft-annotated-rfc', {
+    body: { draft_name: draftName },
+  })
 }
 
-export const fetchIetfMailarchiveSyncStatus = (listName: string): Promise<IetfSyncStatusResponse> => {
+export const fetchIetfMailarchiveSyncStatus = (
+  listName: string,
+): Promise<IetfSyncStatusResponse> => {
   return get<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/status`)
 }
 
@@ -369,7 +488,10 @@ export const triggerIetfMailarchiveSync = (listName: string): Promise<IetfSyncSt
   return post<IetfSyncStatusResponse>(`/ietf/mailarchive/${encodeURIComponent(listName)}/sync`, {})
 }
 
-export const fetchIetfRfcSuggestions = (params: { query?: string, limit?: number }): Promise<{ suggestions: IetfRfcSuggestion[] }> => {
+export const fetchIetfRfcSuggestions = (params: {
+  query?: string
+  limit?: number
+}): Promise<{ suggestions: IetfRfcSuggestion[] }> => {
   return get<{ suggestions: IetfRfcSuggestion[] }>('/ietf/rfcs/suggestions', { params })
 }
 
@@ -378,10 +500,15 @@ export const fetchIetfRfcFormats = (rfcId: string): Promise<IetfRfcFormatsRespon
 }
 
 export const fetchIetfDraftFormats = (draftName: string): Promise<IetfDraftFormatsResponse> => {
-  return get<IetfDraftFormatsResponse>('/ietf/drafts/formats', { params: { draft_name: draftName } })
+  return get<IetfDraftFormatsResponse>('/ietf/drafts/formats', {
+    params: { draft_name: draftName },
+  })
 }
 
-export const sendEMailLoginCode = (email: string, language = 'en-US'): Promise<CommonResponse & { data: string }> =>
+export const sendEMailLoginCode = (
+  email: string,
+  language = 'en-US',
+): Promise<CommonResponse & { data: string }> =>
   post<CommonResponse & { data: string }>('/email-code-login', { body: { email, language } })
 
 export const emailLoginWithCode = (data: {
@@ -390,52 +517,106 @@ export const emailLoginWithCode = (data: {
   token: string
   language: string
   timezone?: string
+}): Promise<LoginResponse> => post<LoginResponse>('/email-code-login/validity', { body: data })
+
+export const sendResetPasswordCode = (
+  email: string,
+  language = 'en-US',
+): Promise<CommonResponse & { data: string; message?: string; code?: string }> =>
+  post<CommonResponse & { data: string; message?: string; code?: string }>('/forgot-password', {
+    body: { email, language },
+  })
+
+export const verifyResetPasswordCode = (body: {
+  email: string
+  code: string
+  token: string
+}): Promise<CommonResponse & { is_valid: boolean; token: string }> =>
+  post<CommonResponse & { is_valid: boolean; token: string }>('/forgot-password/validity', { body })
+
+export const sendWebAppEMailLoginCode = (
+  email: string,
+  language = 'en-US',
+): Promise<CommonResponse & { data: string }> =>
+  post<CommonResponse & { data: string }>(
+    '/email-code-login',
+    { body: { email, language } },
+    { isPublicAPI: true },
+  )
+
+export const webAppEmailLoginWithCode = (data: {
+  email: string
+  code: string
+  token: string
 }): Promise<LoginResponse> =>
-  post<LoginResponse>('/email-code-login/validity', { body: data })
-
-export const sendResetPasswordCode = (email: string, language = 'en-US'): Promise<CommonResponse & { data: string, message?: string, code?: string }> =>
-  post<CommonResponse & { data: string, message?: string, code?: string }>('/forgot-password', { body: { email, language } })
-
-export const verifyResetPasswordCode = (body: { email: string, code: string, token: string }): Promise<CommonResponse & { is_valid: boolean, token: string }> =>
-  post<CommonResponse & { is_valid: boolean, token: string }>('/forgot-password/validity', { body })
-
-export const sendWebAppEMailLoginCode = (email: string, language = 'en-US'): Promise<CommonResponse & { data: string }> =>
-  post<CommonResponse & { data: string }>('/email-code-login', { body: { email, language } }, { isPublicAPI: true })
-
-export const webAppEmailLoginWithCode = (data: { email: string, code: string, token: string }): Promise<LoginResponse> =>
   post<LoginResponse>('/email-code-login/validity', { body: data }, { isPublicAPI: true })
 
-export const sendWebAppResetPasswordCode = (email: string, language = 'en-US'): Promise<CommonResponse & { data: string, message?: string, code?: string }> =>
-  post<CommonResponse & { data: string, message?: string, code?: string }>('/forgot-password', { body: { email, language } }, { isPublicAPI: true })
+export const sendWebAppResetPasswordCode = (
+  email: string,
+  language = 'en-US',
+): Promise<CommonResponse & { data: string; message?: string; code?: string }> =>
+  post<CommonResponse & { data: string; message?: string; code?: string }>(
+    '/forgot-password',
+    { body: { email, language } },
+    { isPublicAPI: true },
+  )
 
-export const verifyWebAppResetPasswordCode = (body: { email: string, code: string, token: string }): Promise<CommonResponse & { is_valid: boolean, token: string }> =>
-  post<CommonResponse & { is_valid: boolean, token: string }>('/forgot-password/validity', { body }, { isPublicAPI: true })
+export const verifyWebAppResetPasswordCode = (body: {
+  email: string
+  code: string
+  token: string
+}): Promise<CommonResponse & { is_valid: boolean; token: string }> =>
+  post<CommonResponse & { is_valid: boolean; token: string }>(
+    '/forgot-password/validity',
+    { body },
+    { isPublicAPI: true },
+  )
 
 export const sendDeleteAccountCode = (): Promise<CommonResponse & { data: string }> =>
   get<CommonResponse & { data: string }>('/account/delete/verify')
 
-export const verifyDeleteAccountCode = (body: { code: string, token: string }): Promise<CommonResponse & { is_valid: boolean }> =>
+export const verifyDeleteAccountCode = (body: {
+  code: string
+  token: string
+}): Promise<CommonResponse & { is_valid: boolean }> =>
   post<CommonResponse & { is_valid: boolean }>('/account/delete', { body })
 
-export const submitDeleteAccountFeedback = (body: { feedback: string, email: string }): Promise<CommonResponse> =>
-  post<CommonResponse>('/account/delete/feedback', { body })
+export const submitDeleteAccountFeedback = (body: {
+  feedback: string
+  email: string
+}): Promise<CommonResponse> => post<CommonResponse>('/account/delete/feedback', { body })
 
 export const getDocDownloadUrl = (doc_name: string): Promise<{ url: string }> =>
   get<{ url: string }>('/compliance/download', { params: { doc_name } }, { silent: true })
 
-export const sendVerifyCode = (body: { email: string, phase: string, token?: string }): Promise<CommonResponse & { data: string }> =>
+export const sendVerifyCode = (body: {
+  email: string
+  phase: string
+  token?: string
+}): Promise<CommonResponse & { data: string }> =>
   post<CommonResponse & { data: string }>('/account/change-email', { body })
 
-export const verifyEmail = (body: { email: string, code: string, token: string }): Promise<CommonResponse & { is_valid: boolean, email: string, token: string }> =>
-  post<CommonResponse & { is_valid: boolean, email: string, token: string }>('/account/change-email/validity', { body })
+export const verifyEmail = (body: {
+  email: string
+  code: string
+  token: string
+}): Promise<CommonResponse & { is_valid: boolean; email: string; token: string }> =>
+  post<CommonResponse & { is_valid: boolean; email: string; token: string }>(
+    '/account/change-email/validity',
+    { body },
+  )
 
-export const resetEmail = (body: { new_email: string, token: string }): Promise<CommonResponse> =>
+export const resetEmail = (body: { new_email: string; token: string }): Promise<CommonResponse> =>
   post<CommonResponse>('/account/change-email/reset', { body })
 
 export const checkEmailExisted = (body: { email: string }): Promise<CommonResponse> =>
   post<CommonResponse>('/account/change-email/check-email-unique', { body }, { silent: true })
 
-export const getAvatar = async ({ avatar }: { avatar: string }): Promise<{ avatar_url: string }> => {
+export const getAvatar = async ({
+  avatar,
+}: {
+  avatar: string
+}): Promise<{ avatar_url: string }> => {
   const { consoleClient } = await import('./client')
   return consoleClient.account.avatar.get({ query: { avatar } })
 }

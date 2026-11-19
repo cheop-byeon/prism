@@ -11,14 +11,16 @@ from unittest.mock import MagicMock
 import orjson
 
 from core.rag.datasource.keyword.bm25.bm25 import Bm25Keyword
+from models.dataset import Dataset
 
 
 def _dataset_with_blob(blob: dict) -> MagicMock:
-    dataset = MagicMock()
+    # spec=Dataset: an attribute the real model doesn't have fails here too.
+    dataset = MagicMock(spec=Dataset)
     table = MagicMock()
     table.data_source_type = "database"
     table.keyword_table = orjson.dumps(blob).decode()
-    dataset.dataset_keyword_table = table
+    dataset.get_dataset_keyword_table.return_value = table
     return dataset
 
 
@@ -34,7 +36,7 @@ class TestBm25CorpusLoading:
         keyword = Bm25Keyword.__new__(Bm25Keyword)
         keyword.dataset = _dataset_with_blob(blob)
 
-        corpus_tokens, doc_ids = keyword._load_corpus()
+        corpus_tokens, doc_ids = keyword._load_corpus(MagicMock())
 
         assert corpus_tokens == [["target", "delay"], ["late", "comers", "measure"]]
         assert doc_ids == ["node-1", "node-2"]  # order preserved
@@ -45,7 +47,7 @@ class TestBm25CorpusLoading:
         keyword = Bm25Keyword.__new__(Bm25Keyword)
         keyword.dataset = _dataset_with_blob(blob)
 
-        corpus_tokens, doc_ids = keyword._load_corpus()
+        corpus_tokens, doc_ids = keyword._load_corpus(MagicMock())
 
         assert corpus_tokens == []
         assert doc_ids == []

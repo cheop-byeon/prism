@@ -9,13 +9,14 @@ index and ranks by overlap count.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, override
 
 import orjson
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 from core.rag.datasource.keyword.keyword_base import BaseKeyword
 from core.rag.models.document import Document
-from extensions.ext_database import db
 from extensions.ext_redis import redis_client
 from extensions.ext_storage import storage
 from models.dataset import Dataset, DatasetKeywordTable, DocumentSegment
@@ -53,10 +54,11 @@ class Bm25Keyword(BaseKeyword):
     # Write operations
     # ------------------------------------------------------------------
 
-    def create(self, texts: list[Document], **kwargs) -> Bm25Keyword:
+    @override
+    def create(self, texts: list[Document], session: Session, **kwargs: Any) -> Bm25Keyword:
         lock_name = f"keyword_indexing_lock_{self.dataset.id}"
         with redis_client.lock(lock_name, timeout=600):
-            corpus_tokens, doc_ids = self._load_corpus()
+            corpus_tokens, doc_ids = self._load_corpus(session)
             for text in texts:
                 if text.metadata is None:
                     continue
@@ -64,13 +66,14 @@ class Bm25Keyword(BaseKeyword):
                 if doc_id not in doc_ids:
                     corpus_tokens.append(_tokenize(text.page_content))
                     doc_ids.append(doc_id)
-            self._save_corpus(corpus_tokens, doc_ids)
+            self._save_corpus(corpus_tokens, doc_ids, session)
         return self
 
-    def add_texts(self, texts: list[Document], **kwargs) -> None:
+    @override
+    def add_texts(self, texts: list[Document], session: Session, **kwargs: Any) -> None:
         lock_name = f"keyword_indexing_lock_{self.dataset.id}"
         with redis_client.lock(lock_name, timeout=600):
-            corpus_tokens, doc_ids = self._load_corpus()
+            corpus_tokens, doc_ids = self._load_corpus(session)
             for text in texts:
                 if text.metadata is None:
                     continue
@@ -78,27 +81,29 @@ class Bm25Keyword(BaseKeyword):
                 if doc_id not in doc_ids:
                     corpus_tokens.append(_tokenize(text.page_content))
                     doc_ids.append(doc_id)
-            self._save_corpus(corpus_tokens, doc_ids)
+            self._save_corpus(corpus_tokens, doc_ids, session)
 
-    def delete_by_ids(self, ids: list[str]) -> None:
+    @override
+    def delete_by_ids(self, ids: list[str], session: Session, **kwargs: Any) -> None:
         lock_name = f"keyword_indexing_lock_{self.dataset.id}"
         with redis_client.lock(lock_name, timeout=600):
-            corpus_tokens, doc_ids = self._load_corpus()
+            corpus_tokens, doc_ids = self._load_corpus(session)
             id_set = set(ids)
             pairs = [(t, d) for t, d in zip(corpus_tokens, doc_ids) if d not in id_set]
             if pairs:
                 new_tokens, new_ids = zip(*pairs)
-                self._save_corpus(list(new_tokens), list(new_ids))
+                self._save_corpus(list(new_tokens), list(new_ids), session)
             else:
-                self._save_corpus([], [])
+                self._save_corpus([], [], session)
 
-    def delete(self) -> None:
+    @override
+    def delete(self, *, session: Session) -> None:
         lock_name = f"keyword_indexing_lock_{self.dataset.id}"
         with redis_client.lock(lock_name, timeout=600):
-            dataset_keyword_table = self.dataset.dataset_keyword_table
+            dataset_keyword_table = self.dataset.get_dataset_keyword_table(session=session)
             if dataset_keyword_table:
-                db.session.delete(dataset_keyword_table)
-                db.session.commit()
+                session.delete(dataset_keyword_table)
+                session.commit()
                 if dataset_keyword_table.data_source_type != "database":
                     file_key = "keyword_files/" + self.dataset.tenant_id + "/" + self.dataset.id + ".txt"
                     storage.delete(file_key)
@@ -107,17 +112,19 @@ class Bm25Keyword(BaseKeyword):
     # Read operations
     # ------------------------------------------------------------------
 
-    def text_exists(self, id: str) -> bool:
-        _, doc_ids = self._load_corpus()
+    @override
+    def text_exists(self, id: str, *, session: Session) -> bool:
+        _, doc_ids = self._load_corpus(session)
         return id in doc_ids
 
-    def search(self, query: str, **kwargs: Any) -> list[Document]:
+    @override
+    def search(self, query: str, *, session: Session, **kwargs: Any) -> list[Document]:
         from rank_bm25 import BM25Plus
 
         k = kwargs.get("top_k", 4)
         document_ids_filter: list[str] | None = kwargs.get("document_ids_filter")
 
-        corpus_tokens, doc_ids = self._load_corpus()
+        corpus_tokens, doc_ids = self._load_corpus(session)
         if not doc_ids:
             return []
 
@@ -141,7 +148,7 @@ class Bm25Keyword(BaseKeyword):
         if not top_ids:
             return []
 
-        segment_query = db.session.query(DocumentSegment).where(
+        segment_query = select(DocumentSegment).where(
             DocumentSegment.dataset_id == self.dataset.id,
             DocumentSegment.index_node_id.in_(top_ids),
         )
@@ -149,7 +156,7 @@ class Bm25Keyword(BaseKeyword):
             segment_query = segment_query.where(
                 DocumentSegment.document_id.in_(document_ids_filter)
             )
-        segments = db.session.execute(segment_query).scalars().all()
+        segments = session.scalars(segment_query).all()
         segment_map = {seg.index_node_id: seg for seg in segments}
 
         documents: list[Document] = []
@@ -171,7 +178,7 @@ class Bm25Keyword(BaseKeyword):
     # Storage helpers
     # ------------------------------------------------------------------
 
-    def _load_corpus(self) -> tuple[list[list[str]], list[str]]:
+    def _load_corpus(self, session: Session) -> tuple[list[list[str]], list[str]]:
         """Return (corpus_tokens, doc_ids) from the stored index.
 
         Parses the raw JSON blob directly. DatasetKeywordTable.keyword_table_dict
@@ -179,7 +186,7 @@ class Bm25Keyword(BaseKeyword):
         value to a set, which raises on corpus_tokens (a list of lists is
         unhashable) and destroys doc_ids ordering.
         """
-        dataset_keyword_table = self.dataset.dataset_keyword_table
+        dataset_keyword_table = self.dataset.get_dataset_keyword_table(session=session)
         if dataset_keyword_table:
             raw_text: str | None = None
             if dataset_keyword_table.data_source_type == "database":
@@ -206,20 +213,20 @@ class Bm25Keyword(BaseKeyword):
             )
             if keyword_data_source_type == "database":
                 dataset_keyword_table.keyword_table = self._empty_blob()
-            db.session.add(dataset_keyword_table)
-            db.session.commit()
+            session.add(dataset_keyword_table)
+            session.flush()
         return [], []
 
-    def _save_corpus(self, corpus_tokens: list[list[str]], doc_ids: list[str]) -> None:
+    def _save_corpus(self, corpus_tokens: list[list[str]], doc_ids: list[str], session: Session) -> None:
         blob = orjson.dumps({
             "__type__": "bm25_index",
             "__data__": {"corpus_tokens": corpus_tokens, "doc_ids": doc_ids},
         }).decode("utf-8")
 
-        dataset_keyword_table = self.dataset.dataset_keyword_table
-        if dataset_keyword_table.data_source_type == "database":
+        dataset_keyword_table = self.dataset.get_dataset_keyword_table(session=session)
+        if dataset_keyword_table is not None and dataset_keyword_table.data_source_type == "database":
             dataset_keyword_table.keyword_table = blob
-            db.session.commit()
+            session.flush()
         else:
             file_key = "keyword_files/" + self.dataset.tenant_id + "/" + self.dataset.id + ".txt"
             if storage.exists(file_key):

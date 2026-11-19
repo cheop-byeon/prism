@@ -1,4 +1,4 @@
-export type WgRepo = { wg: string, repo: string }
+export type WgRepo = { wg: string; repo: string }
 
 export const WG_REPOS: WgRepo[] = [
   { wg: 'ace', repo: 'ace-wg/ace-dtls-profile' },
@@ -375,8 +375,8 @@ export const WG_REPOS: WgRepo[] = [
   { wg: 'wpack', repo: 'wpack-wg/bundled-responses' },
 ]
 
-export const WG_NAMES = [...new Set(WG_REPOS.map(r => r.wg))].sort()
+export const WG_NAMES = [...new Set(WG_REPOS.map((r) => r.wg))].sort()
 
 export function getReposForWg(wg: string): string[] {
-  return WG_REPOS.filter(r => r.wg === wg).map(r => r.repo)
+  return WG_REPOS.filter((r) => r.wg === wg).map((r) => r.repo)
 }

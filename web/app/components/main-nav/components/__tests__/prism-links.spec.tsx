@@ -1,4 +1,8 @@
-import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from '@langgenius/dify-ui/dropdown-menu'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@langgenius/dify-ui/dropdown-menu'
 import { render, screen } from '@testing-library/react'
 import PrismLinks from '../prism-links'
 
@@ -22,14 +26,15 @@ vi.mock('@/config', async (importOriginal) => {
   }
 })
 
-const renderLinks = () => render(
-  <DropdownMenu open>
-    <DropdownMenuTrigger>open</DropdownMenuTrigger>
-    <DropdownMenuContent>
-      <PrismLinks />
-    </DropdownMenuContent>
-  </DropdownMenu>,
-)
+const renderLinks = () =>
+  render(
+    <DropdownMenu open>
+      <DropdownMenuTrigger>open</DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <PrismLinks />
+      </DropdownMenuContent>
+    </DropdownMenu>,
+  )
 
 describe('PrismLinks', () => {
   beforeEach(() => {
@@ -49,8 +54,14 @@ describe('PrismLinks', () => {
 
     renderLinks()
 
-    expect(screen.getByText('Prism (Classic)').closest('a')).toHaveAttribute('href', 'https://prism.example/classic/')
-    expect(screen.getByText('Prism (Spectrum)').closest('a')).toHaveAttribute('href', 'https://prism.example/spectrum/')
+    expect(screen.getByText('Prism (Classic)').closest('a')).toHaveAttribute(
+      'href',
+      'https://prism.example/classic/',
+    )
+    expect(screen.getByText('Prism (Spectrum)').closest('a')).toHaveAttribute(
+      'href',
+      'https://prism.example/spectrum/',
+    )
     expect(screen.getByText('Prism (Spectrum)').closest('a')).toHaveAttribute('target', '_blank')
   })
 
