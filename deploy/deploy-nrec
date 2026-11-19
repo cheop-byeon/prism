@@ -143,20 +143,20 @@ services:
   api:
     image: dify-local-api:dev
     build:
-      context: ../api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: api/Dockerfile
 
   worker:
     image: dify-local-api:dev
     build:
-      context: ../api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: api/Dockerfile
 
   worker_beat:
     image: dify-local-api:dev
     build:
-      context: ../api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: api/Dockerfile
 
   web:
     image: dify-local-web:dev
@@ -166,42 +166,7 @@ services:
 EOF
 
 # ---------------------------------------------------------------------------
-# Phase 5 -- root .dockerignore
-#
-# Without this, building `web` (context = repo root for some builds) tries
-# to tar up the whole repo as build context, including docker/volumes/ --
-# Postgres/Weaviate data and certbot's permission-locked Let's Encrypt
-# keys -- which fails the build outright.
-# ---------------------------------------------------------------------------
-echo ""
-echo "==> Writing root .dockerignore"
-cat > ../.dockerignore <<'EOF'
-.git
-.gitignore
-docker/volumes/
-.env
-.env.*
-logs
-*.log*
-**/node_modules
-**/dist
-**/build
-**/coverage
-**/.next
-**/.pnpm-store
-.husky
-**/.venv
-**/__pycache__
-**/*.pyc
-.vscode
-.idea
-*.iml
-*.iws
-*.ipr
-EOF
-
-# ---------------------------------------------------------------------------
-# Phase 6 -- .env with generated secrets
+# Phase 5 -- .env with generated secrets
 #
 # Leave CONSOLE_API_URL / APP_API_URL / APP_WEB_URL / FILES_URL blank --
 # nginx fronts everything on one origin, and blank (relative URLs) is the
@@ -230,7 +195,7 @@ if ! grep -q '^COMPOSE_FILE=' .env; then
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 7 -- storage directory ownership
+# Phase 6 -- storage directory ownership
 #
 # The api/worker containers run as uid 1001 (the "dify" user), not the
 # host's login user. Left at default ownership, the first dataset upload
@@ -243,7 +208,7 @@ mkdir -p volumes/app/storage
 sudo chown -R 1001:1001 volumes/app/storage
 
 # ---------------------------------------------------------------------------
-# Phase 8 -- build and start the stack
+# Phase 7 -- build and start the stack
 #
 # COMPOSE_PROFILES is set in .env as
 # COMPOSE_PROFILES=${VECTOR_STORE:-weaviate},${DB_TYPE:-postgresql} and
@@ -275,7 +240,7 @@ for i in $(seq 1 60); do
 done
 
 # ---------------------------------------------------------------------------
-# Phase 9 -- (optional) the fine-tuned embedding model via Ollama
+# Phase 8 -- (optional) the fine-tuned embedding model via Ollama
 #
 # Off by default -- this is only needed for the fine-tuned RAG pipeline
 # specifically, not for a basic working Dify instance. Flip SETUP_OLLAMA=true
@@ -323,7 +288,7 @@ EOF
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 10 -- domain + HTTPS
+# Phase 9 -- domain + HTTPS
 #
 # Two gotchas discovered doing this by hand, both baked in below:
 #   1. Enabling NGINX_HTTPS_ENABLED before the cert exists crash-loops

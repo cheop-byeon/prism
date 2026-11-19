@@ -1,7 +1,7 @@
 """Add agentic_rag_sessions and agentic_rag_messages
 
 Revision ID: b7e2f4a91c3d
-Revises: a1b2c3d4e5f6
+Revises: 042cd5b2ebbb
 Create Date: 2026-09-15 12:00:00.000000
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = "b7e2f4a91c3d"
-down_revision = "a1b2c3d4e5f6"
+down_revision = "042cd5b2ebbb"
 branch_labels = None
 depends_on = None
 

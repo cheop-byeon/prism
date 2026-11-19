@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any, TypedDict
+from typing import Any, TypedDict, override
 
 from sqlalchemy import delete, select
 
@@ -13,8 +13,6 @@ from core.db.session_factory import session_factory
 from core.entities.knowledge_entities import PreviewDetail
 from core.model_manager import ModelInstance
 from core.rag.cleaner.clean_processor import CleanProcessor
-from core.rag.data_post_processor.data_post_processor import RerankingModelDict
-from core.rag.datasource.retrieval_service import RetrievalService
 from core.rag.datasource.vdb.vector_factory import Vector
 from core.rag.docstore.dataset_docstore import DatasetDocumentStore
 from core.rag.entities import ParentMode, Rule
@@ -24,7 +22,6 @@ from core.rag.index_processor.constant.doc_type import DocType
 from core.rag.index_processor.constant.index_type import IndexStructureType, IndexTechniqueType
 from core.rag.index_processor.index_processor_base import BaseIndexProcessor, SummaryIndexSettingDict
 from core.rag.models.document import AttachmentDocument, ChildDocument, Document, ParentChildStructureChunk
-from core.rag.retrieval.retrieval_methods import RetrievalMethod
 from extensions.ext_database import db
 from libs import helper
 from models import Account
@@ -45,6 +42,7 @@ class ParentChildFormatPreviewDict(TypedDict):
 
 
 class ParentChildIndexProcessor(BaseIndexProcessor):
+    @override
     def extract(self, extract_setting: ExtractSetting, **kwargs) -> list[Document]:
         text_docs = ExtractProcessor.extract(
             extract_setting=extract_setting,
@@ -55,6 +53,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
 
         return text_docs
 
+    @override
     def transform(self, documents: list[Document], current_user: Account | None = None, **kwargs) -> list[Document]:
         process_rule = kwargs.get("process_rule")
         if not process_rule:
@@ -138,6 +137,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
 
         return all_documents
 
+    @override
     def load(
         self,
         dataset: Dataset,
@@ -158,6 +158,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
             if multimodal_documents and dataset.is_multimodal:
                 vector.create_multimodal(multimodal_documents)
 
+    @override
     def clean(self, dataset: Dataset, node_ids: list[str] | None, with_keywords: bool = True, **kwargs) -> None:
         # node_ids is segment's node_ids
         # Note: Summary indexes are now disabled (not deleted) when segments are disabled.
@@ -227,34 +228,6 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                         )
                     )
                     db.session.commit()
-
-    def retrieve(
-        self,
-        retrieval_method: RetrievalMethod,
-        query: str,
-        dataset: Dataset,
-        top_k: int,
-        score_threshold: float,
-        reranking_model: RerankingModelDict,
-    ) -> list[Document]:
-        # Set search parameters.
-        results = RetrievalService.retrieve(
-            retrieval_method=retrieval_method,
-            dataset_id=dataset.id,
-            query=query,
-            top_k=top_k,
-            score_threshold=score_threshold,
-            reranking_model=reranking_model,
-        )
-        # Organize results.
-        docs = []
-        for result in results:
-            metadata = result.metadata
-            metadata["score"] = result.score
-            if result.score >= score_threshold:
-                doc = Document(page_content=result.page_content, metadata=metadata)
-                docs.append(doc)
-        return docs
 
     # Message marker lines embedded by the IETF thread importer:
     # "--- Message N | author | date | archive-URL ---"
@@ -329,6 +302,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                     child_nodes.append(child_document)
         return child_nodes
 
+    @override
     def index(self, dataset: Dataset, document: DatasetDocument, chunks: Any) -> None:
         parent_childs = ParentChildStructureChunk.model_validate(chunks)
         documents = []
@@ -363,7 +337,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                     attachments.append(file_document)
                 doc.attachments = attachments
             else:
-                account = AccountService.load_user(document.created_by)
+                account = AccountService.load_user(document.created_by, db.session)
                 if not account:
                     raise ValueError("Invalid account")
                 doc.attachments = self._get_content_files(doc, current_user=account)
@@ -402,6 +376,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
                 if all_multimodal_documents and dataset.is_multimodal:
                     vector.create_multimodal(all_multimodal_documents)
 
+    @override
     def format_preview(self, chunks: Any) -> ParentChildFormatPreviewDict:
         parent_childs = ParentChildStructureChunk.model_validate(chunks)
         preview = []
@@ -415,6 +390,7 @@ class ParentChildIndexProcessor(BaseIndexProcessor):
         }
         return result
 
+    @override
     def generate_summary_preview(
         self,
         tenant_id: str,

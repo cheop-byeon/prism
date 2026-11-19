@@ -18,6 +18,7 @@ import { useDatasetDetailContextWithSelector } from '@/context/dataset-detail'
 import { useProviderContext } from '@/context/provider-context'
 import { DataSourceType } from '@/models/datasets'
 import { uploadIetfPreprocessedFile } from '@/service/common'
+import { useCurrentPlanVectorSpace } from '@/service/use-billing'
 import EmptyDatasetCreationModal from '../empty-dataset-creation-modal'
 import FileUploader from '../file-uploader'
 import { PROGRESS_COMPLETE } from '../file-uploader/constants'
@@ -137,7 +138,15 @@ const StepOne = ({
 
   const allFileLoaded = files.length > 0 && files.every(file => file.file.id)
   const hasNotion = notionPages.length > 0
-  const isVectorSpaceFull = plan.usage.vectorSpace >= plan.total.vectorSpace
+  const shouldCheckVectorSpace = enableBilling && (allFileLoaded || hasNotion)
+  const {
+    data: vectorSpace,
+    isFetching: isFetchingVectorSpacePlan,
+  } = useCurrentPlanVectorSpace(shouldCheckVectorSpace)
+  const isCheckingVectorSpace = shouldCheckVectorSpace && !vectorSpace && isFetchingVectorSpacePlan
+  const isVectorSpaceFull = !!vectorSpace
+    && vectorSpace.limit > 0
+    && vectorSpace.size >= vectorSpace.limit
   const isShowVectorSpaceFull = (allFileLoaded || hasNotion) && isVectorSpaceFull && enableBilling
   const supportBatchUpload = !enableBilling || plan.type !== Plan.sandbox
 
@@ -151,11 +160,14 @@ const StepOne = ({
     if (isPreparingIetfFiles)
       return true
 
+    if (isCheckingVectorSpace)
+      return true
+
     if (files.length > 0)
       return files.some(file => !file.file.id)
 
     return selectedIetfYears.length === 0
-  }, [files, isPreparingIetfFiles, isShowVectorSpaceFull, selectedIetfYears.length])
+  }, [files, isCheckingVectorSpace, isPreparingIetfFiles, isShowVectorSpaceFull, selectedIetfYears.length])
 
   // Clear previews when switching data source type
   const handleClearPreviews = useCallback((newType: DataSourceType) => {
@@ -218,7 +230,7 @@ const StepOne = ({
   ])
 
   return (
-    <div className="h-full w-full overflow-x-auto">
+    <div className="size-full overflow-x-auto">
       <div className="flex h-full w-full min-w-[1440px]">
         {/* Left Panel - Form */}
         <div className="relative h-full w-1/2 overflow-y-auto">

@@ -20,7 +20,7 @@ import { Button } from '@langgenius/dify-ui/button'
 import Input from '@/app/components/base/input'
 import { Dialog, DialogCloseButton, DialogContent, DialogDescription, DialogTitle } from '@langgenius/dify-ui/dialog'
 import { toast } from '@langgenius/dify-ui/toast'
-import { ToggleGroup, ToggleGroupItem } from '@langgenius/dify-ui/toggle-group'
+import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@langgenius/dify-ui/tooltip'
 import {
   downloadAndPreprocessMailarchiveYears,
@@ -1388,17 +1388,17 @@ function IetfImporter({
                       <div className="text-xs font-medium text-text-secondary">
                         {t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
                       </div>
-                      <ToggleGroup
+                      <SegmentedControl
                         value={[importType]}
                         onValueChange={([value]) => value && setImportType(value as 'rfc' | 'draft')}
                         aria-label={t('stepOne.ietf.importType', { ns: 'datasetCreation' })}
                         className="w-fit"
                       >
-                        <ToggleGroupItem value="rfc">{selectedRfc.doc_id}</ToggleGroupItem>
-                        <ToggleGroupItem value="draft" disabled={!availableDraftVersions.length}>
+                        <SegmentedControlItem value="rfc">{selectedRfc.doc_id}</SegmentedControlItem>
+                        <SegmentedControlItem value="draft" disabled={!availableDraftVersions.length}>
                           {t('stepOne.ietf.importTypeInternetDraft', { ns: 'datasetCreation' })}
-                        </ToggleGroupItem>
-                      </ToggleGroup>
+                        </SegmentedControlItem>
+                      </SegmentedControl>
                     </div>
 
                     {importType === 'draft' && selectedRfc.draft_base_name && availableDraftVersions.length > 0 && (

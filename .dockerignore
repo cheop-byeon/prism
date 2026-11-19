@@ -1,39 +1,22 @@
-# Root-level .dockerignore — applies to any build whose context is the repo
-# root (e.g. web/Dockerfile via docker-compose.override.yaml's `context: ../`).
-# Without this, Docker tries to tar up the entire monorepo as build context,
-# including docker/volumes/ (Postgres/Weaviate data, certbot's restricted
-# Let's Encrypt keys) — slow at best, permission-denied at worst.
-
-.git
-.gitignore
-
-# Runtime state — never needed to build an image from source.
-docker/volumes/
-
-.env
-.env.*
-
-# Logs
-logs
-*.log*
-
-# node
 **/node_modules
-**/dist
-**/build
-**/coverage
-**/.next
 **/.pnpm-store
-.husky
-
-# Python
-**/.venv
+**/dist
+**/.next
+**/.turbo
+**/.cache
 **/__pycache__
 **/*.pyc
+**/.mypy_cache
+**/.ruff_cache
+.git
+.github
+*.md
+!web/README.md
+!api/README.md
 
-# editors
-.vscode
-.idea
-*.iml
-*.iws
-*.ipr
+# Prism: keep runtime state and secrets out of any build whose context is the
+# repo root and has no <Dockerfile>.dockerignore of its own -- docker/volumes/
+# holds Postgres/Weaviate data and certbot's root-only Let's Encrypt keys.
+docker/volumes/
+.env
+.env.*

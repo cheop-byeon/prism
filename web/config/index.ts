@@ -54,9 +54,6 @@ export const isAmplitudeEnabled = IS_CLOUD_EDITION && !!AMPLITUDE_API_KEY
 
 export const IS_DEV = process.env.NODE_ENV === 'development'
 export const IS_PROD = process.env.NODE_ENV === 'production'
-
-export const SUPPORT_MAIL_LOGIN = env.NEXT_PUBLIC_SUPPORT_MAIL_LOGIN
-
 export const TONE_LIST = [
   {
     id: 1,
@@ -113,11 +110,6 @@ export const DEFAULT_COMPLETION_PROMPT_CONFIG = {
     assistant_prefix: '',
   },
 }
-
-export const getMaxToken = (modelId: string) => {
-  return modelId === 'gpt-4' || modelId === 'gpt-3.5-turbo-16k' ? 8000 : 4000
-}
-
 export const LOCALE_COOKIE_NAME = 'locale'
 
 const COOKIE_DOMAIN = getStringConfig(
@@ -143,12 +135,7 @@ export const PASSPORT_LOCAL_STORAGE_NAME = (appCode: string) => `passport-${appC
 export const PASSPORT_HEADER_NAME = 'X-App-Passport'
 
 export const WEB_APP_SHARE_CODE_HEADER_NAME = 'X-App-Code'
-
-export const DEFAULT_VALUE_MAX_LEN = 48
-export const DEFAULT_PARAGRAPH_VALUE_MAX_LEN = 1000
-
 export const zhRegex = /^[\u4E00-\u9FA5]$/m
-export const emojiRegex = /^[\uD800-\uDBFF][\uDC00-\uDFFF]$/m
 export const emailRegex = /^[\w.!#$%&'*+\-/=?^{|}~]+@([\w-]+\.)+[\w-]{2,}$/m
 const MAX_ZN_VAR_NAME_LENGTH = 8
 const MAX_EN_VAR_VALUE_LENGTH = 30
@@ -187,8 +174,6 @@ export const VAR_ITEM_TEMPLATE_IN_PIPELINE = {
 }
 
 export const appDefaultIconBackground = '#D5F5F6'
-
-export const NEED_REFRESH_APP_LIST_KEY = 'needRefreshAppList'
 
 export const DATASET_DEFAULT = {
   top_k: 4,
@@ -300,8 +285,6 @@ export const VAR_REGEX = /\{\{(#[\w-]{1,50}(\.\d+)?(\.[a-z_]\w{0,29}){1,10}#)\}\
 export const resetReg = () => (VAR_REGEX.lastIndex = 0)
 
 export const HITL_INPUT_REG = /\{\{(#\$output\.(?:[a-z_]\w{0,29}){1,10}#)\}\}/gi
-export const resetHITLInputReg = () => HITL_INPUT_REG.lastIndex = 0
-
 export const DISABLE_UPLOAD_IMAGE_AS_ICON = env.NEXT_PUBLIC_DISABLE_UPLOAD_IMAGE_AS_ICON
 
 export const SUPPORT_INSTALL_LOCAL_FILE_EXTENSIONS = '.difypkg,.difybndl'
@@ -322,6 +305,7 @@ export const ENABLE_WEBSITE_JINAREADER = env.NEXT_PUBLIC_ENABLE_WEBSITE_JINAREAD
 export const ENABLE_WEBSITE_FIRECRAWL = env.NEXT_PUBLIC_ENABLE_WEBSITE_FIRECRAWL
 export const ENABLE_WEBSITE_WATERCRAWL = env.NEXT_PUBLIC_ENABLE_WEBSITE_WATERCRAWL
 export const ENABLE_SINGLE_DOLLAR_LATEX = env.NEXT_PUBLIC_ENABLE_SINGLE_DOLLAR_LATEX
+export const ENABLE_FEATURE_PREVIEW = env.NEXT_PUBLIC_ENABLE_FEATURE_PREVIEW
 
 export const VALUE_SELECTOR_DELIMITER = '@@@'
 

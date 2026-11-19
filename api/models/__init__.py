@@ -8,12 +8,35 @@ from .account import (
     TenantAccountRole,
     TenantStatus,
 )
+from .agent import (
+    Agent,
+    AgentConfigRevision,
+    AgentConfigRevisionOperation,
+    AgentConfigSnapshot,
+    AgentDebugConversation,
+    AgentDriveFile,
+    AgentDriveFileKind,
+    AgentIconType,
+    AgentKind,
+    AgentRuntimeSession,
+    AgentRuntimeSessionOwnerType,
+    AgentRuntimeSessionStatus,
+    AgentScope,
+    AgentSource,
+    AgentStatus,
+    WorkflowAgentBindingType,
+    WorkflowAgentNodeBinding,
+    WorkflowAgentRuntimeSession,
+    WorkflowAgentRuntimeSessionStatus,
+)
 from .api_based_extension import APIBasedExtension, APIBasedExtensionPoint
 from .comment import (
     WorkflowComment,
     WorkflowCommentMention,
     WorkflowCommentReply,
 )
+from .credential_permission import CredentialPermission
+from .credential_permission import CredentialType as CredentialPermissionType
 from .dataset import (
     AppDatasetJoin,
     Dataset,
@@ -35,11 +58,12 @@ from .enums import (
     AppTriggerStatus,
     AppTriggerType,
     CreatorUserRole,
+    PermissionEnum,
     WorkflowRunTriggeredFrom,
     WorkflowTriggerStatus,
 )
 from .execution_extra_content import ExecutionExtraContent, HumanInputContent
-from .human_input import HumanInputForm
+from .human_input import HumanInputForm, HumanInputFormUploadFile, HumanInputFormUploadToken
 from .ietf_agentic_session_share import IetfAgenticSessionShare
 from .ietf_local_source import IetfLocalSource
 from .ietf_rfc_family import (
@@ -60,6 +84,7 @@ from .model import (
     AppMCPServer,
     AppMode,
     AppModelConfig,
+    AppStar,
     Conversation,
     DatasetRetrieverResource,
     DifySetup,
@@ -83,7 +108,7 @@ from .model import (
     TrialApp,
     UploadFile,
 )
-from .oauth import DatasourceOauthParamConfig, DatasourceProvider
+from .oauth import DatasourceOauthParamConfig, DatasourceProvider, OAuthAccessToken
 from .provider import (
     LoadBalancingModelConfig,
     Provider,
@@ -95,6 +120,7 @@ from .provider import (
     TenantDefaultModel,
     TenantPreferredModelProvider,
 )
+from .snippet import CustomizedSnippet, SnippetType
 from .source import DataSourceApiKeyAuthBinding, DataSourceOauthBinding
 from .task import CeleryTask, CeleryTaskSet
 from .tools import (
@@ -120,12 +146,14 @@ from .workflow import (
     WorkflowAppLog,
     WorkflowAppLogCreatedFrom,
     WorkflowArchiveLog,
+    WorkflowKind,
     WorkflowNodeExecutionModel,
     WorkflowNodeExecutionOffload,
     WorkflowNodeExecutionTriggeredFrom,
     WorkflowPause,
     WorkflowRun,
     WorkflowType,
+    resolve_workflow_kind,
 )
 
 __all__ = [
@@ -135,6 +163,21 @@ __all__ = [
     "AccountIntegrate",
     "AccountStatus",
     "AccountTrialAppRecord",
+    "Agent",
+    "AgentConfigRevision",
+    "AgentConfigRevisionOperation",
+    "AgentConfigSnapshot",
+    "AgentDebugConversation",
+    "AgentDriveFile",
+    "AgentDriveFileKind",
+    "AgentIconType",
+    "AgentKind",
+    "AgentRuntimeSession",
+    "AgentRuntimeSessionOwnerType",
+    "AgentRuntimeSessionStatus",
+    "AgentScope",
+    "AgentSource",
+    "AgentStatus",
     "ApiRequest",
     "ApiToken",
     "ApiToolProvider",
@@ -145,6 +188,7 @@ __all__ = [
     "AppMCPServer",
     "AppMode",
     "AppModelConfig",
+    "AppStar",
     "AppTrigger",
     "AppTriggerStatus",
     "AppTriggerType",
@@ -154,6 +198,9 @@ __all__ = [
     "Conversation",
     "ConversationVariable",
     "CreatorUserRole",
+    "CredentialPermission",
+    "CredentialPermissionType",
+    "CustomizedSnippet",
     "DataSourceApiKeyAuthBinding",
     "DataSourceOauthBinding",
     "Dataset",
@@ -177,6 +224,8 @@ __all__ = [
     "ExternalKnowledgeBindings",
     "HumanInputContent",
     "HumanInputForm",
+    "HumanInputFormUploadFile",
+    "HumanInputFormUploadToken",
     "IconType",
     "IetfAgenticSessionShare",
     "IetfLocalSource",
@@ -195,7 +244,9 @@ __all__ = [
     "MessageChain",
     "MessageFeedback",
     "MessageFile",
+    "OAuthAccessToken",
     "OperationLog",
+    "PermissionEnum",
     "PinnedConversation",
     "Provider",
     "ProviderModel",
@@ -206,6 +257,7 @@ __all__ = [
     "RecommendedApp",
     "SavedMessage",
     "Site",
+    "SnippetType",
     "Tag",
     "TagBinding",
     "Tenant",
@@ -228,12 +280,17 @@ __all__ = [
     "UploadFile",
     "Whitelist",
     "Workflow",
+    "WorkflowAgentBindingType",
+    "WorkflowAgentNodeBinding",
+    "WorkflowAgentRuntimeSession",
+    "WorkflowAgentRuntimeSessionStatus",
     "WorkflowAppLog",
     "WorkflowAppLogCreatedFrom",
     "WorkflowArchiveLog",
     "WorkflowComment",
     "WorkflowCommentMention",
     "WorkflowCommentReply",
+    "WorkflowKind",
     "WorkflowNodeExecutionModel",
     "WorkflowNodeExecutionOffload",
     "WorkflowNodeExecutionTriggeredFrom",
@@ -244,4 +301,5 @@ __all__ = [
     "WorkflowToolProvider",
     "WorkflowTriggerStatus",
     "WorkflowType",
+    "resolve_workflow_kind",
 ]
