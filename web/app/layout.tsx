@@ -10,7 +10,7 @@ import { getDatasetMap } from '@/env'
 import { getLocaleOnServer } from '@/i18n-config/server'
 import { headers } from '@/next/headers'
 import PartnerStackCookieRecorder from './components/billing/partner-stack/cookie-recorder'
-import CreateAppAttributionBootstrap from './components/create-app-attribution-bootstrap'
+import { CreateAppAttributionBootstrap } from './components/create-app-attribution-bootstrap'
 import { AgentationLoader } from './components/devtools/agentation-loader'
 import { ReactScanLoader } from './components/devtools/react-scan/loader'
 import { I18nServerProvider } from './components/provider/i18n-server'
@@ -21,9 +21,7 @@ import './styles/markdown.css'
 export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
-  maximumScale: 1,
   viewportFit: 'cover',
-  userScalable: false,
 }
 
 const LocaleLayout = async ({
@@ -51,11 +49,10 @@ const LocaleLayout = async ({
         <meta name="msapplication-config" content="/browserconfig.xml" />
 
         <CreateAppAttributionBootstrap />
-        {/* <ReactGrabLoader /> */}
         <ReactScanLoader />
       </head>
       <body
-        className="h-full select-auto"
+        className="h-full bg-background-body"
         {...datasetMap}
       >
         <div className="isolate h-full">

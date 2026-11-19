@@ -22,6 +22,15 @@
 #   IETFDATA_SERVICE_TIMEOUT  seconds (default 60)
 #   IETFDATA_LOGLEVEL         sidecar log level (default INFO)
 
+# Since Dify 1.15 the API image builds from the repo root, as web has since
+# 1.14 (it needs dify-agent/ beside api/); api/Dockerfile.dockerignore and
+# web/Dockerfile.dockerignore keep the rest of the repo, docker/volumes
+# included, out of the build context. Set here rather than in each
+# machine's override, which predates both.
+x-prism-api-build: &prism-api-build
+  context: ..
+  dockerfile: api/Dockerfile
+
 x-prism-env: &prism-env
   ALLOW_REGISTER: ${ALLOW_REGISTER:-false}
   ALLOW_CREATE_WORKSPACE: ${ALLOW_CREATE_WORKSPACE:-false}
@@ -30,6 +39,7 @@ x-prism-env: &prism-env
 
 services:
   api:
+    build: *prism-api-build
     # host.docker.internal reaches services on the Docker host, such as a
     # host-level Ollama serving the embedding model.
     extra_hosts:
@@ -46,6 +56,7 @@ services:
       - ./prism/email-templates/reset_password_mail_when_account_not_exist_template_en-US.html:/app/api/templates/reset_password_mail_when_account_not_exist_template_en-US.html:ro
 
   worker:
+    build: *prism-api-build
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment: *prism-env
@@ -58,12 +69,9 @@ services:
       - ./prism/email-templates/reset_password_mail_when_account_not_exist_template_en-US.html:/app/api/templates/reset_password_mail_when_account_not_exist_template_en-US.html:ro
 
   worker_beat:
+    build: *prism-api-build
     environment: *prism-env
 
-  # Since Dify 1.14 the web image builds from the repo root (it needs the
-  # pnpm workspace and packages/); web/Dockerfile.dockerignore keeps the
-  # rest of the repo, docker/volumes included, out of the build context.
-  # Set here rather than in each machine's override, which predates this.
   web:
     build:
       context: ..
@@ -79,8 +87,10 @@ services:
   ssrf_proxy:
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    volumes:
-      - ./ssrf_proxy/prism.conf:/etc/squid/conf.d/prism.conf:ro
+    environment:
+      # Dify's proxy denies private addresses by default; let outbound calls
+      # reach services on the Docker host, such as a host-level Ollama.
+      SSRF_PROXY_ALLOW_PRIVATE_DOMAINS: ${SSRF_PROXY_ALLOW_PRIVATE_DOMAINS:-host.docker.internal}
 
   nginx:
     volumes:

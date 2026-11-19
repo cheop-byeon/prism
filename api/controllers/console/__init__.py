@@ -46,11 +46,17 @@ from . import (
     spec,
     version,
 )
+from .agent import composer as agent_composer
+from .agent import roster as agent_roster
 
 # Import app controllers
 from .app import (
     advanced_prompt_template,
     agent,
+    agent_app_access,
+    agent_app_feature,
+    agent_app_sandbox,
+    agent_drive_inspector,
     annotation,
     app,
     audio,
@@ -68,6 +74,7 @@ from .app import (
     workflow_app_log,
     workflow_comment,
     workflow_draft_variable,
+    workflow_node_output_inspector,
     workflow_run,
     workflow_statistic,
     workflow_trigger,
@@ -118,6 +125,7 @@ from .explore import (
     saved_message,
     trial,
 )
+from .snippets import snippet_workflow, snippet_workflow_draft_variable
 from .socketio import workflow as socketio_workflow
 
 # Import tag controllers
@@ -133,6 +141,8 @@ from .workspace import (
     model_providers,
     models,
     plugin,
+    rbac,
+    snippets,
     tool_providers,
     trigger_providers,
     workspace,
@@ -145,7 +155,13 @@ __all__ = [
     "activate",
     "advanced_prompt_template",
     "agent",
+    "agent_app_access",
+    "agent_app_feature",
+    "agent_app_sandbox",
+    "agent_composer",
+    "agent_drive_inspector",
     "agent_providers",
+    "agent_roster",
     "annotation",
     "api",
     "apikey",
@@ -200,10 +216,14 @@ __all__ = [
     "rag_pipeline_draft_variable",
     "rag_pipeline_import",
     "rag_pipeline_workflow",
+    "rbac",
     "recommended_app",
     "saved_message",
     "setup",
     "site",
+    "snippet_workflow",
+    "snippet_workflow_draft_variable",
+    "snippets",
     "socketio_workflow",
     "spec",
     "statistic",
@@ -217,6 +237,7 @@ __all__ = [
     "workflow_app_log",
     "workflow_comment",
     "workflow_draft_variable",
+    "workflow_node_output_inspector",
     "workflow_run",
     "workflow_statistic",
     "workflow_trigger",

@@ -4,7 +4,7 @@ import type { FC } from 'react'
 import type { ChunkStrategy, PreProcessingRule, StrategyProvider, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
 import { Button } from '@langgenius/dify-ui/button'
 import { Checkbox } from '@langgenius/dify-ui/checkbox'
-import { ToggleGroup, ToggleGroupItem } from '@langgenius/dify-ui/toggle-group'
+import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
 import {
   RiAlertFill,
   RiSearchEyeLine,
@@ -144,7 +144,7 @@ export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({
       actions={(
         <>
           <Button variant="secondary-accent" onClick={onPreview}>
-            <span className="i-ri-search-eye-line mr-0.5 h-4 w-4" />
+            <RiSearchEyeLine className="mr-0.5 size-4" />
             {t('stepTwo.previewChunk', { ns: 'datasetCreation' })}
           </Button>
           <Button variant="ghost" onClick={onReset}>
@@ -158,15 +158,15 @@ export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({
         {/* Provider selector */}
         <div className="flex flex-col gap-2">
           <TextLabel>{t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}</TextLabel>
-          <ToggleGroup
+          <SegmentedControl
             value={[strategyProvider]}
             onValueChange={([value]) => value && onStrategyProviderChange(value as StrategyProvider)}
             aria-label={t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}
           >
             {providerOptions.map(option => (
-              <ToggleGroupItem key={option.value} value={option.value}>{option.text}</ToggleGroupItem>
+              <SegmentedControlItem key={option.value} value={option.value}>{option.text}</SegmentedControlItem>
             ))}
-          </ToggleGroup>
+          </SegmentedControl>
         </div>
 
         {/* Strategy selector */}
@@ -302,7 +302,7 @@ export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({
                   />
                   <Infotip
                     aria-label={t('stepTwo.QATip', { ns: 'datasetCreation' })}
-                    className="h-3.5 w-3.5"
+                    className="size-3.5"
                     iconClassName="h-full w-full"
                   >
                     {t('stepTwo.QATip', { ns: 'datasetCreation' })}

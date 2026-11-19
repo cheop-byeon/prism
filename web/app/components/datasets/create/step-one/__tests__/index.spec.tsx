@@ -19,6 +19,7 @@ vi.mock('@/service/common', () => ({
 
 // Mock config for website crawl features
 vi.mock('@/config', () => ({
+  IS_CLOUD_EDITION: false,
   ENABLE_WEBSITE_FIRECRAWL: true,
   ENABLE_WEBSITE_JINAREADER: false,
   ENABLE_WEBSITE_WATERCRAWL: false,
@@ -44,6 +45,16 @@ vi.mock('@/context/provider-context', () => ({
   useProviderContext: () => ({
     plan: mockPlan,
     enableBilling: mockEnableBilling,
+  }),
+}))
+
+vi.mock('@/service/use-billing', () => ({
+  useCurrentPlanVectorSpace: () => ({
+    data: {
+      size: mockPlan.usage.vectorSpace,
+      limit: mockPlan.total.vectorSpace,
+    },
+    isFetching: false,
   }),
 }))
 

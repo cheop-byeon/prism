@@ -145,7 +145,7 @@ export const PreviewPanel: FC<PreviewPanelProps> = ({
 
         {/* Idle State */}
         {isIdle && (
-          <div className="flex h-full w-full items-center justify-center">
+          <div className="flex size-full items-center justify-center">
             <div className="flex flex-col items-center justify-center gap-3">
               <RiSearchEyeLine className="size-10 text-text-empty-state-icon" />
               <p className="text-sm text-text-tertiary">
