@@ -136,7 +136,7 @@ class AgenticRagSessionService:
     @staticmethod
     def get_session(session_id: str, *, account: Account) -> Conversation | None:
         try:
-            return ConversationService.get_conversation(_prism_app(), session_id, account)
+            return ConversationService.get_conversation(_prism_app(), session_id, account, session=db.session())
         except ConversationNotExistsError:
             return None
 
@@ -419,7 +419,7 @@ class AgenticRagSessionService:
         from models.ietf_agentic_session_share import IetfAgenticSessionShare
 
         try:
-            ConversationService.delete(_prism_app(), session_id, account)
+            ConversationService.delete(_prism_app(), session_id, account, session=db.session())
         except ConversationNotExistsError:
             return False
         # IetfAgenticSessionShare is this project's own table, not part of
@@ -594,7 +594,7 @@ class AgenticRagSessionService:
             # generator now that this is a real Conversation row.
             tenant_id = get_data_tenant_id()
             with contextlib.suppress(Exception):
-                ConversationService.auto_generate_name(_prism_app(tenant_id), conversation)
+                ConversationService.auto_generate_name(_prism_app(tenant_id), conversation, session=db.session())
 
         return message.id
 
@@ -613,6 +613,7 @@ class AgenticRagSessionService:
             user=account,
             rating=parsed_rating,
             content=content,
+            session=db.session(),
         )
         if parsed_rating is None or feedback is None:
             return {"rating": None, "content": None}
@@ -624,7 +625,9 @@ class AgenticRagSessionService:
         looking the conversation up scoped to this account (raises
         ConversationNotExistsError otherwise) and committing the change.
         """
-        return ConversationService.rename(_prism_app(), session_id, account, name, auto_generate=False)
+        return ConversationService.rename(
+            _prism_app(), session_id, account, name, auto_generate=False, session=db.session()
+        )
 
     @staticmethod
     def get_observability_stats(*, days: int = 30) -> dict:

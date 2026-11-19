@@ -1,9 +1,12 @@
 import type { ChunkStrategy } from '@/models/datasets'
+import type { I18nKeysWithPrefix } from '@/types/i18n'
+
+type StrategyLabelKey = I18nKeysWithPrefix<'datasetCreation', 'stepTwo.chunkStrategy'>
 
 // Shared by GeneralChunkingOptions and ParentChildOptions (each level's
 // strategy dropdown). Kept in its own non-component file — a component file
 // mixing component and non-component exports breaks React Fast Refresh.
-export const CUSTOM_STRATEGY_LABEL_KEYS: Record<string, string> = {
+export const CUSTOM_STRATEGY_LABEL_KEYS: Record<string, StrategyLabelKey> = {
   recursive: 'stepTwo.chunkStrategyRecursive',
   paragraph: 'stepTwo.chunkStrategyParagraph',
   sentence: 'stepTwo.chunkStrategySentence',
@@ -16,7 +19,7 @@ export const CUSTOM_STRATEGY_LABEL_KEYS: Record<string, string> = {
   semantic: 'stepTwo.chunkStrategySemantic',
 }
 
-export const LLAMAINDEX_STRATEGY_LABEL_KEYS: Record<string, string> = {
+export const LLAMAINDEX_STRATEGY_LABEL_KEYS: Record<string, StrategyLabelKey> = {
   li_sentence: 'stepTwo.chunkStrategyLiSentence',
   li_token: 'stepTwo.chunkStrategyLiToken',
   li_fixed: 'stepTwo.chunkStrategyLiFixed',
@@ -26,7 +29,7 @@ export const LLAMAINDEX_STRATEGY_LABEL_KEYS: Record<string, string> = {
   li_code: 'stepTwo.chunkStrategyLiCode',
 }
 
-export const LANGCHAIN_STRATEGY_LABEL_KEYS: Record<string, string> = {
+export const LANGCHAIN_STRATEGY_LABEL_KEYS: Record<string, StrategyLabelKey> = {
   lc_recursive: 'stepTwo.chunkStrategyLcRecursive',
   lc_character: 'stepTwo.chunkStrategyLcCharacter',
   lc_token: 'stepTwo.chunkStrategyLcToken',
@@ -36,11 +39,10 @@ export const LANGCHAIN_STRATEGY_LABEL_KEYS: Record<string, string> = {
   lc_python: 'stepTwo.chunkStrategyLcPython',
 }
 
-export function getStrategyLabelKey(strategy: ChunkStrategy): string {
+export function getStrategyLabelKey(strategy: ChunkStrategy): StrategyLabelKey | undefined {
   return (
-    CUSTOM_STRATEGY_LABEL_KEYS[strategy]
-    ?? LLAMAINDEX_STRATEGY_LABEL_KEYS[strategy]
-    ?? LANGCHAIN_STRATEGY_LABEL_KEYS[strategy]
-    ?? strategy
+    CUSTOM_STRATEGY_LABEL_KEYS[strategy] ??
+    LLAMAINDEX_STRATEGY_LABEL_KEYS[strategy] ??
+    LANGCHAIN_STRATEGY_LABEL_KEYS[strategy]
   )
 }

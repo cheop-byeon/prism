@@ -936,7 +936,7 @@ def _suggest_passage_questions(
         f"Selected passage:\n{selected_text[:1500]}"
     )
     try:
-        model_instance = ModelManager().get_model_instance(
+        model_instance = ModelManager.for_tenant(tenant_id=tenant_id).get_model_instance(
             tenant_id=tenant_id, provider=model_provider, model_type=ModelType.LLM, model=model_name
         )
         result = _invoke_llm_with_retry(
@@ -1031,7 +1031,7 @@ def _judge_lane_discussion(
             prompt_lines.append(f"--- candidate {j} ---\n{cand['text'][:600]}")
         prompt_lines.append("")
 
-    model_instance = ModelManager().get_model_instance(
+    model_instance = ModelManager.for_tenant(tenant_id=tenant_id).get_model_instance(
         tenant_id=tenant_id, provider=model_provider, model_type=ModelType.LLM, model=model_name
     )
     if on_event:
@@ -3442,8 +3442,9 @@ def ask(
     # handling for this at all, since it resolves whatever that tenant
     # itself has configured via Dify's own real Settings/Model Provider
     # storage. None (every existing caller) leaves this exactly as before.
-    model_instance = ModelManager().get_model_instance(
-        tenant_id=model_tenant_id or tenant_id,
+    llm_tenant_id = model_tenant_id or tenant_id
+    model_instance = ModelManager.for_tenant(tenant_id=llm_tenant_id).get_model_instance(
+        tenant_id=llm_tenant_id,
         provider=model_provider,
         model_type=ModelType.LLM,
         model=model_name,

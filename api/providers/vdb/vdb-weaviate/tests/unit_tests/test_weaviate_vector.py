@@ -360,7 +360,16 @@ class TestWeaviateVector(unittest.TestCase):
 
         add_calls = mock_col.config.add_property.call_args_list
         added_names = [call.args[0].name for call in add_calls]
-        assert added_names == ["document_id", "doc_id", "doc_type", "chunk_index", "is_summary", "original_chunk_id"]
+        assert added_names == [
+            "document_id",
+            "doc_id",
+            "doc_type",
+            "chunk_index",
+            "is_summary",
+            "original_chunk_id",
+            # Prism: chunk display metadata (see SegmentService.get_chunk_metadata).
+            *WeaviateVector._DISPLAY_METADATA_PROPERTIES,
+        ]
 
     @patch("dify_vdb_weaviate.weaviate_vector.weaviate")
     def test_ensure_properties_skips_existing_doc_type(self, mock_weaviate_module):
@@ -382,6 +391,7 @@ class TestWeaviateVector(unittest.TestCase):
             SimpleNamespace(name="chunk_index"),
             SimpleNamespace(name="is_summary"),
             SimpleNamespace(name="original_chunk_id"),
+            *(SimpleNamespace(name=name) for name in WeaviateVector._DISPLAY_METADATA_PROPERTIES),
         ]
         mock_cfg = MagicMock()
         mock_cfg.properties = existing_props
@@ -419,7 +429,7 @@ class TestWeaviateVector(unittest.TestCase):
         with patch.object(weaviate_vector_module.logger, "warning") as mock_warning:
             wv._ensure_properties()
 
-        assert mock_warning.call_count == 6
+        assert mock_warning.call_count == 6 + len(WeaviateVector._DISPLAY_METADATA_PROPERTIES)
 
     @patch("dify_vdb_weaviate.weaviate_vector.weaviate")
     def test_search_by_vector_returns_doc_type_in_metadata(self, mock_weaviate_module):
@@ -894,7 +904,7 @@ class TestVectorDefaultAttributes(unittest.TestCase):
         mock_dataset = MagicMock()
         mock_dataset.index_struct_dict = None
 
-        vector = Vector(dataset=mock_dataset)
+        vector = Vector(dataset=mock_dataset, session=MagicMock())
 
         assert "doc_type" in vector._attributes, f"doc_type should be in default attributes, got: {vector._attributes}"
 

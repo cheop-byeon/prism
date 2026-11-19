@@ -26,6 +26,7 @@ from models.dataset import (
 )
 from models.model import TagBinding, UploadFile
 from models.workflow import Workflow
+from tasks.refresh_billing_vector_space_task import schedule_billing_vector_space_refresh
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,7 @@ def clean_dataset_task(
     """
     logger.info(click.style(f"Start clean dataset when dataset deleted: {dataset_id}", fg="green"))
     start_at = time.perf_counter()
+    vector_cleanup_succeeded = False
 
     with session_factory.create_session() as session:
         try:
@@ -117,8 +119,9 @@ def clean_dataset_task(
                     # Shared collection: remove only vectors tagged with this dataset_id.
                     from core.rag.datasource.vdb.vector_factory import Vector
 
-                    vector = Vector(dataset)
+                    vector = Vector(dataset, session=session)
                     vector.delete_by_metadata_field("dataset_id", dataset_id)
+                    vector_cleanup_succeeded = True
                     logger.info(
                         click.style(
                             f"Removed vectors for dataset {dataset_id} from shared collection "
@@ -128,7 +131,8 @@ def clean_dataset_task(
                     )
                 else:
                     index_processor = IndexProcessorFactory(doc_form).init_index_processor()
-                    index_processor.clean(dataset, None, with_keywords=True, delete_child_chunks=True)
+                    index_processor.clean(dataset, None, with_keywords=True, delete_child_chunks=True, session=session)
+                    vector_cleanup_succeeded = True
                     logger.info(
                         click.style(f"Successfully cleaned vector database for dataset: {dataset_id}", fg="green")
                     )
@@ -230,6 +234,8 @@ def clean_dataset_task(
                 session.execute(file_delete_stmt)
 
             session.commit()
+            if vector_cleanup_succeeded:
+                schedule_billing_vector_space_refresh(dataset.tenant_id)
             end_at = time.perf_counter()
             logger.info(
                 click.style(

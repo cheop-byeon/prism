@@ -2,18 +2,25 @@
 
 import type { FC } from 'react'
 import type { ParentChildConfig } from '../hooks'
-import type { ChunkStrategy, ParentMode, PreProcessingRule, StrategyProvider, SummaryIndexSetting as SummaryIndexSettingType } from '@/models/datasets'
+import type {
+  ChunkStrategy,
+  ParentMode,
+  PreProcessingRule,
+  StrategyProvider,
+  SummaryIndexSetting as SummaryIndexSettingType,
+} from '@/models/datasets'
 import { Button } from '@langgenius/dify-ui/button'
 import { Checkbox } from '@langgenius/dify-ui/checkbox'
+import { RadioGroup } from '@langgenius/dify-ui/radio'
 import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
-import { RadioGroup } from '@langgenius/dify-ui/radio-group'
 import { RiSearchEyeLine } from '@remixicon/react'
+import { useSuspenseQuery } from '@tanstack/react-query'
 import { useTranslation } from 'react-i18next'
 import Divider from '@/app/components/base/divider'
 import { ParentChildChunk } from '@/app/components/base/icons/src/vender/knowledge'
 import RadioCard from '@/app/components/base/radio-card'
 import SummaryIndexSetting from '@/app/components/datasets/settings/summary-index-setting'
-import { IS_CE_EDITION } from '@/config'
+import { systemFeaturesQueryOptions } from '@/features/system-features/client'
 import {
   ChunkingMode,
   CUSTOM_STRATEGIES,
@@ -71,47 +78,64 @@ const LevelStrategySection: FC<LevelStrategySectionProps> = ({
   onStrategyParamChange,
 }) => {
   const { t } = useTranslation()
+  const strategyLabel = (strategy: ChunkStrategy) => {
+    const labelKey = getStrategyLabelKey(strategy)
+    return labelKey ? t(($) => $[labelKey], { ns: 'datasetCreation' }) : strategy
+  }
 
   const strategyCategory = getStrategyCategory(level.chunkStrategy)
   const isFramework = strategyCategory === 'framework'
-  const activeStrategies
-    = level.strategyProvider === 'llamaindex'
+  const activeStrategies =
+    level.strategyProvider === 'llamaindex'
       ? LLAMAINDEX_STRATEGIES
       : level.strategyProvider === 'langchain'
         ? LANGCHAIN_STRATEGIES
         : CUSTOM_STRATEGIES
   const providerOptions = [
-    { value: 'custom' as StrategyProvider, text: t('stepTwo.chunkStrategyProviderCustom', { ns: 'datasetCreation' }) },
-    { value: 'llamaindex' as StrategyProvider, text: t('stepTwo.chunkStrategyProviderLlamaIndex', { ns: 'datasetCreation' }) },
-    { value: 'langchain' as StrategyProvider, text: t('stepTwo.chunkStrategyProviderLangChain', { ns: 'datasetCreation' }) },
+    {
+      value: 'custom' as StrategyProvider,
+      text: t(($) => $['stepTwo.chunkStrategyProviderCustom'], { ns: 'datasetCreation' }),
+    },
+    {
+      value: 'llamaindex' as StrategyProvider,
+      text: t(($) => $['stepTwo.chunkStrategyProviderLlamaIndex'], { ns: 'datasetCreation' }),
+    },
+    {
+      value: 'langchain' as StrategyProvider,
+      text: t(($) => $['stepTwo.chunkStrategyProviderLangChain'], { ns: 'datasetCreation' }),
+    },
   ]
   const frameworkSchema = STRATEGY_PARAM_SCHEMAS[level.chunkStrategy]
 
   return (
     <div className="mt-2 flex flex-col gap-3">
       <div className="flex flex-col gap-2">
-        <TextLabel>{t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}</TextLabel>
+        <TextLabel>
+          {t(($) => $['stepTwo.chunkStrategyProvider'], { ns: 'datasetCreation' })}
+        </TextLabel>
         <SegmentedControl
           value={[level.strategyProvider]}
           onValueChange={([value]) => value && onStrategyProviderChange(value as StrategyProvider)}
-          aria-label={t('stepTwo.chunkStrategyProvider', { ns: 'datasetCreation' })}
+          aria-label={t(($) => $['stepTwo.chunkStrategyProvider'], { ns: 'datasetCreation' })}
         >
-          {providerOptions.map(option => (
-            <SegmentedControlItem key={option.value} value={option.value}>{option.text}</SegmentedControlItem>
+          {providerOptions.map((option) => (
+            <SegmentedControlItem key={option.value} value={option.value}>
+              {option.text}
+            </SegmentedControlItem>
           ))}
         </SegmentedControl>
       </div>
 
       <div className="flex flex-col gap-1">
-        <TextLabel>{t('stepTwo.chunkStrategy', { ns: 'datasetCreation' })}</TextLabel>
+        <TextLabel>{t(($) => $['stepTwo.chunkStrategy'], { ns: 'datasetCreation' })}</TextLabel>
         <select
           className="h-9 rounded-lg border border-components-panel-border bg-components-panel-bg px-3 text-sm text-text-primary"
           value={level.chunkStrategy}
-          onChange={e => onStrategyChange(e.target.value as ChunkStrategy)}
+          onChange={(e) => onStrategyChange(e.target.value as ChunkStrategy)}
         >
-          {activeStrategies.map(strategy => (
+          {activeStrategies.map((strategy) => (
             <option key={strategy} value={strategy}>
-              {t(getStrategyLabelKey(strategy), { ns: 'datasetCreation', defaultValue: getStrategyLabelKey(strategy) })}
+              {strategyLabel(strategy)}
             </option>
           ))}
         </select>
@@ -119,7 +143,7 @@ const LevelStrategySection: FC<LevelStrategySectionProps> = ({
 
       {isFramework && frameworkSchema && frameworkSchema.params.length > 0 && (
         <div className="flex flex-wrap gap-3">
-          {frameworkSchema.params.map(param => (
+          {frameworkSchema.params.map((param) => (
             <FrameworkParamInput
               key={param.key}
               paramKey={param.key}
@@ -136,8 +160,8 @@ const LevelStrategySection: FC<LevelStrategySectionProps> = ({
       )}
 
       {isFramework && frameworkSchema && frameworkSchema.params.length === 0 && (
-        <p className="text-text-secondary system-xs-regular">
-          {t('stepTwo.frameworkNoParams', { ns: 'datasetCreation' })}
+        <p className="system-xs-regular text-text-secondary">
+          {t(($) => $['stepTwo.frameworkNoParams'], { ns: 'datasetCreation' })}
         </p>
       )}
 
@@ -147,13 +171,15 @@ const LevelStrategySection: FC<LevelStrategySectionProps> = ({
             <DelimiterInput
               value={level.delimiter}
               tooltip={delimiterTooltip}
-              onChange={e => onDelimiterChange(e.target.value)}
+              onChange={(e) => onDelimiterChange(e.target.value)}
             />
           )}
           <MaxLengthInput
-            unit={strategyCategory === 'token'
-              ? t('stepTwo.tokens', { ns: 'datasetCreation' })
-              : t('stepTwo.characters', { ns: 'datasetCreation' })}
+            unit={
+              strategyCategory === 'token'
+                ? t(($) => $['stepTwo.tokens'], { ns: 'datasetCreation' })
+                : t(($) => $['stepTwo.characters'], { ns: 'datasetCreation' })
+            }
             value={level.maxLength}
             onChange={onMaxLengthChange}
           />
@@ -220,37 +246,42 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
   showSummaryIndexSetting,
 }) => {
   const { t } = useTranslation()
+  const { data: deploymentEdition } = useSuspenseQuery({
+    ...systemFeaturesQueryOptions(),
+    select: ({ deployment_edition }) => deployment_edition,
+  })
+  const isNonCloudEdition = deploymentEdition === 'COMMUNITY' || deploymentEdition === 'ENTERPRISE'
 
   const getRuleName = (key: string): string => {
     const ruleNameMap: Record<string, string> = {
-      remove_extra_spaces: t('stepTwo.removeExtraSpaces', { ns: 'datasetCreation' }),
-      remove_urls_emails: t('stepTwo.removeUrlEmails', { ns: 'datasetCreation' }),
-      remove_stopwords: t('stepTwo.removeStopwords', { ns: 'datasetCreation' }),
+      remove_extra_spaces: t(($) => $['stepTwo.removeExtraSpaces'], { ns: 'datasetCreation' }),
+      remove_urls_emails: t(($) => $['stepTwo.removeUrlEmails'], { ns: 'datasetCreation' }),
+      remove_stopwords: t(($) => $['stepTwo.removeStopwords'], { ns: 'datasetCreation' }),
     }
     return ruleNameMap[key] ?? key
   }
 
   return (
     <OptionCard
-      title={t('stepTwo.parentChild', { ns: 'datasetCreation' })}
+      title={t(($) => $['stepTwo.parentChild'], { ns: 'datasetCreation' })}
       icon={<ParentChildChunk className="h-[20px] w-[20px]" />}
       effectImg={BlueEffect.src}
       className="text-util-colors-blue-light-blue-light-500"
       activeHeaderClassName="bg-dataset-option-card-blue-gradient"
-      description={t('stepTwo.parentChildTip', { ns: 'datasetCreation' })}
+      description={t(($) => $['stepTwo.parentChildTip'], { ns: 'datasetCreation' })}
       isActive={isActive}
       onSwitched={() => onDocFormChange(ChunkingMode.parentChild)}
-      actions={(
+      actions={
         <>
           <Button variant="secondary-accent" onClick={onPreview}>
             <RiSearchEyeLine className="mr-0.5 size-4" />
-            {t('stepTwo.previewChunk', { ns: 'datasetCreation' })}
+            {t(($) => $['stepTwo.previewChunk'], { ns: 'datasetCreation' })}
           </Button>
           <Button variant="ghost" onClick={onReset}>
-            {t('stepTwo.reset', { ns: 'datasetCreation' })}
+            {t(($) => $['stepTwo.reset'], { ns: 'datasetCreation' })}
           </Button>
         </>
-      )}
+      }
       noHighlight={isInUpload && isNotUploadInEmptyDataset}
     >
       <div className="flex flex-col gap-4">
@@ -258,38 +289,42 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
         <div>
           <div className="flex items-center gap-x-2">
             <div className="inline-flex shrink-0">
-              <TextLabel>{t('stepTwo.parentChunkForContext', { ns: 'datasetCreation' })}</TextLabel>
+              <TextLabel>
+                {t(($) => $['stepTwo.parentChunkForContext'], { ns: 'datasetCreation' })}
+              </TextLabel>
             </div>
             <Divider className="grow" bgStyle="gradient" />
           </div>
           <RadioGroup<ParentMode>
-            aria-label={t('stepTwo.parentChunkForContext', { ns: 'datasetCreation' })}
+            aria-label={t(($) => $['stepTwo.parentChunkForContext'], { ns: 'datasetCreation' })}
             value={parentChildConfig.chunkForContext}
-            onValueChange={value => onChunkForContextChange(value)}
+            onValueChange={(value) => onChunkForContextChange(value)}
             className="mt-1 flex-col items-stretch gap-2"
           >
-            <RadioCard
+            <RadioCard<ParentMode>
               value="paragraph"
               icon={<img src={Note.src} alt="" />}
-              title={t('stepTwo.paragraph', { ns: 'datasetCreation' })}
-              description={t('stepTwo.paragraphTip', { ns: 'datasetCreation' })}
-              chosenConfig={(
+              title={t(($) => $['stepTwo.paragraph'], { ns: 'datasetCreation' })}
+              description={t(($) => $['stepTwo.paragraphTip'], { ns: 'datasetCreation' })}
+              chosenConfig={
                 <LevelStrategySection
                   level={parentChildConfig.parent}
-                  delimiterTooltip={t('stepTwo.parentChildDelimiterTip', { ns: 'datasetCreation' })!}
+                  delimiterTooltip={t(($) => $['stepTwo.parentChildDelimiterTip'], {
+                    ns: 'datasetCreation',
+                  })!}
                   onDelimiterChange={onParentDelimiterChange}
                   onMaxLengthChange={onParentMaxLengthChange}
                   onStrategyProviderChange={onParentStrategyProviderChange}
                   onStrategyChange={onParentStrategyChange}
                   onStrategyParamChange={onParentStrategyParamChange}
                 />
-              )}
+              }
             />
-            <RadioCard
+            <RadioCard<ParentMode>
               value="full-doc"
               icon={<img src={FileList.src} alt="" />}
-              title={t('stepTwo.fullDoc', { ns: 'datasetCreation' })}
-              description={t('stepTwo.fullDocTip', { ns: 'datasetCreation' })}
+              title={t(($) => $['stepTwo.fullDoc'], { ns: 'datasetCreation' })}
+              description={t(($) => $['stepTwo.fullDocTip'], { ns: 'datasetCreation' })}
             />
           </RadioGroup>
         </div>
@@ -298,13 +333,17 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
         <div>
           <div className="flex items-center gap-x-2">
             <div className="inline-flex shrink-0">
-              <TextLabel>{t('stepTwo.childChunkForRetrieval', { ns: 'datasetCreation' })}</TextLabel>
+              <TextLabel>
+                {t(($) => $['stepTwo.childChunkForRetrieval'], { ns: 'datasetCreation' })}
+              </TextLabel>
             </div>
             <Divider className="grow" bgStyle="gradient" />
           </div>
           <LevelStrategySection
             level={parentChildConfig.child}
-            delimiterTooltip={t('stepTwo.parentChildChunkDelimiterTip', { ns: 'datasetCreation' })!}
+            delimiterTooltip={t(($) => $['stepTwo.parentChildChunkDelimiterTip'], {
+              ns: 'datasetCreation',
+            })!}
             onDelimiterChange={onChildDelimiterChange}
             onMaxLengthChange={onChildMaxLengthChange}
             onStrategyProviderChange={onChildStrategyProviderChange}
@@ -317,36 +356,28 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
         <div>
           <div className="flex items-center gap-x-2">
             <div className="inline-flex shrink-0">
-              <TextLabel>{t('stepTwo.rules', { ns: 'datasetCreation' })}</TextLabel>
+              <TextLabel>{t(($) => $['stepTwo.rules'], { ns: 'datasetCreation' })}</TextLabel>
             </div>
             <Divider className="grow" bgStyle="gradient" />
           </div>
           <div className="mt-1">
-            {rules.map(rule => (
-              <label
-                key={rule.id}
-                className={`${s.ruleItem} cursor-pointer`}
-              >
-                <Checkbox
-                  checked={rule.enabled}
-                  onCheckedChange={() => onRuleToggle(rule.id)}
-                />
+            {rules.map((rule) => (
+              <label key={rule.id} className={`${s.ruleItem} cursor-pointer`}>
+                <Checkbox checked={rule.enabled} onCheckedChange={() => onRuleToggle(rule.id)} />
                 <span className="ml-2 system-sm-regular text-text-secondary">
                   {getRuleName(rule.id)}
                 </span>
               </label>
             ))}
-            {
-              showSummaryIndexSetting && IS_CE_EDITION && (
-                <div className="mt-3">
-                  <SummaryIndexSetting
-                    entry="create-document"
-                    summaryIndexSetting={summaryIndexSetting}
-                    onSummaryIndexSettingChange={onSummaryIndexSettingChange}
-                  />
-                </div>
-              )
-            }
+            {showSummaryIndexSetting && isNonCloudEdition && (
+              <div className="mt-3">
+                <SummaryIndexSetting
+                  entry="create-document"
+                  summaryIndexSetting={summaryIndexSetting}
+                  onSummaryIndexSettingChange={onSummaryIndexSettingChange}
+                />
+              </div>
+            )}
           </div>
         </div>
       </div>
