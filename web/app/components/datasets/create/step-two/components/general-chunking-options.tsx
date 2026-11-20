@@ -7,12 +7,13 @@ import type {
   StrategyProvider,
   SummaryIndexSetting as SummaryIndexSettingType,
 } from '@/models/datasets'
+import { Alert, AlertTitle } from '@langgenius/dify-ui/alert'
 import { Button } from '@langgenius/dify-ui/button'
 import { Checkbox } from '@langgenius/dify-ui/checkbox'
 import { Infotip, InfotipContent, InfotipTrigger } from '@langgenius/dify-ui/infotip'
 import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
 import { Separator } from '@langgenius/dify-ui/separator'
-import { RiAlertFill, RiSearchEyeLine } from '@remixicon/react'
+import { RiSearchEyeLine } from '@remixicon/react'
 import { useSuspenseQuery } from '@tanstack/react-query'
 import { useId } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -335,18 +336,11 @@ export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({
                   </Infotip>
                 </div>
                 {currentDocForm === ChunkingMode.qa && (
-                  <div
-                    style={{
-                      background:
-                        'linear-gradient(92deg, rgba(247, 144, 9, 0.1) 0%, rgba(255, 255, 255, 0.00) 100%)',
-                    }}
-                    className="mt-2 flex min-h-10 items-center gap-2 rounded-xl border border-components-panel-border px-3 text-xs shadow-xs backdrop-blur-[5px]"
-                  >
-                    <RiAlertFill className="size-4 text-text-warning-secondary" />
-                    <span className="system-xs-medium text-text-primary">
+                  <Alert type="warning" className="mt-2">
+                    <AlertTitle>
                       {t(($) => $['stepTwo.QATip'], { ns: 'datasetCreation' })}
-                    </span>
-                  </div>
+                    </AlertTitle>
+                  </Alert>
                 )}
               </>
             )}

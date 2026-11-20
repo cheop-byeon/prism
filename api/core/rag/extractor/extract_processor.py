@@ -154,6 +154,7 @@ class ExtractProcessor:
                             file_path,
                             upload_file.tenant_id if upload_file else None,
                             upload_file.created_by if upload_file else None,
+                            source_file_id=upload_file.id if upload_file else None,
                             session=session,
                         )
                     elif file_extension in {".md", ".markdown", ".mdx"}:
@@ -208,6 +209,7 @@ class ExtractProcessor:
                             file_path,
                             upload_file.tenant_id if upload_file else None,
                             upload_file.created_by if upload_file else None,
+                            source_file_id=upload_file.id if upload_file else None,
                             session=session,
                         )
                     elif file_extension in {".md", ".markdown", ".mdx"}:

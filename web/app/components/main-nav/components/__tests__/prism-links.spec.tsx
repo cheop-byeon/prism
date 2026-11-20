@@ -1,8 +1,8 @@
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@langgenius/dify-ui/dropdown-menu'
+  Menu,
+  MenuContent,
+  MenuTrigger,
+} from '@langgenius/dify-ui/menu'
 import { render, screen } from '@testing-library/react'
 import PrismLinks from '../prism-links'
 
@@ -28,12 +28,12 @@ vi.mock('@/config', async (importOriginal) => {
 
 const renderLinks = () =>
   render(
-    <DropdownMenu open>
-      <DropdownMenuTrigger>open</DropdownMenuTrigger>
-      <DropdownMenuContent>
+    <Menu open>
+      <MenuTrigger>open</MenuTrigger>
+      <MenuContent>
         <PrismLinks />
-      </DropdownMenuContent>
-    </DropdownMenu>,
+      </MenuContent>
+    </Menu>,
   )
 
 describe('PrismLinks', () => {

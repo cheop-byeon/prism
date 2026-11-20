@@ -1,8 +1,8 @@
-import { DropdownMenuLinkItem } from '@langgenius/dify-ui/dropdown-menu'
+import { MenuLinkItem } from '@langgenius/dify-ui/menu'
 import {
   ExternalLinkIndicator,
   MenuItemContent,
-} from '@/app/components/header/account-dropdown/menu-item-content'
+} from '@/app/components/header/account-menu/menu-item-content'
 import { PRISM_CLASSIC_URL, PRISM_SPECTRUM_URL } from '@/config'
 
 // Prism: links from Dify's help menu out to this deployment's Prism IETF
@@ -21,7 +21,7 @@ export default function PrismLinks() {
       {links.map(
         ({ href, label }) =>
           href && (
-            <DropdownMenuLinkItem
+            <MenuLinkItem
               key={label}
               className="mx-0 h-8 gap-1 px-3 py-1"
               href={href}
@@ -33,7 +33,7 @@ export default function PrismLinks() {
                 label={label}
                 trailing={<ExternalLinkIndicator />}
               />
-            </DropdownMenuLinkItem>
+            </MenuLinkItem>
           ),
       )}
     </>

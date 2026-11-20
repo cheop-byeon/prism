@@ -52,6 +52,7 @@ jobs:
             tests/unit_tests/services/test_job_status_service.py \
             tests/unit_tests/services/test_local_source_index_service.py \
             tests/unit_tests/services/test_prism_estimate_validation.py \
+            tests/unit_tests/services/test_agentic_rag_conversations.py \
             tests/unit_tests/migrations/test_prism_migration_graph.py \
             tests/unit_tests/core/rag/extractor/test_jsonl_extractor.py \
             tests/unit_tests/core/rag/datasource/keyword/test_bm25_load.py
