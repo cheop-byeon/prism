@@ -1,6 +1,7 @@
 from events.dataset_event import dataset_was_deleted
 from extensions.ext_database import db
 from models import Dataset
+from repositories.knowledge.dataset_read_repository import get_dataset_doc_form
 from tasks.clean_dataset_task import clean_dataset_task
 
 
@@ -8,7 +9,7 @@ from tasks.clean_dataset_task import clean_dataset_task
 def handle(sender: Dataset, **kwargs):
     dataset = sender
     # Prism: always queue cleanup, even without doc_form/indexing_technique.
-    doc_form = dataset.get_doc_form(session=db.session())
+    doc_form = get_dataset_doc_form(dataset, session=db.session())
     clean_dataset_task.delay(
         dataset.id,
         dataset.tenant_id,

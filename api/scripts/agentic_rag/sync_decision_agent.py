@@ -232,14 +232,12 @@ def _verify_draft(app_id: str, mailarchive_dataset_id: str, evolution_dataset_id
     from models.model import App
 
     app = db.session.query(App).filter_by(id=app_id).first()
-    if not app or not app.app_model_config:
+    config = app.app_model_config_with_session(session=db.session) if app else None
+    if not config:
         sys.exit("verification failed: app or app_model_config not found after import")
 
-    config = app.app_model_config
     agent_mode = json.loads(config.agent_mode) if config.agent_mode else {}
-    tool_dataset_ids = {
-        tool["dataset"]["id"] for tool in agent_mode.get("tools", []) if "dataset" in tool
-    }
+    tool_dataset_ids = {tool["dataset"]["id"] for tool in agent_mode.get("tools", []) if "dataset" in tool}
     expected = {mailarchive_dataset_id, evolution_dataset_id}
     if tool_dataset_ids != expected:
         sys.exit(f"verification failed: expected dataset tools {expected}, got {tool_dataset_ids}")

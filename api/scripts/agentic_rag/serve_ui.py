@@ -552,10 +552,9 @@ def _authenticate_console_request(request):
     """
     from werkzeug.exceptions import Unauthorized
 
-    from extensions.ext_database import db
+    from extensions.ext_login import load_account
     from libs.passport import PassportService
     from libs.token import extract_access_token
-    from services.account_service import AccountService
 
     auth_token = extract_access_token(request)
     if not auth_token:
@@ -569,7 +568,7 @@ def _authenticate_console_request(request):
     user_id = decoded.get("user_id")
     if not user_id:
         return None
-    return AccountService.load_logged_in_account(account_id=user_id, session=db.session())
+    return load_account(user_id)
 
 
 # Formerly gated every mail-sync/draft-download/local-sync/topic-pull route
@@ -711,21 +710,22 @@ def main() -> None:
         same check /console/api/email-register's own final step makes.
 
         Still "replicates Dify's business logic, not reimplementing it":
-        every step below calls Dify's own AccountService functions
-        directly (the exact same ones /console/api/email-register's own
-        final step calls), never a hand-rolled account-creation path.
+        the account is created and logged in by the very same
+        application service /console/api/email-register's own final step
+        calls, never a hand-rolled account-creation path.
         """
-        from sqlalchemy.orm import sessionmaker
-
         from constants.languages import languages
-        from extensions.ext_database import db
+        from extensions.ext_application_services import application_services
         from libs.helper import extract_remote_ip
         from libs.password import valid_password
         from libs.token import set_access_token_to_cookie, set_csrf_token_to_cookie, set_refresh_token_to_cookie
-        from services.account_email_registration_adapters import TokenManagerEmailRegistrationTokenGateway
-        from services.account_service import AccountService
-        from services.entities.account_entities import AccountEmailRegistrationPhase
-        from services.errors.account import AccountRegisterError
+        from services.account_errors import (
+            AccountEmailAlreadyInUseError,
+            AccountEmailDomainSuspendedError,
+            AccountEmailFrozenError,
+            EmailRegistrationSeatsLimitError,
+            InvalidEmailRegistrationTokenError,
+        )
 
         payload = request.get_json(silent=True) or {}
         token = (payload.get("token") or "").strip()
@@ -741,40 +741,32 @@ def main() -> None:
         except ValueError as exc:
             return jsonify({"message": str(exc)}), 400
 
-        token_gateway = TokenManagerEmailRegistrationTokenGateway()
-        register_data = token_gateway.get(token)
-        if not register_data or register_data.phase != AccountEmailRegistrationPhase.REGISTER:
-            return jsonify({"message": "That verification code has expired -- request a new one."}), 400
-        token_gateway.revoke(token)
-        normalized_email = register_data.email.lower()
-        if not normalized_email:
-            return jsonify({"message": "That verification code has expired -- request a new one."}), 400
-
-        with sessionmaker(db.engine).begin() as session:
-            existing = AccountService.get_account_by_email_with_case_fallback(normalized_email, session=session)
-            if existing:
-                return jsonify({"message": "A user with this email already exists."}), 400
-            try:
-                account = AccountService.create_account_and_tenant(
-                    email=normalized_email,
-                    name=normalized_email,
-                    password=password,
-                    interface_language=languages[0],
-                    session=db.session(),
-                )
-            except AccountRegisterError:
-                return jsonify(
-                    {
-                        "message": (
-                            "This email was deleted within the past 30 days and is temporarily "
-                            "unavailable for new account registration."
-                        )
-                    }
-                ), 400
-            token_pair = AccountService.login(
-                account=account, session=db.session(), ip_address=extract_remote_ip(request)
+        try:
+            token_pair = application_services().accounts.email_registration.register(
+                remote_ip=extract_remote_ip(request),
+                token=token,
+                new_password=password,
+                password_confirm=password_confirm,
+                language=languages[0],
+                timezone=None,
             )
-            AccountService.reset_login_error_rate_limit(normalized_email)
+        except InvalidEmailRegistrationTokenError:
+            return jsonify({"message": "That verification code has expired -- request a new one."}), 400
+        except AccountEmailAlreadyInUseError:
+            return jsonify({"message": "A user with this email already exists."}), 400
+        except AccountEmailFrozenError:
+            return jsonify(
+                {
+                    "message": (
+                        "This email was deleted within the past 30 days and is temporarily "
+                        "unavailable for new account registration."
+                    )
+                }
+            ), 400
+        except AccountEmailDomainSuspendedError:
+            return jsonify({"message": "Registration from this email domain is suspended."}), 400
+        except EmailRegistrationSeatsLimitError:
+            return jsonify({"message": "This workspace has no seats left for new accounts."}), 400
 
         response = make_response(jsonify({"result": "success"}))
         set_access_token_to_cookie(request, response, token_pair.access_token)

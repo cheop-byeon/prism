@@ -20,28 +20,95 @@ from core.rag.models.document import Document
 from extensions.ext_redis import redis_client
 from extensions.ext_storage import storage
 from models.dataset import Dataset, DatasetKeywordTable, DocumentSegment
+from repositories.knowledge.dataset_read_repository import get_dataset_keyword_table
 
 # Minimal English stopword list — keeps common function words out of the
 # BM25 corpus without pulling in NLTK or another NLP library.
-_STOPWORDS: frozenset[str] = frozenset({
-    "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
-    "of", "with", "by", "from", "is", "are", "was", "were", "be", "been",
-    "being", "have", "has", "had", "do", "does", "did", "will", "would",
-    "could", "should", "may", "might", "shall", "this", "that", "these",
-    "those", "it", "its", "as", "into", "about", "up", "out", "if", "so",
-    "not", "no", "can", "also", "than", "then", "i", "we", "you", "he",
-    "she", "they", "their", "our", "your", "his", "her", "which", "who",
-    "what", "when", "where", "how", "all", "each", "more", "such", "other",
-})
+_STOPWORDS: frozenset[str] = frozenset(
+    {
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "in",
+        "on",
+        "at",
+        "to",
+        "for",
+        "of",
+        "with",
+        "by",
+        "from",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "have",
+        "has",
+        "had",
+        "do",
+        "does",
+        "did",
+        "will",
+        "would",
+        "could",
+        "should",
+        "may",
+        "might",
+        "shall",
+        "this",
+        "that",
+        "these",
+        "those",
+        "it",
+        "its",
+        "as",
+        "into",
+        "about",
+        "up",
+        "out",
+        "if",
+        "so",
+        "not",
+        "no",
+        "can",
+        "also",
+        "than",
+        "then",
+        "i",
+        "we",
+        "you",
+        "he",
+        "she",
+        "they",
+        "their",
+        "our",
+        "your",
+        "his",
+        "her",
+        "which",
+        "who",
+        "what",
+        "when",
+        "where",
+        "how",
+        "all",
+        "each",
+        "more",
+        "such",
+        "other",
+    }
+)
 
 
 def _tokenize(text: str) -> list[str]:
     """Lower-case, split on non-word boundaries, drop stopwords and short tokens."""
-    return [
-        token
-        for token in re.findall(r"\b\w+\b", text.lower())
-        if token not in _STOPWORDS and len(token) > 1
-    ]
+    return [token for token in re.findall(r"\b\w+\b", text.lower()) if token not in _STOPWORDS and len(token) > 1]
 
 
 class Bm25Keyword(BaseKeyword):
@@ -100,7 +167,7 @@ class Bm25Keyword(BaseKeyword):
     def delete(self, *, session: Session) -> None:
         lock_name = f"keyword_indexing_lock_{self.dataset.id}"
         with redis_client.lock(lock_name, timeout=600):
-            dataset_keyword_table = self.dataset.get_dataset_keyword_table(session=session)
+            dataset_keyword_table = get_dataset_keyword_table(self.dataset, session=session)
             if dataset_keyword_table:
                 session.delete(dataset_keyword_table)
                 session.commit()
@@ -153,9 +220,7 @@ class Bm25Keyword(BaseKeyword):
             DocumentSegment.index_node_id.in_(top_ids),
         )
         if document_ids_filter:
-            segment_query = segment_query.where(
-                DocumentSegment.document_id.in_(document_ids_filter)
-            )
+            segment_query = segment_query.where(DocumentSegment.document_id.in_(document_ids_filter))
         segments = session.scalars(segment_query).all()
         segment_map = {seg.index_node_id: seg for seg in segments}
 
@@ -163,15 +228,17 @@ class Bm25Keyword(BaseKeyword):
         for node_id in top_ids:
             seg = segment_map.get(node_id)
             if seg:
-                documents.append(Document(
-                    page_content=seg.content,
-                    metadata={
-                        "doc_id": node_id,
-                        "doc_hash": seg.index_node_hash,
-                        "document_id": seg.document_id,
-                        "dataset_id": seg.dataset_id,
-                    },
-                ))
+                documents.append(
+                    Document(
+                        page_content=seg.content,
+                        metadata={
+                            "doc_id": node_id,
+                            "doc_hash": seg.index_node_hash,
+                            "document_id": seg.document_id,
+                            "dataset_id": seg.dataset_id,
+                        },
+                    )
+                )
         return documents
 
     # ------------------------------------------------------------------
@@ -186,7 +253,7 @@ class Bm25Keyword(BaseKeyword):
         value to a set, which raises on corpus_tokens (a list of lists is
         unhashable) and destroys doc_ids ordering.
         """
-        dataset_keyword_table = self.dataset.get_dataset_keyword_table(session=session)
+        dataset_keyword_table = get_dataset_keyword_table(self.dataset, session=session)
         if dataset_keyword_table:
             raw_text: str | None = None
             if dataset_keyword_table.data_source_type == "database":
@@ -205,6 +272,7 @@ class Bm25Keyword(BaseKeyword):
                     return data.get("corpus_tokens", []), data.get("doc_ids", [])
         else:
             from configs import dify_config
+
             keyword_data_source_type = dify_config.KEYWORD_DATA_SOURCE_TYPE
             dataset_keyword_table = DatasetKeywordTable(
                 dataset_id=self.dataset.id,
@@ -218,12 +286,14 @@ class Bm25Keyword(BaseKeyword):
         return [], []
 
     def _save_corpus(self, corpus_tokens: list[list[str]], doc_ids: list[str], session: Session) -> None:
-        blob = orjson.dumps({
-            "__type__": "bm25_index",
-            "__data__": {"corpus_tokens": corpus_tokens, "doc_ids": doc_ids},
-        }).decode("utf-8")
+        blob = orjson.dumps(
+            {
+                "__type__": "bm25_index",
+                "__data__": {"corpus_tokens": corpus_tokens, "doc_ids": doc_ids},
+            }
+        ).decode("utf-8")
 
-        dataset_keyword_table = self.dataset.get_dataset_keyword_table(session=session)
+        dataset_keyword_table = get_dataset_keyword_table(self.dataset, session=session)
         if dataset_keyword_table is not None and dataset_keyword_table.data_source_type == "database":
             dataset_keyword_table.keyword_table = blob
             session.flush()
@@ -235,6 +305,6 @@ class Bm25Keyword(BaseKeyword):
 
     @staticmethod
     def _empty_blob() -> str:
-        return orjson.dumps(
-            {"__type__": "bm25_index", "__data__": {"corpus_tokens": [], "doc_ids": []}}
-        ).decode("utf-8")
+        return orjson.dumps({"__type__": "bm25_index", "__data__": {"corpus_tokens": [], "doc_ids": []}}).decode(
+            "utf-8"
+        )

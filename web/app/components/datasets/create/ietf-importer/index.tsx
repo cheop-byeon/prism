@@ -23,12 +23,13 @@ import {
   DialogTitle,
 } from '@langgenius/dify-ui/dialog'
 import { IconButton } from '@langgenius/dify-ui/icon-button'
+import { Input } from '@langgenius/dify-ui/input'
 import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
-import { toast } from '@langgenius/dify-ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@langgenius/dify-ui/tooltip'
+import { useQuery } from '@tanstack/react-query'
 import { startTransition, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Input from '@/app/components/base/input'
+import { toast } from '@/app/notifications'
 import {
   downloadAndPreprocessMailarchiveYears,
   fetchGithubImportStatus,
@@ -47,7 +48,7 @@ import {
   startGithubImport,
   triggerIetfMailarchiveSync,
 } from '@/service/common'
-import { useFileUploadConfig } from '@/service/use-common'
+import { consoleQuery } from '@/service/console'
 import { PROGRESS_COMPLETE } from '../file-uploader/constants'
 import { getReposForWg, WG_NAMES } from './wg-repos'
 
@@ -187,7 +188,7 @@ function IetfImporter({
   supportBatchUpload,
 }: IetfImporterProps) {
   const { t } = useTranslation()
-  const { data: fileUploadConfig } = useFileUploadConfig()
+  const { data: fileUploadConfig } = useQuery(consoleQuery.files.upload.get.queryOptions())
 
   const [open, setOpen] = useState(false)
   const [mode, setMode] = useState<IetfImportMode>('mailarchive')
