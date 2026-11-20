@@ -11,25 +11,6 @@ const getStringConfig = (envVar: string | undefined, defaultValue: string) => {
   return defaultValue
 }
 
-const isLocalMarketplaceApiUrl = (url: string | undefined) =>
-  /^https?:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/)/i.test(url ?? '')
-
-// Docker entrypoint sets NEXT_PUBLIC_MARKETPLACE_API_PREFIX=${MARKETPLACE_API_URL}/api/v1.
-// MARKETPLACE_API_URL itself is the site origin (no /api/v1). Standalone marketplace
-// images may set MARKETPLACE_API_URL at runtime for SSR; normalize the same way
-// entrypoint does so console SSR does not call the HTML origin and fail Templates.
-const marketplaceApiPrefixFromUrl = (url: string) => {
-  const trimmed = url.replace(/\/$/, '')
-  return trimmed.endsWith('/api/v1') ? trimmed : `${trimmed}/api/v1`
-}
-
-const runtimeMarketplaceApiUrl =
-  typeof globalThis.window === 'undefined' &&
-  process.env.MARKETPLACE_API_URL &&
-  !isLocalMarketplaceApiUrl(process.env.MARKETPLACE_API_URL)
-    ? marketplaceApiPrefixFromUrl(process.env.MARKETPLACE_API_URL)
-    : undefined
-
 export const API_PREFIX = getStringConfig(
   env.NEXT_PUBLIC_API_PREFIX,
   'http://localhost:5001/console/api',
@@ -38,12 +19,6 @@ export const PUBLIC_API_PREFIX = getStringConfig(
   env.NEXT_PUBLIC_PUBLIC_API_PREFIX,
   'http://localhost:5001/api',
 )
-export const MARKETPLACE_API_PREFIX = getStringConfig(
-  runtimeMarketplaceApiUrl || env.NEXT_PUBLIC_MARKETPLACE_API_PREFIX,
-  'http://localhost:5002/api',
-)
-export const MARKETPLACE_URL_PREFIX = getStringConfig(env.NEXT_PUBLIC_MARKETPLACE_URL_PREFIX, '')
-
 // Unset (undefined) by default -- see NEXT_PUBLIC_PRISM_CLASSIC_URL's own
 // comment in env.ts. No getStringConfig fallback here on purpose: an empty-
 // string default would make the link's visibility check (Boolean(...))
@@ -51,7 +26,6 @@ export const MARKETPLACE_URL_PREFIX = getStringConfig(env.NEXT_PUBLIC_MARKETPLAC
 // avoids implying these have a real default URL.
 export const PRISM_CLASSIC_URL = env.NEXT_PUBLIC_PRISM_CLASSIC_URL
 export const PRISM_SPECTRUM_URL = env.NEXT_PUBLIC_PRISM_SPECTRUM_URL
-
 export const AMPLITUDE_API_KEY = getStringConfig(env.NEXT_PUBLIC_AMPLITUDE_API_KEY, '')
 export const COOKIEYES_SITE_KEY = getStringConfig(env.NEXT_PUBLIC_COOKIEYES_SITE_KEY, '')
 export const TURNSTILE_SITE_KEY = getStringConfig(env.NEXT_PUBLIC_TURNSTILE_SITE_KEY, '')
@@ -308,6 +282,7 @@ export const ENABLE_WEBSITE_FIRECRAWL = env.NEXT_PUBLIC_ENABLE_WEBSITE_FIRECRAWL
 export const ENABLE_WEBSITE_WATERCRAWL = env.NEXT_PUBLIC_ENABLE_WEBSITE_WATERCRAWL
 export const ENABLE_SINGLE_DOLLAR_LATEX = env.NEXT_PUBLIC_ENABLE_SINGLE_DOLLAR_LATEX
 export const ENABLE_FEATURE_PREVIEW = env.NEXT_PUBLIC_ENABLE_FEATURE_PREVIEW
+export const ENABLE_HITL_IM = env.NEXT_PUBLIC_ENABLE_HITL_IM
 
 export const VALUE_SELECTOR_DELIMITER = '@@@'
 

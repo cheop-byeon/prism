@@ -41,6 +41,12 @@ def _resolves(module: str, name: str) -> bool:
 
 
 def test_scripts_only_import_existing_dify_names():
+    # Load modules in the app's own order first: some Dify services only import
+    # cleanly after the controllers (1.19 has a services <-> tasks cycle when a
+    # conversation service is imported cold).
+    for package in ("controllers.console", "controllers.web", "controllers.service_api"):
+        importlib.import_module(package)
+
     missing = {
         str(path.relative_to(SCRIPTS_DIR)): sorted(f"{module}.{name}" for module, name in unresolved)
         for path in sorted(SCRIPTS_DIR.rglob("*.py"))

@@ -30,7 +30,7 @@ class Segmentation(BaseModel):
         validation_alias=AliasChoices("separator", "delimiter"),
     )
     max_tokens: int | None = Field(default=None, description="Maximum token count per chunk.")
-    chunk_overlap: int | None = Field(default=None, description="Token overlap between chunks.")
+    chunk_overlap: int | None = Field(default=None, ge=0, description="Token overlap between chunks.")
     chunk_strategy: str = "recursive"
     strategy_params: dict | None = None
 

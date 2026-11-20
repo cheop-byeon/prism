@@ -14,14 +14,14 @@ from models import Account, Tenant
 from models.account import TenantAccountJoin, TenantAccountRole
 from models.enums import ConversationFromSource, CreatorUserRole, FeedbackRating
 from models.model import App, AppMode, Conversation, Message, MessageAgentThought, MessageFeedback
+from services import agentic_rag_conversations as conversations
 from services.conversation_service import ConversationService
 from services.errors.conversation import ConversationNotExistsError
-from services.message_service import MessageService
 
 # Prism has no real per-invocation surface of its own (WEB_APP/SERVICE_API
 # don't apply -- it's neither Dify's web app nor an API caller); DEBUGGER is
 # the closest fit for "an internal console tool", and since every Prism
-# Conversation leaves invoke_from unset (None), pagination_by_last_id's own
+# Conversation leaves invoke_from unset (None), the session list query's own
 # `Conversation.invoke_from.is_(None) OR == invoke_from` filter matches
 # regardless of which value is passed here -- this is mostly documentation.
 _INVOKE_FROM = InvokeFrom.DEBUGGER
@@ -279,14 +279,14 @@ class AgenticRagSessionService:
 
     @staticmethod
     def list_sessions(*, account: Account, last_id: str | None = None, limit: int = 30) -> dict:
-        """Real cursor pagination via ConversationService.pagination_by_last_id
-        (the same method a normal Dify app's conversation list uses) instead
+        """Real cursor pagination (the same query a normal Dify app's conversation
+        list used before 1.19) instead
         of a flat limit=200 query that silently dropped anything older.
         """
-        pagination: InfiniteScrollPagination = ConversationService.pagination_by_last_id(
-            session=db.session,
+        pagination: InfiniteScrollPagination = conversations.paginate(
+            session=db.session(),
             app_model=_prism_app(),
-            user=account,
+            account=account,
             last_id=last_id,
             limit=limit,
             invoke_from=_INVOKE_FROM,
@@ -321,7 +321,7 @@ class AgenticRagSessionService:
         list_local_source_names's own-pulls-plus-shared merge, kept as a
         separate list here (rather than merged into list_sessions) since
         list_sessions' cursor pagination comes straight from Dify's own
-        ConversationService.pagination_by_last_id, which is hard-scoped to
+        agentic_rag_conversations.paginate, which is hard-scoped to
         one owning account by design -- not worth forking to inject a
         second account's rows into the same cursor.
         """
@@ -419,7 +419,9 @@ class AgenticRagSessionService:
         from models.ietf_agentic_session_share import IetfAgenticSessionShare
 
         try:
-            ConversationService.delete(_prism_app(), session_id, account, session=db.session())
+            conversations.delete(
+                session=db.session(), app_model=_prism_app(), conversation_id=session_id, account=account
+            )
         except ConversationNotExistsError:
             return False
         # IetfAgenticSessionShare is this project's own table, not part of
@@ -594,26 +596,28 @@ class AgenticRagSessionService:
             # generator now that this is a real Conversation row.
             tenant_id = get_data_tenant_id()
             with contextlib.suppress(Exception):
-                ConversationService.auto_generate_name(_prism_app(tenant_id), conversation, session=db.session())
+                conversations.auto_generate_name(
+                    session=db.session(), app_model=_prism_app(tenant_id), conversation=conversation
+                )
 
         return message.id
 
     @staticmethod
     def set_feedback(*, message_id: str, account: Account, rating: str | None, content: str | None = None) -> dict:
-        """Thumbs up/down on one answer -- reuses MessageService.create_feedback
-        as-is (it toggles/clears/updates a MessageFeedback row by itself);
+        """Thumbs up/down on one answer -- toggles/clears/updates the account's
+        MessageFeedback row (the behaviour of Dify's pre-1.19 create_feedback);
         rating=None clears existing feedback, matching that method's own
         contract. Real per-answer quality signal to query later, where Prism
         previously had none at all.
         """
         parsed_rating = FeedbackRating(rating) if rating else None
-        feedback = MessageService.create_feedback(
+        feedback = conversations.set_feedback(
+            session=db.session(),
             app_model=_prism_app(),
             message_id=message_id,
-            user=account,
+            account=account,
             rating=parsed_rating,
             content=content,
-            session=db.session(),
         )
         if parsed_rating is None or feedback is None:
             return {"rating": None, "content": None}
@@ -621,12 +625,12 @@ class AgenticRagSessionService:
 
     @staticmethod
     def rename_session(session_id: str, *, account: Account, name: str) -> Conversation:
-        """Reuses ConversationService.rename as-is -- it already handles
+        """Looks the conversation up through ConversationService.get_conversation --
         looking the conversation up scoped to this account (raises
         ConversationNotExistsError otherwise) and committing the change.
         """
-        return ConversationService.rename(
-            _prism_app(), session_id, account, name, auto_generate=False, session=db.session()
+        return conversations.rename(
+            session=db.session(), app_model=_prism_app(), conversation_id=session_id, account=account, name=name
         )
 
     @staticmethod
@@ -654,8 +658,9 @@ class AgenticRagSessionService:
         """
         since = naive_utc_now() - timedelta(days=days)
 
-        daily_metrics = db.session.execute(
-            sa_text("""
+        daily_metrics = (
+            db.session.execute(
+                sa_text("""
                 SELECT
                     DATE(created_at) AS date,
                     COUNT(*) AS turns,
@@ -667,11 +672,15 @@ class AgenticRagSessionService:
                 GROUP BY date
                 ORDER BY date
             """),
-            {"app_id": _PRISM_APP_ID, "since": since},
-        ).mappings().all()
+                {"app_id": _PRISM_APP_ID, "since": since},
+            )
+            .mappings()
+            .all()
+        )
 
-        daily_satisfaction = db.session.execute(
-            sa_text("""
+        daily_satisfaction = (
+            db.session.execute(
+                sa_text("""
                 SELECT
                     DATE(m.created_at) AS date,
                     COUNT(m.id) AS message_count,
@@ -682,8 +691,11 @@ class AgenticRagSessionService:
                 GROUP BY date
                 ORDER BY date
             """),
-            {"app_id": _PRISM_APP_ID, "since": since},
-        ).mappings().all()
+                {"app_id": _PRISM_APP_ID, "since": since},
+            )
+            .mappings()
+            .all()
+        )
         satisfaction_by_date = {
             row["date"]: (row["like_count"] / row["message_count"] * 100) if row["message_count"] else 0.0
             for row in daily_satisfaction
@@ -701,8 +713,9 @@ class AgenticRagSessionService:
             for row in daily_metrics
         ]
 
-        tool_usage_rows = db.session.execute(
-            sa_text("""
+        tool_usage_rows = (
+            db.session.execute(
+                sa_text("""
                 SELECT mat.tool AS tool, COUNT(*) AS calls
                 FROM message_agent_thoughts mat
                 JOIN messages m ON m.id = mat.message_id
@@ -710,12 +723,16 @@ class AgenticRagSessionService:
                 GROUP BY mat.tool
                 ORDER BY calls DESC
             """),
-            {"app_id": _PRISM_APP_ID, "since": since},
-        ).mappings().all()
+                {"app_id": _PRISM_APP_ID, "since": since},
+            )
+            .mappings()
+            .all()
+        )
         tool_usage = [{"tool": row["tool"], "calls": row["calls"]} for row in tool_usage_rows]
 
-        totals_row = db.session.execute(
-            sa_text("""
+        totals_row = (
+            db.session.execute(
+                sa_text("""
                 SELECT
                     COUNT(*) AS turns,
                     COALESCE(SUM(message_tokens) + SUM(answer_tokens), 0) AS tokens,
@@ -726,17 +743,24 @@ class AgenticRagSessionService:
                 FROM messages
                 WHERE app_id = :app_id AND created_at >= :since
             """),
-            {"app_id": _PRISM_APP_ID, "since": since},
-        ).mappings().one()
-        totals_satisfaction_row = db.session.execute(
-            sa_text("""
+                {"app_id": _PRISM_APP_ID, "since": since},
+            )
+            .mappings()
+            .one()
+        )
+        totals_satisfaction_row = (
+            db.session.execute(
+                sa_text("""
                 SELECT COUNT(m.id) AS message_count, COUNT(mf.id) AS like_count
                 FROM messages m
                 LEFT JOIN message_feedbacks mf ON mf.message_id = m.id AND mf.rating = 'like'
                 WHERE m.app_id = :app_id AND m.created_at >= :since
             """),
-            {"app_id": _PRISM_APP_ID, "since": since},
-        ).mappings().one()
+                {"app_id": _PRISM_APP_ID, "since": since},
+            )
+            .mappings()
+            .one()
+        )
         totals_satisfaction_pct = (
             (totals_satisfaction_row["like_count"] / totals_satisfaction_row["message_count"] * 100)
             if totals_satisfaction_row["message_count"]
@@ -769,8 +793,9 @@ class AgenticRagSessionService:
         """
         since = naive_utc_now() - timedelta(days=days)
 
-        rows = db.session.execute(
-            sa_text("""
+        rows = (
+            db.session.execute(
+                sa_text("""
                 SELECT
                     m.from_account_id AS account_id,
                     a.email AS email,
@@ -784,8 +809,11 @@ class AgenticRagSessionService:
                 GROUP BY m.from_account_id, a.email
                 ORDER BY cost DESC
             """),
-            {"app_id": _PRISM_APP_ID, "since": since},
-        ).mappings().all()
+                {"app_id": _PRISM_APP_ID, "since": since},
+            )
+            .mappings()
+            .all()
+        )
         return [
             {
                 "account_id": row["account_id"],
