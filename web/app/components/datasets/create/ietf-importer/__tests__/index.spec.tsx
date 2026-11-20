@@ -1,5 +1,6 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { renderWithConsoleQuery as render } from '@/test/console/query-data'
 import IetfImporter from '../index'
 
 const mockDownloadAndPreprocessMailarchiveYears = vi.fn()
@@ -21,15 +22,22 @@ vi.mock('@/service/common', () => ({
   fetchIetfWgDocuments: (...args: unknown[]) => mockFetchIetfWgDocuments(...args),
 }))
 
-vi.mock('@/service/use-common', () => ({
-  useFileUploadConfig: () => ({
-    data: {
-      file_upload_limit: 5,
-    },
-  }),
-}))
+vi.mock('@/service/console', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/service/console')>()
+  const { withConsoleResponses } = await import('@/test/console/service-responses')
+  const { createFileUploadConfigFixture } = await import('@/test/fixtures/file-upload-config')
+  return {
+    ...actual,
+    consoleQuery: withConsoleResponses(actual.consoleQuery, {
+      'files.upload.get': async () => ({
+        ...createFileUploadConfigFixture(),
+        file_upload_limit: 5,
+      }),
+    }),
+  }
+})
 
-vi.mock('@langgenius/dify-ui/toast', () => ({
+vi.mock('@/app/notifications', () => ({
   toast: {
     success: (...args: unknown[]) => mockToastSuccess(...args),
     error: (...args: unknown[]) => mockToastError(...args),

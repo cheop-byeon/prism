@@ -36,7 +36,7 @@ export const FrameworkParamInput: FC<FrameworkParamInputProps> = ({
   max,
   onChange,
 }) => {
-  const { t } = useTranslation()
+  const { t } = useTranslation(['datasetCreation'])
   const label = t(($) => $[labelKey], { ns: 'datasetCreation' })
 
   if (type === 'select' && options) {

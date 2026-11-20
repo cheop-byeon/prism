@@ -14,14 +14,14 @@ from core.rag.datasource.keyword.bm25.bm25 import Bm25Keyword
 from models.dataset import Dataset
 
 
-def _dataset_with_blob(blob: dict) -> MagicMock:
-    # spec=Dataset: an attribute the real model doesn't have fails here too.
-    dataset = MagicMock(spec=Dataset)
+def _session_with_blob(blob: dict) -> MagicMock:
+    # The keyword table row is looked up through the session.
     table = MagicMock()
     table.data_source_type = "database"
     table.keyword_table = orjson.dumps(blob).decode()
-    dataset.get_dataset_keyword_table.return_value = table
-    return dataset
+    session = MagicMock()
+    session.scalar.return_value = table
+    return session
 
 
 class TestBm25CorpusLoading:
@@ -34,9 +34,10 @@ class TestBm25CorpusLoading:
             },
         }
         keyword = Bm25Keyword.__new__(Bm25Keyword)
-        keyword.dataset = _dataset_with_blob(blob)
+        # spec=Dataset: an attribute the real model doesn't have fails here too.
+        keyword.dataset = MagicMock(spec=Dataset)
 
-        corpus_tokens, doc_ids = keyword._load_corpus(MagicMock())
+        corpus_tokens, doc_ids = keyword._load_corpus(_session_with_blob(blob))
 
         assert corpus_tokens == [["target", "delay"], ["late", "comers", "measure"]]
         assert doc_ids == ["node-1", "node-2"]  # order preserved
@@ -45,9 +46,10 @@ class TestBm25CorpusLoading:
         # A table written by the Jieba backend must not be misread as BM25.
         blob = {"__type__": "keyword_table", "__data__": {"kw": ["node-1"]}}
         keyword = Bm25Keyword.__new__(Bm25Keyword)
-        keyword.dataset = _dataset_with_blob(blob)
+        # spec=Dataset: an attribute the real model doesn't have fails here too.
+        keyword.dataset = MagicMock(spec=Dataset)
 
-        corpus_tokens, doc_ids = keyword._load_corpus(MagicMock())
+        corpus_tokens, doc_ids = keyword._load_corpus(_session_with_blob(blob))
 
         assert corpus_tokens == []
         assert doc_ids == []
