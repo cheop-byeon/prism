@@ -17,11 +17,12 @@ import type {
 import { Button } from '@langgenius/dify-ui/button'
 import {
   Dialog,
-  DialogCloseButton,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogTitle,
 } from '@langgenius/dify-ui/dialog'
+import { IconButton } from '@langgenius/dify-ui/icon-button'
 import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
 import { toast } from '@langgenius/dify-ui/toast'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@langgenius/dify-ui/tooltip'
@@ -937,7 +938,17 @@ function IetfImporter({
       >
         <DialogContent className="w-[720px] max-w-[calc(100vw-2rem)] p-0">
           <div className="border-b border-divider-subtle px-6 py-5">
-            <DialogCloseButton data-testid="ietf-import-close" className="top-5 right-5" />
+            <DialogClose
+              render={
+                <IconButton
+                  aria-label={t(($) => $['operation.close'], { ns: 'common' })}
+                  data-testid="ietf-import-close"
+                  className="absolute inset-e-5 top-5"
+                >
+                  <span aria-hidden className="i-ri-close-line size-4" />
+                </IconButton>
+              }
+            />
             <DialogTitle className="pr-10 title-2xl-semi-bold text-text-primary">
               {t(($) => $['stepOne.ietf.open'], { ns: 'datasetCreation' })}
             </DialogTitle>
@@ -1498,10 +1509,8 @@ function IetfImporter({
                         {t(($) => $['stepOne.ietf.importType'], { ns: 'datasetCreation' })}
                       </div>
                       <SegmentedControl
-                        value={[importType]}
-                        onValueChange={([value]) =>
-                          value && setImportType(value as 'rfc' | 'draft')
-                        }
+                        value={importType}
+                        onValueChange={(value) => setImportType(value as 'rfc' | 'draft')}
                         aria-label={t(($) => $['stepOne.ietf.importType'], {
                           ns: 'datasetCreation',
                         })}

@@ -11,13 +11,36 @@ This module tests the dataset cleanup task functionality including:
 - Segment attachment cleanup
 """
 
+import json
 import uuid
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from sqlalchemy import Engine, event
+from sqlalchemy.orm import Session, sessionmaker
 
 from core.rag.index_processor.constant.index_type import IndexStructureType, IndexTechniqueType
-from models.enums import DataSourceType
+from extensions.storage.storage_type import StorageType
+from models.base import TypeBase
+from models.dataset import (
+    AppDatasetJoin,
+    ChildChunk,
+    Dataset,
+    DatasetMetadata,
+    DatasetMetadataBinding,
+    DatasetPermission,
+    DatasetProcessRule,
+    DatasetQuery,
+    Document,
+    DocumentSegment,
+    Pipeline,
+    SegmentAttachmentBinding,
+)
+from models.enums import CreatorUserRole, DataSourceType, DocumentCreatedFrom, IndexingStatus
+from models.model import TagBinding, UploadFile
+from models.workflow import Workflow, WorkflowType
 from tasks.clean_dataset_task import clean_dataset_task
 
 # ============================================================================
@@ -26,59 +49,60 @@ from tasks.clean_dataset_task import clean_dataset_task
 
 
 @pytest.fixture
-def tenant_id():
+def tenant_id() -> str:
     """Generate a unique tenant ID for testing."""
     return str(uuid.uuid4())
 
 
 @pytest.fixture
-def dataset_id():
+def dataset_id() -> str:
     """Generate a unique dataset ID for testing."""
     return str(uuid.uuid4())
 
 
 @pytest.fixture
-def collection_binding_id():
+def collection_binding_id() -> str:
     """Generate a unique collection binding ID for testing."""
     return str(uuid.uuid4())
 
 
 @pytest.fixture
-def pipeline_id():
+def pipeline_id() -> str:
     """Generate a unique pipeline ID for testing."""
     return str(uuid.uuid4())
 
 
 @pytest.fixture
-def mock_db_session():
-    """Mock database session via session_factory.create_session()."""
-    with patch("tasks.clean_dataset_task.session_factory", autospec=True) as mock_sf:
-        mock_session = MagicMock()
-        # context manager for create_session()
-        cm = MagicMock()
-        cm.__enter__.return_value = mock_session
-        cm.__exit__.return_value = None
-        mock_sf.create_session.return_value = cm
-
-        # Setup scalars for select queries
-        mock_session.scalars.return_value.all.return_value = []
-
-        # No other datasets share a collection binding in the mocked DB, so
-        # the task takes the index_processor.clean branch (not the
-        # shared-binding vector-filter branch).
-        mock_session.scalar.return_value = 0
-
-        # Setup execute for JOIN queries
-        mock_session.execute.return_value.all.return_value = []
-
-        # Yield an object with a `.session` attribute to keep tests unchanged
-        wrapper = MagicMock()
-        wrapper.session = mock_session
-        yield wrapper
+def orm_session_maker(
+    sqlite_engine: Engine,
+    sqlite_session_factory: sessionmaker[Session],
+) -> sessionmaker[Session]:
+    """Create the cleanup tables and return the suite's real SQLite session factory."""
+    models = (
+        Document,
+        DocumentSegment,
+        SegmentAttachmentBinding,
+        UploadFile,
+        DatasetProcessRule,
+        DatasetQuery,
+        AppDatasetJoin,
+        DatasetMetadata,
+        DatasetMetadataBinding,
+        Pipeline,
+        Workflow,
+        # Prism: shared-binding check and the unconditional segment/child-chunk,
+        # permission and tag-binding deletes.
+        Dataset,
+        ChildChunk,
+        DatasetPermission,
+        TagBinding,
+    )
+    TypeBase.metadata.create_all(sqlite_engine, tables=[model.__table__ for model in models])
+    return sqlite_session_factory
 
 
 @pytest.fixture
-def mock_storage():
+def mock_storage() -> Iterator[MagicMock]:
     """Mock storage client."""
     with patch("tasks.clean_dataset_task.storage", autospec=True) as mock_storage:
         mock_storage.delete.return_value = None
@@ -86,7 +110,7 @@ def mock_storage():
 
 
 @pytest.fixture
-def mock_index_processor_factory():
+def mock_index_processor_factory() -> Iterator[dict[str, MagicMock]]:
     """Mock IndexProcessorFactory."""
     with patch("tasks.clean_dataset_task.IndexProcessorFactory", autospec=True) as mock_factory:
         mock_processor = MagicMock()
@@ -103,42 +127,104 @@ def mock_index_processor_factory():
 
 
 @pytest.fixture
-def mock_get_image_upload_file_ids():
+def mock_get_image_upload_file_ids() -> Iterator[MagicMock]:
     """Mock get_image_upload_file_ids function."""
     with patch("tasks.clean_dataset_task.get_image_upload_file_ids", autospec=True) as mock_func:
         mock_func.return_value = []
         yield mock_func
 
 
-@pytest.fixture
-def mock_document():
-    """Create a mock Document object."""
-    doc = MagicMock()
-    doc.id = str(uuid.uuid4())
-    doc.tenant_id = str(uuid.uuid4())
-    doc.dataset_id = str(uuid.uuid4())
-    doc.data_source_type = DataSourceType.UPLOAD_FILE
-    doc.data_source_info = '{"upload_file_id": "test-file-id"}'
-    doc.data_source_info_dict = {"upload_file_id": "test-file-id"}
-    return doc
+def _run_clean_dataset(
+    *,
+    dataset_id: str,
+    tenant_id: str,
+    collection_binding_id: str,
+    pipeline_id: str | None = None,
+) -> None:
+    clean_dataset_task(
+        dataset_id=dataset_id,
+        tenant_id=tenant_id,
+        indexing_technique=IndexTechniqueType.HIGH_QUALITY,
+        index_struct='{"type": "paragraph"}',
+        collection_binding_id=collection_binding_id,
+        doc_form=IndexStructureType.PARAGRAPH_INDEX,
+        pipeline_id=pipeline_id,
+    )
 
 
-@pytest.fixture
-def mock_segment():
-    """Create a mock DocumentSegment object."""
-    segment = MagicMock()
-    segment.id = str(uuid.uuid4())
-    segment.content = "Test segment content"
-    return segment
+def _persist_document(session_maker: sessionmaker[Session], *, dataset_id: str, tenant_id: str) -> Document:
+    document = Document(
+        id=str(uuid.uuid4()),
+        tenant_id=tenant_id,
+        dataset_id=dataset_id,
+        position=1,
+        data_source_type=DataSourceType.LOCAL_FILE,
+        batch="batch",
+        name="Document",
+        created_from=DocumentCreatedFrom.API,
+        created_by=str(uuid.uuid4()),
+        indexing_status=IndexingStatus.COMPLETED,
+        doc_form=IndexStructureType.PARAGRAPH_INDEX,
+    )
+    with session_maker.begin() as session:
+        session.add(document)
+    return document
 
 
-@pytest.fixture
-def mock_upload_file():
-    """Create a mock UploadFile object."""
-    upload_file = MagicMock()
-    upload_file.id = str(uuid.uuid4())
-    upload_file.key = f"test_files/{uuid.uuid4()}.txt"
-    return upload_file
+def _persist_pipeline_and_workflow(
+    session_maker: sessionmaker[Session],
+    *,
+    pipeline_id: str,
+    tenant_id: str,
+) -> Workflow:
+    pipeline = Pipeline(tenant_id=tenant_id, name="Pipeline", description="Pipeline")
+    pipeline.id = pipeline_id
+    workflow = Workflow.new(
+        tenant_id=tenant_id,
+        app_id=pipeline_id,
+        type=WorkflowType.RAG_PIPELINE.value,
+        version="v1",
+        graph=json.dumps({"nodes": [], "edges": []}),
+        features="{}",
+        created_by=str(uuid.uuid4()),
+        environment_variables=[],
+        conversation_variables=[],
+        rag_pipeline_variables=[],
+    )
+    with session_maker.begin() as session:
+        session.add_all([pipeline, workflow])
+    return workflow
+
+
+def _persist_attachment(
+    session_maker: sessionmaker[Session],
+    *,
+    dataset_id: str,
+    tenant_id: str,
+) -> tuple[SegmentAttachmentBinding, UploadFile]:
+    attachment_file = UploadFile(
+        tenant_id=tenant_id,
+        storage_type=StorageType.LOCAL,
+        key=f"attachments/{uuid.uuid4()}.pdf",
+        name="attachment.pdf",
+        size=10,
+        extension="pdf",
+        mime_type="application/pdf",
+        created_by_role=CreatorUserRole.ACCOUNT,
+        created_by=str(uuid.uuid4()),
+        created_at=datetime.now(UTC),
+        used=False,
+    )
+    binding = SegmentAttachmentBinding(
+        tenant_id=tenant_id,
+        dataset_id=dataset_id,
+        document_id=str(uuid.uuid4()),
+        segment_id=str(uuid.uuid4()),
+        attachment_id=attachment_file.id,
+    )
+    with session_maker.begin() as session:
+        session.add_all([attachment_file, binding])
+    return binding, attachment_file
 
 
 # ============================================================================
@@ -146,53 +232,6 @@ def mock_upload_file():
 # ============================================================================
 # Note: Basic cleanup behavior is now covered by testcontainers-based
 # integration tests; no unit tests remain in this section.
-# ============================================================================
-# Test Segment / Child Chunk Cleanup
-# ============================================================================
-
-
-class TestSegmentAndChildChunkCleanup:
-    """Segments and child chunks must be deleted by dataset_id unconditionally.
-
-    Regression tests for two leaks observed on a live stack:
-    - a dataset whose documents were already gone kept all its segments
-      (deletion used to sit inside the ``if documents`` guard)
-    - parent-child datasets on a shared collection binding leaked every
-      ChildChunk row (the shared-binding branch never calls
-      index_processor.clean, previously the only child-chunk deletion path)
-    """
-
-    def test_segments_and_child_chunks_deleted_even_without_documents(
-        self,
-        dataset_id,
-        tenant_id,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
-    ):
-        session = mock_db_session.session
-        # No documents and no segments returned by the initial queries.
-        session.scalars.return_value.all.return_value = []
-
-        clean_dataset_task(
-            dataset_id=dataset_id,
-            tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "weaviate", "vector_store": {"class_prefix": "x"}}',
-            collection_binding_id=None,
-            doc_form=IndexStructureType.PARENT_CHILD_INDEX,
-        )
-
-        deleted_tables = {
-            call.args[0].table.name
-            for call in session.execute.call_args_list
-            if call.args and type(call.args[0]).__name__ == "Delete"
-        }
-        assert "document_segments" in deleted_tables
-        assert "child_chunks" in deleted_tables
-
-
 # ============================================================================
 # Test Error Handling
 # ============================================================================
@@ -206,38 +245,50 @@ class TestErrorHandling:
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
         Test that session is closed even if rollback fails.
 
         Scenario:
         - Database commit fails
-        - Rollback also fails
-        - Session should still be closed
+        - Rollback completes, then its event hook raises
+        - Session cleanup should still make the factory reusable
 
         Expected behavior:
-        - Session.close() is called regardless of rollback failure
+        - The database rollback preserves the pending row
+        - The task session closes and a new session remains usable
         """
-        # Arrange
-        mock_db_session.session.commit.side_effect = Exception("Commit failed")
-        mock_db_session.session.rollback.side_effect = Exception("Rollback failed")
+        # Arrange: persist a row whose attempted deletion must be rolled back.
+        document = _persist_document(orm_session_maker, dataset_id=dataset_id, tenant_id=tenant_id)
+
+        def fail_commit(_session: Session) -> None:
+            raise RuntimeError("Commit failed")
+
+        def fail_rollback(_session: Session) -> None:
+            raise RuntimeError("Rollback failed")
+
+        event.listen(orm_session_maker.class_, "before_commit", fail_commit)
+        event.listen(orm_session_maker.class_, "after_rollback", fail_rollback)
 
         # Act
-        clean_dataset_task(
-            dataset_id=dataset_id,
-            tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "paragraph"}',
-            collection_binding_id=collection_binding_id,
-            doc_form=IndexStructureType.PARAGRAPH_INDEX,
-        )
+        try:
+            _run_clean_dataset(
+                dataset_id=dataset_id,
+                tenant_id=tenant_id,
+                collection_binding_id=collection_binding_id,
+            )
+        finally:
+            event.remove(orm_session_maker.class_, "before_commit", fail_commit)
+            event.remove(orm_session_maker.class_, "after_rollback", fail_rollback)
 
-        # Assert
-        mock_db_session.session.close.assert_called_once()
+        # Assert: rollback happened before its hook failed, and the closed task
+        # session did not prevent a new real session from reading the row.
+        with orm_session_maker() as session:
+            assert session.get(Document, document.id) is not None
 
 
 # ============================================================================
@@ -253,11 +304,11 @@ class TestPipelineAndWorkflowDeletion:
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        pipeline_id,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        pipeline_id: str,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
         Test that pipeline and workflow are deleted when pipeline_id is provided.
@@ -266,30 +317,35 @@ class TestPipelineAndWorkflowDeletion:
         - Pipeline record is deleted
         - Related workflow record is deleted
         """
+        workflow = _persist_pipeline_and_workflow(
+            orm_session_maker,
+            pipeline_id=pipeline_id,
+            tenant_id=tenant_id,
+        )
+
         # Act
-        clean_dataset_task(
+        _run_clean_dataset(
             dataset_id=dataset_id,
             tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "paragraph"}',
             collection_binding_id=collection_binding_id,
-            doc_form=IndexStructureType.PARAGRAPH_INDEX,
             pipeline_id=pipeline_id,
         )
 
-        # Assert - verify execute was called for delete operations
-        # 1 attachment JOIN query + 5 base deletes + 2 pipeline/workflow deletes = 8
-        assert mock_db_session.session.execute.call_count >= 8
+        # Assert
+        with orm_session_maker() as session:
+            assert session.get(Pipeline, pipeline_id) is None
+            assert session.get(Workflow, workflow.id) is None
 
     def test_clean_dataset_task_without_pipeline_id(
         self,
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        pipeline_id: str,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
         Test that pipeline/workflow deletion is skipped when pipeline_id is None.
@@ -297,22 +353,24 @@ class TestPipelineAndWorkflowDeletion:
         Expected behavior:
         - Pipeline and workflow deletion queries are not executed
         """
+        workflow = _persist_pipeline_and_workflow(
+            orm_session_maker,
+            pipeline_id=pipeline_id,
+            tenant_id=tenant_id,
+        )
+
         # Act
-        clean_dataset_task(
+        _run_clean_dataset(
             dataset_id=dataset_id,
             tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "paragraph"}',
             collection_binding_id=collection_binding_id,
-            doc_form=IndexStructureType.PARAGRAPH_INDEX,
             pipeline_id=None,
         )
 
-        # Assert - verify execute was called for delete operations:
-        # 1 attachment JOIN query + 5 base deletes, plus Prism's segment and
-        # child-chunk deletes by dataset_id, dataset permissions and tag
-        # bindings = 10
-        assert mock_db_session.session.execute.call_count == 10
+        # Assert
+        with orm_session_maker() as session:
+            assert session.get(Pipeline, pipeline_id) is not None
+            assert session.get(Workflow, workflow.id) is not None
 
 
 # ============================================================================
@@ -328,10 +386,10 @@ class TestSegmentAttachmentCleanup:
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
         Test that segment attachments are cleaned up properly.
@@ -346,42 +404,34 @@ class TestSegmentAttachmentCleanup:
         - Binding records are deleted from database
         """
         # Arrange
-        mock_binding = MagicMock()
-        mock_binding.attachment_id = str(uuid.uuid4())
-
-        mock_attachment_file = MagicMock()
-        mock_attachment_file.id = mock_binding.attachment_id
-        mock_attachment_file.key = f"attachments/{uuid.uuid4()}.pdf"
-
-        # Setup execute to return attachment with binding
-        mock_db_session.session.execute.return_value.all.return_value = [(mock_binding, mock_attachment_file)]
-
-        # Act
-        clean_dataset_task(
+        binding, attachment_file = _persist_attachment(
+            orm_session_maker,
             dataset_id=dataset_id,
             tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "paragraph"}',
+        )
+
+        # Act
+        _run_clean_dataset(
+            dataset_id=dataset_id,
+            tenant_id=tenant_id,
             collection_binding_id=collection_binding_id,
-            doc_form=IndexStructureType.PARAGRAPH_INDEX,
         )
 
         # Assert
-        mock_storage.delete.assert_called_with(mock_attachment_file.key)
-        # Attachment file and binding are deleted in batch; verify DELETEs were issued
-        execute_sqls = [" ".join(str(c[0][0]).split()) for c in mock_db_session.session.execute.call_args_list]
-        assert any("DELETE FROM upload_files" in sql for sql in execute_sqls)
-        assert any("DELETE FROM segment_attachment_bindings" in sql for sql in execute_sqls)
+        mock_storage.delete.assert_called_once_with(attachment_file.key)
+        with orm_session_maker() as session:
+            assert session.get(UploadFile, attachment_file.id) is None
+            assert session.get(SegmentAttachmentBinding, binding.id) is None
 
     def test_clean_dataset_task_attachment_storage_failure(
         self,
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
         Test that cleanup continues even if attachment storage deletion fails.
@@ -391,32 +441,25 @@ class TestSegmentAttachmentCleanup:
         - Attachment file and binding are still deleted from database
         """
         # Arrange
-        mock_binding = MagicMock()
-        mock_binding.attachment_id = str(uuid.uuid4())
-
-        mock_attachment_file = MagicMock()
-        mock_attachment_file.id = mock_binding.attachment_id
-        mock_attachment_file.key = f"attachments/{uuid.uuid4()}.pdf"
-
-        mock_db_session.session.execute.return_value.all.return_value = [(mock_binding, mock_attachment_file)]
+        binding, attachment_file = _persist_attachment(
+            orm_session_maker,
+            dataset_id=dataset_id,
+            tenant_id=tenant_id,
+        )
         mock_storage.delete.side_effect = Exception("Storage error")
 
         # Act
-        clean_dataset_task(
+        _run_clean_dataset(
             dataset_id=dataset_id,
             tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "paragraph"}',
             collection_binding_id=collection_binding_id,
-            doc_form=IndexStructureType.PARAGRAPH_INDEX,
         )
 
         # Assert - storage delete was attempted
-        mock_storage.delete.assert_called_once()
-        # Records are deleted in batch; verify DELETEs were issued
-        execute_sqls = [" ".join(str(c[0][0]).split()) for c in mock_db_session.session.execute.call_args_list]
-        assert any("DELETE FROM upload_files" in sql for sql in execute_sqls)
-        assert any("DELETE FROM segment_attachment_bindings" in sql for sql in execute_sqls)
+        mock_storage.delete.assert_called_once_with(attachment_file.key)
+        with orm_session_maker() as session:
+            assert session.get(UploadFile, attachment_file.id) is None
+            assert session.get(SegmentAttachmentBinding, binding.id) is None
 
 
 # ============================================================================
@@ -427,34 +470,35 @@ class TestSegmentAttachmentCleanup:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
-    def test_clean_dataset_task_session_always_closed(
+    def test_clean_dataset_task_commits_cleanup_and_factory_remains_usable(
         self,
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
-        Test that database session is always closed regardless of success or failure.
+        Test that cleanup commits and the task-owned session releases its resources.
 
         Expected behavior:
-        - Session.close() is called in finally block
+        - The document deletion is committed
+        - A subsequent real session can use the same factory
         """
+        document = _persist_document(orm_session_maker, dataset_id=dataset_id, tenant_id=tenant_id)
+
         # Act
-        clean_dataset_task(
+        _run_clean_dataset(
             dataset_id=dataset_id,
             tenant_id=tenant_id,
-            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
-            index_struct='{"type": "paragraph"}',
             collection_binding_id=collection_binding_id,
-            doc_form=IndexStructureType.PARAGRAPH_INDEX,
         )
 
         # Assert
-        mock_db_session.session.close.assert_called_once()
+        with orm_session_maker() as session:
+            assert session.get(Document, document.id) is None
 
 
 # ============================================================================
@@ -470,10 +514,10 @@ class TestIndexProcessorParameters:
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
     ):
         """
         Test that correct parameters are passed to IndexProcessor.clean().
@@ -514,7 +558,9 @@ class TestIndexProcessorParameters:
         assert call_args[0][1] is None
 
         # Verify keyword arguments
-        assert call_args[1]["session"] is mock_db_session.session
+        cleanup_session = call_args[1]["session"]
+        assert isinstance(cleanup_session, Session)
+        assert cleanup_session.get_bind() is orm_session_maker.kw["bind"]
         assert call_args[1]["with_keywords"] is True
         assert call_args[1]["delete_child_chunks"] is True
         schedule_refresh.assert_called_once_with(tenant_id)
@@ -524,11 +570,11 @@ class TestIndexProcessorParameters:
         dataset_id: str,
         tenant_id: str,
         collection_binding_id: str,
-        mock_db_session,
-        mock_storage,
-        mock_index_processor_factory,
-        mock_get_image_upload_file_ids,
-    ):
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
+    ) -> None:
         mock_index_processor_factory["processor"].clean.side_effect = RuntimeError("vector cleanup failed")
 
         with patch("tasks.clean_dataset_task.schedule_billing_vector_space_refresh") as schedule_refresh:
@@ -542,3 +588,64 @@ class TestIndexProcessorParameters:
             )
 
         schedule_refresh.assert_not_called()
+
+
+class TestSegmentAndChildChunkCleanup:
+    """Segments and child chunks must be deleted by dataset_id unconditionally.
+
+    Regression tests for two leaks observed on a live stack:
+    - a dataset whose documents were already gone kept all its segments
+      (deletion used to sit inside the ``if documents`` guard)
+    - parent-child datasets on a shared collection binding leaked every
+      ChildChunk row (the shared-binding branch never calls
+      index_processor.clean, previously the only child-chunk deletion path)
+    """
+
+    def test_segments_and_child_chunks_deleted_even_without_documents(
+        self,
+        dataset_id: str,
+        tenant_id: str,
+        orm_session_maker: sessionmaker[Session],
+        mock_storage: MagicMock,
+        mock_index_processor_factory: dict[str, MagicMock],
+        mock_get_image_upload_file_ids: MagicMock,
+    ):
+        # Arrange: a segment and child chunk whose document is already gone
+        user_id = str(uuid.uuid4())
+        segment = DocumentSegment(
+            tenant_id=tenant_id,
+            dataset_id=dataset_id,
+            document_id=str(uuid.uuid4()),
+            position=1,
+            content="parent",
+            word_count=1,
+            tokens=1,
+            created_by=user_id,
+        )
+        child_chunk = ChildChunk(
+            tenant_id=tenant_id,
+            dataset_id=dataset_id,
+            document_id=segment.document_id,
+            segment_id=segment.id,
+            position=1,
+            content="child",
+            word_count=1,
+            created_by=user_id,
+        )
+        with orm_session_maker.begin() as session:
+            session.add_all([segment, child_chunk])
+
+        # Act
+        clean_dataset_task(
+            dataset_id=dataset_id,
+            tenant_id=tenant_id,
+            indexing_technique=IndexTechniqueType.HIGH_QUALITY,
+            index_struct='{"type": "weaviate", "vector_store": {"class_prefix": "x"}}',
+            collection_binding_id=None,
+            doc_form=IndexStructureType.PARENT_CHILD_INDEX,
+        )
+
+        # Assert
+        with orm_session_maker() as session:
+            assert session.get(DocumentSegment, segment.id) is None
+            assert session.get(ChildChunk, child_chunk.id) is None

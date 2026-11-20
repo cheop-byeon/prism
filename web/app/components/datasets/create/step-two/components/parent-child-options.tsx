@@ -11,7 +11,7 @@ import type {
 } from '@/models/datasets'
 import { Button } from '@langgenius/dify-ui/button'
 import { Checkbox } from '@langgenius/dify-ui/checkbox'
-import { RadioGroup } from '@langgenius/dify-ui/radio'
+import { RadioGroup } from '@langgenius/dify-ui/radio-group'
 import { SegmentedControl, SegmentedControlItem } from '@langgenius/dify-ui/segmented-control'
 import { RiSearchEyeLine } from '@remixicon/react'
 import { useSuspenseQuery } from '@tanstack/react-query'
@@ -114,8 +114,8 @@ const LevelStrategySection: FC<LevelStrategySectionProps> = ({
           {t(($) => $['stepTwo.chunkStrategyProvider'], { ns: 'datasetCreation' })}
         </TextLabel>
         <SegmentedControl
-          value={[level.strategyProvider]}
-          onValueChange={([value]) => value && onStrategyProviderChange(value as StrategyProvider)}
+          value={level.strategyProvider}
+          onValueChange={(value) => onStrategyProviderChange(value as StrategyProvider)}
           aria-label={t(($) => $['stepTwo.chunkStrategyProvider'], { ns: 'datasetCreation' })}
         >
           {providerOptions.map((option) => (
@@ -264,7 +264,7 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
   return (
     <OptionCard
       title={t(($) => $['stepTwo.parentChild'], { ns: 'datasetCreation' })}
-      icon={<ParentChildChunk className="h-[20px] w-[20px]" />}
+      icon={<ParentChildChunk className="h-5 w-5" />}
       effectImg={BlueEffect.src}
       className="text-util-colors-blue-light-blue-light-500"
       activeHeaderClassName="bg-dataset-option-card-blue-gradient"
@@ -274,7 +274,7 @@ export const ParentChildOptions: FC<ParentChildOptionsProps> = ({
       actions={
         <>
           <Button variant="secondary-accent" onClick={onPreview}>
-            <RiSearchEyeLine className="mr-0.5 size-4" />
+            <RiSearchEyeLine className="size-4" />
             {t(($) => $['stepTwo.previewChunk'], { ns: 'datasetCreation' })}
           </Button>
           <Button variant="ghost" onClick={onReset}>

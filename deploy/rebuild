@@ -118,7 +118,8 @@ ensure_env_secret() {
 if [ -f .env ]; then
   ensure_env_secret DIFY_AGENT_API_TOKEN dify-agent-run-token-for-dev-only
   ensure_env_secret DIFY_AGENT_SERVER_SECRET_KEY MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY
-  ensure_env_secret DIFY_AGENT_SHELLCTL_AUTH_TOKEN
+  # Dify 1.17 renamed DIFY_AGENT_SHELLCTL_AUTH_TOKEN; compose still falls back to it.
+  ensure_env_secret DIFY_AGENT_LOCAL_SANDBOX_AUTH_TOKEN
 fi
 
 echo "==> Removing stale dify-local-api:dev / dify-local-web:dev images and build cache..."

@@ -133,7 +133,6 @@ class ExtractProcessor:
                     storage.download(upload_file.key, file_path)
                 input_file = Path(file_path)
                 file_extension = input_file.suffix.lower()
-                assert upload_file is not None, "upload_file is required"
                 etl_type = dify_config.ETL_TYPE
                 extractor: BaseExtractor | None = None
                 if etl_type == "Unstructured":
@@ -141,6 +140,7 @@ class ExtractProcessor:
                     unstructured_api_key = dify_config.UNSTRUCTURED_API_KEY or ""
 
                     if file_extension in {".xlsx", ".xls"}:
+                        assert upload_file is not None, "upload_file is required"
                         extractor = ExcelExtractor(
                             file_path,
                             upload_file.tenant_id,
@@ -148,9 +148,11 @@ class ExtractProcessor:
                             upload_file.id,
                         )
                     elif file_extension == ".pdf":
-                        assert upload_file is not None
                         extractor = PdfExtractor(
-                            file_path, upload_file.tenant_id, upload_file.created_by, session=session
+                            file_path,
+                            upload_file.tenant_id if upload_file else None,
+                            upload_file.created_by if upload_file else None,
+                            session=session,
                         )
                     elif file_extension in {".md", ".markdown", ".mdx"}:
                         extractor = (
@@ -192,6 +194,7 @@ class ExtractProcessor:
                         extractor = TextExtractor(file_path, autodetect_encoding=True)
                 else:
                     if file_extension in {".xlsx", ".xls"}:
+                        assert upload_file is not None, "upload_file is required"
                         extractor = ExcelExtractor(
                             file_path,
                             upload_file.tenant_id,
@@ -199,9 +202,11 @@ class ExtractProcessor:
                             upload_file.id,
                         )
                     elif file_extension == ".pdf":
-                        assert upload_file is not None
                         extractor = PdfExtractor(
-                            file_path, upload_file.tenant_id, upload_file.created_by, session=session
+                            file_path,
+                            upload_file.tenant_id if upload_file else None,
+                            upload_file.created_by if upload_file else None,
+                            session=session,
                         )
                     elif file_extension in {".md", ".markdown", ".mdx"}:
                         extractor = MarkdownExtractor(file_path, autodetect_encoding=True)
