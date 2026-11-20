@@ -172,7 +172,7 @@ export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({
       actions={
         <>
           <Button variant="secondary-accent" onClick={onPreview}>
-            <RiSearchEyeLine className="mr-0.5 size-4" />
+            <RiSearchEyeLine className="size-4" />
             {t(($) => $['stepTwo.previewChunk'], { ns: 'datasetCreation' })}
           </Button>
           <Button variant="ghost" onClick={onReset}>
@@ -189,10 +189,8 @@ export const GeneralChunkingOptions: FC<GeneralChunkingOptionsProps> = ({
             {t(($) => $['stepTwo.chunkStrategyProvider'], { ns: 'datasetCreation' })}
           </TextLabel>
           <SegmentedControl
-            value={[strategyProvider]}
-            onValueChange={([value]) =>
-              value && onStrategyProviderChange(value as StrategyProvider)
-            }
+            value={strategyProvider}
+            onValueChange={(value) => onStrategyProviderChange(value as StrategyProvider)}
             aria-label={t(($) => $['stepTwo.chunkStrategyProvider'], { ns: 'datasetCreation' })}
           >
             {providerOptions.map((option) => (

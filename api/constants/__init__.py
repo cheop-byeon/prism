@@ -38,6 +38,7 @@ _UNSTRUCTURED_DOCUMENT_EXTENSION_BASE: frozenset[str] = frozenset(
         "pptx",
         "xml",
         "epub",
+        "odt",
     )
 )
 _DEFAULT_DOCUMENT_EXTENSION_BASE: frozenset[str] = frozenset(
@@ -57,6 +58,7 @@ _DEFAULT_DOCUMENT_EXTENSION_BASE: frozenset[str] = frozenset(
         "jsonl",
         "vtt",
         "properties",
+        "odt",
     )
 )
 

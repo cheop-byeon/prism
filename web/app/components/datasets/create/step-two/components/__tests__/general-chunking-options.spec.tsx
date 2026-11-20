@@ -1,6 +1,6 @@
 import type { PreProcessingRule } from '@/models/datasets'
 import { fireEvent, screen } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import { ChunkingMode } from '@/models/datasets'
 import { renderWithConsoleQuery } from '@/test/console/query-data'
 import { GeneralChunkingOptions } from '../general-chunking-options'
@@ -131,6 +131,22 @@ describe('GeneralChunkingOptions', () => {
       const titleEl = screen.getByText(`${ns}.stepTwo.general`)
       fireEvent.click(titleEl.closest('[class*="rounded-xl"]')!)
       expect(onDocFormChange).toHaveBeenCalledWith(ChunkingMode.text)
+    })
+  })
+
+  describe('Strategy Provider', () => {
+    it('should switch the chunk strategy provider', () => {
+      const onStrategyProviderChange = vi.fn()
+      render(
+        <GeneralChunkingOptions
+          {...defaultProps}
+          onStrategyProviderChange={onStrategyProviderChange}
+        />,
+      )
+      fireEvent.click(
+        screen.getByRole('radio', { name: `${ns}.stepTwo.chunkStrategyProviderLlamaIndex` }),
+      )
+      expect(onStrategyProviderChange).toHaveBeenCalledWith('llamaindex')
     })
   })
 

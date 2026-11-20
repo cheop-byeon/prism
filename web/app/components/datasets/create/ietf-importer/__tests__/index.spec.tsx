@@ -302,7 +302,7 @@ describe('IetfImporter', () => {
     expect(screen.getByText('PROPOSED STANDARD')).toBeInTheDocument()
 
     fireEvent.click(
-      screen.getByRole('button', { name: /datasetCreation.stepOne.ietf.importTypeInternetDraft/i }),
+      screen.getByRole('radio', { name: /datasetCreation.stepOne.ietf.importTypeInternetDraft/i }),
     )
     fireEvent.click(screen.getByRole('button', { name: '02' }))
 

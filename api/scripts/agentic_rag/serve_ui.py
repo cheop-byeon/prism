@@ -722,7 +722,9 @@ def main() -> None:
         from libs.helper import extract_remote_ip
         from libs.password import valid_password
         from libs.token import set_access_token_to_cookie, set_csrf_token_to_cookie, set_refresh_token_to_cookie
+        from services.account_email_registration_adapters import TokenManagerEmailRegistrationTokenGateway
         from services.account_service import AccountService
+        from services.entities.account_entities import AccountEmailRegistrationPhase
         from services.errors.account import AccountRegisterError
 
         payload = request.get_json(silent=True) or {}
@@ -739,11 +741,12 @@ def main() -> None:
         except ValueError as exc:
             return jsonify({"message": str(exc)}), 400
 
-        register_data = AccountService.get_email_register_data(token)
-        if not register_data or register_data.get("phase") != "register":
+        token_gateway = TokenManagerEmailRegistrationTokenGateway()
+        register_data = token_gateway.get(token)
+        if not register_data or register_data.phase != AccountEmailRegistrationPhase.REGISTER:
             return jsonify({"message": "That verification code has expired -- request a new one."}), 400
-        AccountService.revoke_email_register_token(token)
-        normalized_email = (register_data.get("email") or "").lower()
+        token_gateway.revoke(token)
+        normalized_email = register_data.email.lower()
         if not normalized_email:
             return jsonify({"message": "That verification code has expired -- request a new one."}), 400
 
