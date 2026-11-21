@@ -103,10 +103,11 @@ ENV VIRTUAL_ENV=/app/api/.venv
 COPY --from=packages --chown=dify:dify ${VIRTUAL_ENV} ${VIRTUAL_ENV}
 ENV PATH="${VIRTUAL_ENV}/bin:${PATH}"
 
-# Ragas imports GitPython while loading metrics, so git must also be present in
-# the production image shared by API and Celery workers.
+# Prism: RAGAS is left out of the evaluation group (it needs LangChain 0.3; Prism
+# uses 1.x), so check that the DeepEval evaluator loads instead. git stays for
+# GitPython users in the production image shared by API and Celery workers.
 RUN git --version \
-    && python -c "from ragas.metrics import answer_correctness"
+    && python -c "from deepeval.metrics import AnswerRelevancyMetric"
 
 RUN mkdir -p /usr/local/share/nltk_data \
     && NLTK_DATA=/usr/local/share/nltk_data python -m nltk.downloader punkt_tab averaged_perceptron_tagger_eng stopwords \
