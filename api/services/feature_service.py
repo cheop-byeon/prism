@@ -19,6 +19,11 @@ class FeatureService:
         """Cloud uses tenant Email Channels instead of the global mail client."""
         return dify_config.DEPLOYMENT_EDITION == DeploymentEdition.CLOUD
 
+    @staticmethod
+    def is_agent_preview_enabled() -> bool:
+        """Agent App preview runs are available on Cloud and Enterprise deployments only."""
+        return dify_config.DEPLOYMENT_EDITION in {DeploymentEdition.CLOUD, DeploymentEdition.ENTERPRISE}
+
     @classmethod
     def can_import_premium_site_settings(cls, tenant_id: str) -> bool:
         """Keep Cloud-only Web app customization out of free workspace imports."""
@@ -35,9 +40,37 @@ class FeatureService:
         return CloudPlan(billing_info.subscription.plan)
 
     @classmethod
+    def can_use_workflow_collaboration(cls, tenant_id: str, *, plan: CloudPlan | None = None) -> bool:
+        """Return the workspace entitlement using its loaded plan, or propagate billing failures."""
+        if not dify_config.ENABLE_COLLABORATION_MODE:
+            return False
+        if dify_config.DEPLOYMENT_EDITION != DeploymentEdition.CLOUD:
+            return True
+        if not tenant_id:
+            return False
+        return (plan if plan is not None else cls.get_workspace_plan(tenant_id)).is_paid
+
+    @staticmethod
+    def is_evaluation_supported() -> bool:
+        """Return whether this deployment ships Evaluation; Cloud workspaces still need a paid plan."""
+        return dify_config.DEPLOYMENT_EDITION in {DeploymentEdition.ENTERPRISE, DeploymentEdition.CLOUD}
+
+    @classmethod
+    def can_use_evaluation(cls, tenant_id: str, *, plan: CloudPlan | None = None) -> bool:
+        """Return the workspace entitlement using its loaded plan, or propagate billing failures."""
+        if not cls.is_evaluation_supported():
+            return False
+        if dify_config.DEPLOYMENT_EDITION != DeploymentEdition.CLOUD:
+            return True
+        if not tenant_id:
+            return False
+        return (plan if plan is not None else cls.get_workspace_plan(tenant_id)).is_paid
+
+    @classmethod
     def get_features(cls, tenant_id: str, exclude_vector_space: bool = False) -> feature_entities.FeatureModel:
         features = feature_entities.FeatureModel()
         features.im_centrally_managed = cls.is_im_centrally_managed()
+        features.agent_preview_enabled = cls.is_agent_preview_enabled()
         if exclude_vector_space:
             features.vector_space = None
 
@@ -58,6 +91,19 @@ class FeatureService:
         features.human_input_email_delivery_enabled = cls._resolve_human_input_email_delivery_enabled(
             features=features,
             tenant_id=tenant_id,
+        )
+        plan = features.billing.subscription.plan
+        features.workflow_collaboration_enabled = cls.can_use_workflow_collaboration(tenant_id, plan=plan)
+        features.workflow_collaboration_upgrade_available = (
+            dify_config.DEPLOYMENT_EDITION == DeploymentEdition.CLOUD
+            and plan == CloudPlan.SANDBOX
+            and cls.can_use_workflow_collaboration(tenant_id, plan=CloudPlan.PROFESSIONAL)
+        )
+        features.evaluation_enabled = cls.can_use_evaluation(tenant_id, plan=plan)
+        features.evaluation_upgrade_available = (
+            dify_config.DEPLOYMENT_EDITION == DeploymentEdition.CLOUD
+            and plan == CloudPlan.SANDBOX
+            and cls.can_use_evaluation(tenant_id, plan=CloudPlan.PROFESSIONAL)
         )
 
         return features
@@ -138,6 +184,7 @@ class FeatureService:
         )
         features.enable_skill = dify_config.ENABLE_SKILL
         features.enable_knowledge_fs = get_knowledge_fs_features().enabled
+        features.enable_file_scan = dify_config.FILE_SCAN_ENABLED
 
     @classmethod
     def _fulfill_params_from_workspace_info(cls, features: feature_entities.FeatureModel, tenant_id: str):
