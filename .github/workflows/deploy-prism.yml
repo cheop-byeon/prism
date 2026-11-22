@@ -39,6 +39,7 @@ jobs:
     needs: test
     if: vars.PRISM_AUTODEPLOY == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     environment:
       name: staging
       url: https://staging.prism.uiocloud.no
@@ -55,7 +56,8 @@ jobs:
           username: ${{ secrets.PRISM_SSH_USER }}
           key: ${{ secrets.PRISM_SSH_ACTION }}
           fingerprint: ${{ secrets.PRISM_SSH_FINGERPRINT }}
-          command_timeout: 60m
+          # A full rebuild has taken 45-115 minutes on these VMs.
+          command_timeout: 150m
           script: deploy ${{ github.sha }}
 
       - name: Smoke test staging
@@ -64,6 +66,7 @@ jobs:
   deploy-production:
     needs: deploy-staging
     runs-on: ubuntu-latest
+    timeout-minutes: 180
     environment:
       name: production
       url: https://prism.uiocloud.no
@@ -80,7 +83,8 @@ jobs:
           username: ${{ secrets.PRISM_SSH_USER }}
           key: ${{ secrets.PRISM_SSH_ACTION }}
           fingerprint: ${{ secrets.PRISM_SSH_FINGERPRINT }}
-          command_timeout: 60m
+          # A full rebuild has taken 45-115 minutes on these VMs.
+          command_timeout: 150m
           script: deploy ${{ github.sha }}
 
       - name: Smoke test production
