@@ -4,12 +4,15 @@ name: Deploy Prism
 # test. A stage only runs if the one before it passed, so production only
 # ever gets a commit that passed the tests and is already up on staging.
 #
-# Each VM accepts a dedicated SSH key whose forced command is
+# Both VMs accept one shared SSH key whose forced command is
 # deploy/ci-deploy (see that file): the key can do nothing but deploy the
-# commit sha sent below. Connection details are per-environment secrets
-# (Settings -> Environments -> staging / production): PRISM_SSH_HOST,
-# PRISM_SSH_USER, PRISM_SSH_PRIVATE_KEY, PRISM_SSH_FINGERPRINT (the VM's
-# host key, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`).
+# commit sha sent below. Its private half and the login user are repository
+# secrets (Settings -> Secrets and variables -> Actions): PRISM_SSH_ACTION,
+# PRISM_SSH_USER. What differs per VM is in environment secrets (Settings ->
+# Environments -> staging / production): PRISM_SSH_HOST and
+# PRISM_SSH_FINGERPRINT (the VM's host key,
+# `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'`).
+# An environment secret overrides a repository secret of the same name.
 #
 # Off switch: the deploy stages run only while the repository variable
 # PRISM_AUTODEPLOY is "true" (Settings -> Secrets and variables -> Actions
@@ -50,7 +53,7 @@ jobs:
         with:
           host: ${{ secrets.PRISM_SSH_HOST }}
           username: ${{ secrets.PRISM_SSH_USER }}
-          key: ${{ secrets.PRISM_SSH_PRIVATE_KEY }}
+          key: ${{ secrets.PRISM_SSH_ACTION }}
           fingerprint: ${{ secrets.PRISM_SSH_FINGERPRINT }}
           command_timeout: 60m
           script: deploy ${{ github.sha }}
@@ -75,7 +78,7 @@ jobs:
         with:
           host: ${{ secrets.PRISM_SSH_HOST }}
           username: ${{ secrets.PRISM_SSH_USER }}
-          key: ${{ secrets.PRISM_SSH_PRIVATE_KEY }}
+          key: ${{ secrets.PRISM_SSH_ACTION }}
           fingerprint: ${{ secrets.PRISM_SSH_FINGERPRINT }}
           command_timeout: 60m
           script: deploy ${{ github.sha }}
