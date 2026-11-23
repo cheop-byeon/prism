@@ -127,6 +127,39 @@ docker rmi dify-local-api:dev dify-local-web:dev 2>/dev/null || true
 docker image prune -f
 docker builder prune -af   # -a: today's builds left ~11GB of cache a plain (non-`-a`) prune didn't catch
 
+# api/worker/worker_beat/ietf_decision_agent_ui all build the SAME image tag
+# (dify-local-api:dev) from separate compose service entries. Building them
+# all in one `compose build` call races their concurrent "exporting to
+# image"/"unpacking" steps against that one shared tag -- confirmed live,
+# twice (once here, once via GitHub Actions' own ci-deploy), that this races
+# badly enough with a cold cache (every run, since this script always prunes
+# first) to corrupt the containerd snapshot extraction ("failed to Lchown
+# ... no such file or directory") on every service sharing the tag, after a
+# ~3h build each time. It's a genuine race, not deterministic -- a run could
+# get lucky -- but the failing conditions (cold cache + concurrent export of
+# a shared tag) recur on every single deploy as this script is written, so
+# the odds are bad often enough to be worth avoiding outright. Building one
+# representative of each distinct image tag alone FIRST -- so the real work
+# happens with nothing else racing it -- then building the full requested
+# set together is fast and race-free, confirmed live: the second pass is
+# just confirming/retagging an image that already exists, not actually
+# exporting a fresh one.
+echo "==> Building one service per image tag first (avoids racing concurrent exports to the same tag)"
+declare -A _seen_images
+for service in "${SERVICES[@]}"; do
+  image="$("${COMPOSE[@]}" config --format json 2>/dev/null | python3 -c "
+import json, sys
+cfg = json.load(sys.stdin)
+svc = cfg.get('services', {}).get('$service', {})
+print(svc.get('image', ''))
+")"
+  if [ -n "$image" ] && [ -z "${_seen_images[$image]:-}" ]; then
+    _seen_images[$image]=1
+    echo "==> Building $service (establishes $image)"
+    "${COMPOSE[@]}" build "$service"
+  fi
+done
+
 echo "==> Building: ${SERVICES[*]}"
 "${COMPOSE[@]}" build "${SERVICES[@]}"
 
