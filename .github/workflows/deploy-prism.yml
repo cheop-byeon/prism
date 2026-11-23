@@ -10,8 +10,10 @@ name: Deploy Prism
 # secrets (Settings -> Secrets and variables -> Actions): PRISM_SSH_ACTION,
 # PRISM_SSH_USER. What differs per VM is in environment secrets (Settings ->
 # Environments -> staging / production): PRISM_SSH_HOST and
-# PRISM_SSH_FINGERPRINT (the VM's host key,
-# `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub | awk '{print $2}'`).
+# PRISM_SSH_FINGERPRINT. The action's Go SSH client prefers ECDSA, then RSA,
+# over ED25519 host keys, so this is the fingerprint of the first of those the
+# VM offers (`ssh-keyscan -t ecdsa,rsa localhost`), e.g.
+# `ssh-keygen -lf /etc/ssh/ssh_host_rsa_key.pub | awk '{print $2}'`.
 # An environment secret overrides a repository secret of the same name.
 #
 # Off switch: the deploy stages run only while the repository variable
