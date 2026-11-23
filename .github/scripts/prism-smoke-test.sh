@@ -10,8 +10,12 @@ base="${1:?usage: $0 BASE_URL}"
 deadline=$((SECONDS + 300))
 
 check() {
+  local page
   curl -fsS -m 15 -o /dev/null "$base/console/api/system-features" &&
-    curl -fsSL -m 15 "$base/prism/login" | grep -q "Prism"
+    # Read the whole page before grep: with pipefail, `curl | grep -q` fails
+    # whenever grep exits on its first match before curl finishes writing.
+    page="$(curl -fsSL -m 15 "$base/prism/login")" &&
+    grep -q "Prism" <<<"$page"
 }
 
 until check; do
