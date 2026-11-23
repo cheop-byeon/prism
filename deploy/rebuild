@@ -184,14 +184,29 @@ echo "==> Redeploying: ${SERVICES[*]}"
 echo "==> Restarting nginx (picks up new container IPs and any config template changes)"
 "${COMPOSE[@]}" restart --no-deps nginx
 
-echo "==> Waiting for api to be healthy..."
-for i in $(seq 1 30); do
+# The api runs database migrations before it serves requests; on production
+# that has taken about 10 minutes. Fail the deploy if it never comes up.
+echo "==> Waiting for api to be healthy (up to 20 minutes)..."
+api_up=false
+wait_start=$SECONDS
+last_report=0
+while (( SECONDS - wait_start < 1200 )); do
   if "${COMPOSE[@]}" exec -T api curl -sf -m 3 http://localhost:5001/console/api/system-features >/dev/null 2>&1; then
-    echo "    api is up."
+    echo "    api is up after $(( (SECONDS - wait_start) / 60 )) min."
+    api_up=true
     break
   fi
-  sleep 2
+  if (( SECONDS - wait_start - last_report >= 60 )); then
+    last_report=$(( SECONDS - wait_start ))
+    echo "    still waiting ($(( last_report / 60 )) min)..."
+  fi
+  sleep 5
 done
+if [ "$api_up" != true ]; then
+  echo "error: api did not become healthy within 20 minutes" >&2
+  "${COMPOSE[@]}" logs --tail=50 api >&2
+  exit 1
+fi
 
 if [ "$HAS_IETF_UI" = true ]; then
   echo "==> Waiting for ietf_decision_agent_ui (Prism) to be up..."
