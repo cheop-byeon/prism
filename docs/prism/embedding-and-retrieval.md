@@ -1,6 +1,6 @@
 # Embedding & retrieval infrastructure
 
-A custom embedding model (`RFC-DRAlign-QN`) fine-tuned for aligning draft/RFC text with the mailing-list discussion behind it, quantized to GGUF and served via a host-level Ollama install (validated at cosine 0.985–0.9998 against the fp16 reference) — see [Local development](../../README.md#local-development) for how it's registered. This is the same draft-to-email alignment task the mailarchive retrieval in [Decision → Discussion](decision-bot.md) depends on, so a low raw-score rank isn't a register mismatch the model wasn't built for — the retrieval-quality gap that pipeline's LLM judge exists to close has a different, not yet fully diagnosed cause.
+A custom embedding model (`RFC-DRAlign-QN`) fine-tuned for aligning draft/RFC text with the mailing-list discussion behind it, quantized to GGUF and served via a host-level Ollama install (validated at cosine 0.985–0.9998 against the fp16 reference) — see [Local development](../../.github/README.md#local-development) for how it's registered. This is the same draft-to-email alignment task the mailarchive retrieval in [Decision → Discussion](decision-bot.md) depends on, so a low raw-score rank isn't a register mismatch the model wasn't built for — the retrieval-quality gap that pipeline's LLM judge exists to close has a different, not yet fully diagnosed cause.
 
 ## Mailarchive retrieval: BM25, not semantic
 

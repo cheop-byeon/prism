@@ -19,8 +19,13 @@ Spec text alone is not evidence of rationale, no matter how self-explanatory a d
 
 Every answer follows the same two-hop process, enforced by the agent's own instructions ([`agent_skill.md`](/api/scripts/agentic_rag/agent_skill.md) — the literal system prompt):
 
-1. **What changed.** Search the draft-evolution corpus — tagged, section-level diffs between specific revisions — to pin down the exact change being asked about.
-2. **Why it changed.** Search the working group's mailing-list archive for discussion of that specific change. If that's thin or empty, the agent doesn't stop: it tries differently-phrased queries, then meeting minutes, then the RFC's formal obsoletes/updates relations, then its wider topical family, before giving up on a source.
+1. **What changed.** Search the draft-evolution corpus to pin down the exact change being asked about. Every published RFC and its drafts are downloaded as-is; the evolution corpus is what Prism computes from them — tagged, section-level diffs between specific revisions — since no such revision-to-revision record is published anywhere.
+2. **Why it changed.** Search the working group's mailing-list archive for discussion of that specific change. If that's thin or empty, the agent doesn't stop: it tries differently-phrased queries, then meeting minutes and IESG ballot comments — and, in Panorama mode only, the RFC's formal obsoletes/updates relations and its wider topical family — before giving up on a source.
+
+How far it may look depends on the scope, which is decided before the agent starts:
+
+- **Focused search** — a specific draft or RFC is selected when asking. The agent stays inside it: its own revisions and RFC text, its WG's mail and minutes, its IESG ballot. Tools that search the wider RFC landscape (`get_rfc_relations`, `find_related_rfc_family`, `search_rfc_corpus_bm25`, `find_similar_rfcs_by_meaning`), and any fetch naming a different draft or RFC, are refused in code, not just discouraged in the prompt.
+- **Panorama** — nothing is selected. The agent decides its own scope: it finds a starting RFC by searching the whole corpus, maps the protocol family (obsoletes/updates links, citations, roadmap RFCs such as RFC 9364 for DNSSEC, with corpus search filling in members the links miss), and follows the decision across specifications and years.
 
 The answer is written under a fixed set of headings, each included only if the evidence actually supports it — no heading is ever written just to say "none found":
 
@@ -40,7 +45,7 @@ A real answer, start to finish (session: "Why we evolve from NSEC to NSEC3?"):
 
 ## Agent tools
 
-The agent reasons over these 16 tools (defined in [`ask_decision_agent.py`](/api/scripts/agentic_rag/ask_decision_agent.py)), called with deterministic dispatch rather than an open-ended function-calling loop:
+The agent reasons over these 17 tools (defined in [`ask_decision_agent.py`](/api/scripts/agentic_rag/ask_decision_agent.py)) in a function-calling loop: the model chooses which tool to call and with what query, while code-enforced guardrails sit around it — a forced mailing-list search if the model tries to answer without one, scope enforcement in focused mode, and a mandatory `verify_answer` pass before the final answer:
 
 | Tool | Does |
 |---|---|
@@ -80,7 +85,7 @@ A left-rail, document-first workspace (not a chat window bolted onto Dify's cons
 ```mermaid
 flowchart LR
     U[Researcher] -->|asks a question| UI["Prism UI<br/>serve_ui.py (Flask) +<br/>serve_ui_spectrum_template.html"]
-    UI --> Agent["Agent loop<br/>ask_decision_agent.py<br/>deterministic tool dispatch"]
+    UI --> Agent["Agent loop<br/>ask_decision_agent.py<br/>function calling + guardrails"]
     Agent -->|evolution / mailarchive search| DS[("Dify Dataset table<br/>legacy-registered corpora")]
     Agent -->|local source search| BM25[("Local BM25 + embedding index<br/>per Sources-tab draft")]
     Agent -->|direct fetch, relations, graph| DT["Datatracker / rfc-editor.org"]
@@ -92,17 +97,19 @@ flowchart LR
 ```
 
 - **`api/scripts/agentic_rag/serve_ui.py`** is the actual product — a Flask app with its own routes for research, sessions, sources, documents, the RFC graph, coverage, usage, and a self-service signup/login flow with Prism's own branding (not Dify's console chrome).
-- **`api/scripts/agentic_rag/ask_decision_agent.py`** is the agent loop: builds the 16-tool set, dispatches each call, streams live reasoning sentences to the UI, and runs the verify pass before returning.
+- **`api/scripts/agentic_rag/ask_decision_agent.py`** is the agent loop: builds the 17-tool set, executes the calls the model makes (refusing out-of-scope ones in focused mode), streams live reasoning sentences to the UI, and runs the verify pass before returning.
 - **`tools/ietfdata_service/`** is a standalone FastAPI sidecar, reached over the internal Docker network only. It exists because the [`ietfdata`](https://github.com/glasgow-ipl/ietfdata) library (for mailing-list IMAP access) requires Python 3.13+, while the main API runtime doesn't — isolating that dependency here instead of forcing the whole API onto a newer Python.
 - **Local sources** (anything added via the Sources tab that isn't already a real Dify dataset) get their own BM25 — and optionally embedding — index, built and queried entirely outside Dify's dataset/chunking/vector-store pipeline.
 - A small cached reverse-index, built once from rfc-editor.org's own `rfc-index.xml`, maps RFC ↔ publication year/title ↔ originating draft name — used to lay out Decision history's cross-specification map chronologically and to resolve a local source's RFC number, both without a live per-draft network call.
 
 ## Data model
 
-Two tables, both deliberately separate from Dify's own schema rather than bolted onto it:
+Prism's own tables, all deliberately separate from Dify's own schema rather than bolted onto it:
 
 - **`IetfLocalSource`** (`draft_name`, `owner_account_id`, `shared`) — one row per locally-tracked draft/RFC. A local source is raw downloaded text on shared disk, not a Dify `Dataset`, so it has no tenant/permission fields to reuse the way a dataset does; ownership goes to whoever pulled it first, and sharing is opt-in, mirroring a dataset's own default-private behavior.
 - **`IetfAgenticSessionShare`** (`conversation_id`, `shared`) — a side table layered on top of Dify's own `Conversation` row, since that's core schema this project otherwise doesn't touch.
+- **`IetfSessionDecisionThread`** (`conversation_id`, `query`, `data`, …) — the latest Decision history "Track phrase" result for a session, one row per `Conversation`, so reopening a past session shows it without re-running its LLM calls.
+- **RFC family graph** ([`api/models/ietf_rfc_family.py`](/api/models/ietf_rfc_family.py), built by `build_rfc_families.py`) — `IetfRfcStructuralEdge` (obsoletes/updates), `IetfRfcCitationEdge` (citation-family relations), `IetfRfcCitationFetchLog`, and the clustered result, `IetfRfcFamily` + `IetfRfcFamilyMember`. These back the RFC Graph view and Panorama's family mapping.
 
 ## Relationship to Dify
 
@@ -129,20 +136,20 @@ The docs under [`docs/prism/`](/docs/prism/) (ingestion, chunking strategies, em
 The easiest way to start the server is through [Docker Compose](/docker/docker-compose.yaml). Make sure [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) are installed, then:
 
 ```bash
-cd dify
-cd docker
+git clone https://github.com/cheop-byeon/prism.git
+cd prism/docker
 cp .env.example .env
 echo 'COMPOSE_FILE=docker-compose.yaml:docker-compose.prism.yaml' >> .env  # add :docker-compose.override.yaml before prism.yaml if you have one
 docker compose up -d
 ```
 
-Dify's own `docker-compose.yaml` stays exactly as upstream ships it; Prism's services and settings live in [`docker-compose.prism.yaml`](/docker/docker-compose.prism.yaml), which `COMPOSE_FILE` loads on top of it (see that file's header).
+Dify's own `docker-compose.yaml` stays exactly as upstream ships it; Prism's services and settings live in [`docker-compose.prism.yaml`](/docker/docker-compose.prism.yaml), which `COMPOSE_FILE` loads on top of it (see that file's header). That file builds `api`, `worker`, `worker_beat`, `web` and `ietfdata_service` from this repo's source rather than pulling Dify's published images, so the first `docker compose up -d` is a full build and takes a while.
 
-Prism is served at the domain root (`http://localhost/`); the underlying Dify console is still reachable as a fallback. `/spectrum` and `/classic` are friendly aliases for Prism's own two UI generations.
+Opening `http://localhost/` redirects to Prism's login page (`/login`). Prism's two UI generations live at `/spectrum` (the current one, where you land after logging in) and `/classic` (the original); `/prism/…` is internal plumbing their pages call, not a path to open directly. Every other path still goes to the underlying Dify console.
 
 ## Local development
 
-The quick-start above (`docker compose up -d` with the published images) is the fastest way to just run the app. Day-to-day development on this fork uses a different, more granular setup — everything lives in `dev/`:
+The quick-start above (one `docker compose up -d` that builds everything) is the fastest way to just run the app. Day-to-day development on this fork uses a different, more granular setup — everything lives in `dev/`:
 
 - **`dev/setup`** — one-time bootstrap: copies the `.env.example` files (`api/`, `web/`, `docker/middleware.env.example`), then `uv sync --group dev` and `pnpm install`.
 - **`dev/start-active-dev`** — the main hybrid loop: backend (`api worker worker_beat ietfdata_service weaviate sandbox ssrf_proxy plugin_daemon`) runs in Docker via `docker-compose.override.yaml`, which builds a local `dify-local-api:dev` image from `../api` instead of pulling `langgenius/dify-api`; the frontend runs natively (`pnpm dev`) for hot reload.
@@ -152,7 +159,16 @@ The quick-start above (`docker compose up -d` with the published images) is the 
 
 The `ietfdata_service` sidecar is always included in the Docker set (it's defined in `docker-compose.prism.yaml`, not the override) and is reachable only on the internal network at `http://ietfdata_service:8010` — there's no host port for it.
 
-**The embedding model has no compose service or env var at all.** `RFC-DRAlign-QN` is served by a host-level Ollama install, not a container: `dev/start-embedding-server` looks for the GGUF at `$HOME/Models/rfc-dralign-q8-pooled.gguf` (override with `RFC_DRALIGN_GGUF`), registers it with `ollama create rfc-dralign-q8` if not already present, and health-checks `http://localhost:11434/api/embed`. Dify itself is then pointed at it manually, once, via Settings → Model Provider → Ollama, with `base_url: http://host.docker.internal:11434` and model `rfc-dralign-q8` (4096 dims) — this step doesn't show up in any `.env` file, so it's easy to miss on a fresh machine.
+**The embedding model has no compose service or env var at all.** `RFC-DRAlign-QN` is served by Ollama running on the host (the Ollama app, or `ollama serve`), not by a container, and Prism's code calls it directly at `http://host.docker.internal:11434` as model `rfc-dralign-q8`. Nothing needs starting day to day beyond Ollama itself. On a fresh machine there are two one-time steps, neither of which shows up in any `.env` file:
+
+1. Register the GGUF with Ollama: `ollama create rfc-dralign-q8` from `$HOME/Models/rfc-dralign-q8-pooled.gguf`. `dev/start-embedding-server` does this and health-checks the endpoint (override the path with `RFC_DRALIGN_GGUF`); on the VMs, `deploy/vm-setup` does it.
+2. Point Dify at it, for Dataset-backed corpora: Settings → Model Provider → Ollama, `base_url: http://host.docker.internal:11434`, model `rfc-dralign-q8` (Text Embedding, 4096 dims).
+
+## Deployment
+
+Every push to `main` runs [`deploy-prism.yml`](/.github/workflows/deploy-prism.yml): tests → deploy to **staging** ([staging.prism.uiocloud.no](https://staging.prism.uiocloud.no)) → smoke test → deploy to **production** ([prism.uiocloud.no](https://prism.uiocloud.no)) → smoke test. Each stage runs only if the one before it passed, so production only ever gets a commit that passed the tests and is already up on staging. Deploys can be switched off with the repository variable `PRISM_AUTODEPLOY`; tests still run either way.
+
+Each VM accepts a dedicated SSH key whose forced command is [`deploy/ci-deploy`](/deploy/ci-deploy): it can only fast-forward to the tested commit and run `deploy/rebuild`. The rest of [`deploy/`](/deploy/) sets up a VM (`vm-setup`) and renews its Let's Encrypt certificate on a timer (`renew-cert`).
 
 ## Advanced setup
 
@@ -164,7 +180,7 @@ If you need to customize the configuration, refer to the comments in [.env.examp
 
 Prism is based on the [Ph.D. project](https://folk.universitetetioslo.no/michawe/research/projects/rdr/index.html) of Jie Bian, extracting and explaining the design rationale behind RFC/Internet-Draft decisions from the discussion that produced them. See the [project page](https://folk.universitetetioslo.no/michawe/research/projects/rdr/index.html) for further research details, and [mwelzl/prism](https://github.com/mwelzl/prism) for the companion search-engine repository this fork feeds into.
 
-This is still actively evolving — see the commit history on `feature/ietf-mailarchive-import` for the current state of the work.
+This is still actively evolving — `main` is the current state of the work. The fork tracks upstream Dify releases through sync merges and is currently based on Dify 1.20.0.
 
 ## License
 

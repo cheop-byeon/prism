@@ -12,4 +12,4 @@ The sidecar's mailarchive output (JSONL) and mbox exports needed new extractors 
 
 GitHub import (issues/PRs, async via Celery with progress tracking and resume-on-failure) is a separate, Dify-native path — `api/services/github_import_service.py` + `api/tasks/github_import_task.py` — with three interchangeable loader backends (raw GraphQL, LangChain's `GitHubIssuesLoader`, LlamaIndex's `GitHubRepositoryIssuesReader`), exporting one JSONL record per issue/PR.
 
-See also: the Import UI entry in the [main README](../../README.md#my-additions) for the React wizard that drives GitHub/RFC/draft import from the console.
+See also: the Sources section ("Product surface") of the [Prism README](../../.github/README.md#product-surface) for the React wizard that drives GitHub/RFC/draft import from the console.
