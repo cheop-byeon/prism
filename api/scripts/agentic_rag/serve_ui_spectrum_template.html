@@ -154,6 +154,7 @@
   .po-logout, .po-settingslink { font-size: 11px; color: var(--po-muted); background: none; border: none; padding: 0; text-decoration: underline; }
   .po-classiclink { display: block; font-size: 11px; color: var(--po-muted); padding: 8px 6px; text-decoration: none; border-top: 1px solid var(--po-line); margin-top: 8px; }
   .po-classiclink:hover { color: var(--po-accent); }
+  .po-classiclink[hidden], .po-railnav button[hidden] { display: none; }
   .po-logout:hover, .po-settingslink:hover { color: var(--po-ink); }
   .po-profilelinks { display: flex; gap: 8px; }
   .po-theme-toggle { display: flex; gap: 2px; background: var(--po-shell); border: 1px solid var(--po-line); border-radius: 7px; padding: 2px; }
@@ -945,7 +946,8 @@
 </head>
 <body>
 <script>const CONSOLE_API_BASE = "__API_BASE__";
-const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
+const PRISM_PREFIX = "__PRISM_URL_PREFIX__";
+const IS_DATA_ADMIN = __IS_DATA_ADMIN__;</script>
 <div id="poToast" class="po-toast" hidden></div>
 <div class="po-shell">
   <aside class="po-rail">
@@ -975,13 +977,13 @@ const PRISM_PREFIX = "__PRISM_URL_PREFIX__";</script>
       <button data-goto="coverage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>Archive coverage</button>
       <div class="pm-navlabel">Operations</div>
       <button data-goto="usage"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 20V10M11 20V4M18 20v-7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>Usage</button>
-      <button data-goto="users"><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c0-3.3 2.7-5.8 6-5.8s6 2.5 6 5.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M15.5 5.3a3.2 3.2 0 0 1 0 6.3M18.3 19c0-2.6-1.6-4.7-3.9-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Users</button>
+      <button data-goto="users"__ADMIN_ONLY_HIDDEN__><svg width="15" height="15" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M3 19c0-3.3 2.7-5.8 6-5.8s6 2.5 6 5.8" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M15.5 5.3a3.2 3.2 0 0 1 0 6.3M18.3 19c0-2.6-1.6-4.7-3.9-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>Users</button>
       <button data-goto="tools"><svg width="15" height="15" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>How it works</button>
     </nav>
     <div class="po-railcaption">Recent investigations</div>
     <input id="poSessionSearch" type="text" class="po-sessionsearch" placeholder="Search sessions…">
     <div class="po-sessionlist" id="poSessionList"></div>
-    <a class="po-classiclink" id="poClassicLink" href="#" target="_blank" rel="noopener" title="Fuller Sources/Usage/RFC Graph tools">Classic view →</a>
+    <a class="po-classiclink" id="poClassicLink" href="#" target="_blank" rel="noopener" title="Fuller Sources/Usage/RFC Graph tools"__ADMIN_ONLY_HIDDEN__>Classic view →</a>
     <div class="po-profile">
       <span class="po-avatar" id="poAvatar">__ACCOUNT_INITIAL__</span>
       <div style="min-width:0;">
@@ -1455,6 +1457,7 @@ const BREADCRUMBS = {
 // calls is read-only and safe to run once automatically.
 const _pageOpened = {};
 function go(name) {
+  if (name === 'users' && !IS_DATA_ADMIN) return;
   document.querySelectorAll('[data-page]').forEach((p) => { p.hidden = p.dataset.page !== name; });
   document.getElementById('poBreadcrumb').textContent = BREADCRUMBS[name] || '';
   document.querySelectorAll('.po-railnav button').forEach((b) => {
