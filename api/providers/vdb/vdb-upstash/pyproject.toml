@@ -3,7 +3,7 @@ name = "dify-vdb-upstash"
 version = "0.0.1"
 
 dependencies = [
-    "upstash-vector==0.8.0",
+    "upstash-vector==0.8.1",
 ]
 description = "Dify vector store backend (dify-vdb-upstash)."
 
