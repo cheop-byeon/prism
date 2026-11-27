@@ -43,7 +43,9 @@ import threading
 import traceback
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from enum import StrEnum
 from pathlib import Path
+from urllib.parse import urlsplit
 
 sys.path.insert(0, "/app/api")
 
@@ -331,6 +333,33 @@ _LOGIN_PAGE_TEMPLATE = (Path(__file__).parent / "login_template.html").read_text
 # switch inside the existing one.
 _SPECTRUM_PAGE_HTML = (Path(__file__).parent / "serve_ui_spectrum_template.html").read_text(encoding="utf-8")
 _SPECTRUM_PORT = 8766
+
+
+class IndexPage(StrEnum):
+    """Which page `/` serves: spectrum to everyone; the classic page only to
+    data admins -- it's an older, fuller maintenance view, not something
+    self-service sign-ups should land on."""
+
+    SPECTRUM = "spectrum"
+    CLASSIC = "classic"
+    CLASSIC_FORBIDDEN = "classic_forbidden"
+
+
+def _resolve_index_page(server_port: str | None, is_data_admin: bool) -> IndexPage:
+    if server_port == str(_SPECTRUM_PORT):
+        return IndexPage.SPECTRUM
+    return IndexPage.CLASSIC if is_data_admin else IndexPage.CLASSIC_FORBIDDEN
+
+
+def _spectrum_home_url(url_prefix: str, scheme: str, hostname: str) -> str:
+    """Where to send a non-admin who opened the classic page. Behind nginx
+    (a URL prefix is set) spectrum's public path is /spectrum/ on the same
+    origin; in local dev each page is its own port with no prefix."""
+    if url_prefix:
+        return "/spectrum/"
+    return f"{scheme}://{hostname}:{_SPECTRUM_PORT}/"
+
+
 # Resized/re-encoded from the original (1122x1402, 1.7MB) down to ~95KB --
 # this loads on every visit to the login page, unauthenticated, so size
 # matters here in a way it doesn't for the rest of this app.
@@ -440,12 +469,18 @@ def _render_index_page(account) -> str:
     )
 
 
-def _render_spectrum_page(account) -> str:
+def _render_spectrum_page(account, is_data_admin: bool) -> str:
     """Same placeholder-fill as _render_index_page, against
     _SPECTRUM_PAGE_HTML instead -- kept as a separate function (not a
     parameter on _render_index_page) since the two pages' placeholder needs
     are expected to diverge as the spectrum page grows its own account/nav
-    chrome."""
+    chrome.
+
+    __ADMIN_ONLY_HIDDEN__ hides the Users nav entry and the Classic view
+    link for non-admins at render time, so they never flash into view;
+    the server still enforces both (/api/admin/* and the classic page
+    itself refuse non-admins) -- this only keeps the UI from offering
+    them."""
     from configs import dify_config
 
     api_base = dify_config.CONSOLE_API_URL or "http://localhost:5001"
@@ -457,6 +492,8 @@ def _render_spectrum_page(account) -> str:
         .replace("__ACCOUNT_EMAIL__", account.email)
         .replace("__ACCOUNT_INITIAL__", initial)
         .replace("__PRISM_URL_PREFIX__", _URL_PREFIX)
+        .replace("__ADMIN_ONLY_HIDDEN__", "" if is_data_admin else " hidden")
+        .replace("__IS_DATA_ADMIN__", "true" if is_data_admin else "false")
     )
 
 
@@ -792,8 +829,13 @@ def main() -> None:
         # local dev. SERVER_PORT is a WSGI-server-level fact (the actual
         # socket Werkzeug accepted this connection on) that a Host header
         # can't override, so it stays correct either way.
-        if request.environ.get("SERVER_PORT") == str(_SPECTRUM_PORT):
-            return _render_spectrum_page(g.account)
+        is_data_admin = _is_data_admin(g.account)
+        page = _resolve_index_page(request.environ.get("SERVER_PORT"), is_data_admin)
+        if page is IndexPage.SPECTRUM:
+            return _render_spectrum_page(g.account, is_data_admin=is_data_admin)
+        if page is IndexPage.CLASSIC_FORBIDDEN:
+            hostname = urlsplit(request.host_url).hostname or "localhost"
+            return redirect(_spectrum_home_url(_URL_PREFIX, request.scheme, hostname))
         return _render_index_page(g.account)
 
     @app.route(f"{_URL_PREFIX}/api/models", methods=["GET"])
