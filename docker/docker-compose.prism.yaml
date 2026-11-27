@@ -37,6 +37,15 @@ x-prism-env: &prism-env
   IETFDATA_SERVICE_URL: ${IETFDATA_SERVICE_URL:-http://ietfdata_service:8010}
   IETFDATA_SERVICE_TIMEOUT: ${IETFDATA_SERVICE_TIMEOUT:-60}
 
+# Third-party images are pinned to an exact version and digest, rather than
+# Dify's floating tags (nginx:latest, postgres:15-alpine, ...), which are only
+# downloaded once and then go stale. Dependabot (.github/dependabot.yml) opens
+# a PR when a new version or a security rebuild of the same version is
+# published; merging it deploys through the usual staging-then-production run.
+# The langgenius/* and weaviate images stay on Dify's pins, which move with
+# each Dify sync. Each pin is written out in full, not through a YAML anchor,
+# so Dependabot can find and update it.
+
 services:
   api:
     build: *prism-api-build
@@ -85,6 +94,9 @@ services:
       FORCE_VERIFYING_SIGNATURE: "false"
 
   ssrf_proxy:
+    # ubuntu/squid:latest stopped receiving updates in 2025; the _edge tags
+    # get Ubuntu's security rebuilds.
+    image: ubuntu/squid:6.6-24.04_edge@sha256:d9c34c5ab74c6dd41cf1070d9b4221aac072e67e983527ca2d41512958f77506
     extra_hosts:
       - "host.docker.internal:host-gateway"
     environment:
@@ -93,8 +105,21 @@ services:
       SSRF_PROXY_ALLOW_PRIVATE_DOMAINS: ${SSRF_PROXY_ALLOW_PRIVATE_DOMAINS:-host.docker.internal}
 
   nginx:
+    image: nginx:1.31.10@sha256:a786635fd3c7b9a57ea089ab1c0713e510f3b548b65fe699ce3d59e4a926b37e
     volumes:
       - ./nginx/prism:/etc/nginx/prism:ro
+
+  agent_ssrf_proxy:
+    image: ubuntu/squid:6.6-24.04_edge@sha256:d9c34c5ab74c6dd41cf1070d9b4221aac072e67e983527ca2d41512958f77506
+
+  certbot:
+    image: certbot/certbot:v5.10.0@sha256:c5698da859429ccee0fcc299a8000368198222d1f9e789ab6e388b491e8ce06d
+
+  db_postgres:
+    image: postgres:15.20-alpine@sha256:e18480a22d6e48f4d816a6696769b1ec09ac73a824c5649e49c7d8b684913f3d
+
+  redis:
+    image: redis:6.2.24-alpine@sha256:3f9c6e23ed6bea3b41d0ef709fc164c1a0b7c00d5a21a60e0e9c33ada5496881
 
   weaviate:
     environment:

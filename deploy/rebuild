@@ -163,6 +163,11 @@ done
 echo "==> Building: ${SERVICES[*]}"
 "${COMPOSE[@]}" build "${SERVICES[@]}"
 
+# Recreates postgres and redis only when their pinned image changed (a
+# Dependabot bump), and before the api starts its migrations.
+echo "==> Updating db_postgres and redis if their image changed"
+"${COMPOSE[@]}" up -d --no-deps db_postgres redis
+
 echo "==> Redeploying: ${SERVICES[*]}"
 # --no-deps: only touch the named services. Without it, Compose also
 # recreates whatever they depend_on using the SAME -f files passed here —
@@ -229,3 +234,16 @@ fi
 
 echo "==> Container status:"
 "${COMPOSE[@]}" ps
+
+# A Dependabot bump leaves the previous version of a pinned image on disk
+# once its container has been recreated. Remove the versions of these images
+# that no container (running or stopped) uses any more.
+echo "==> Removing old versions of the pinned third-party images..."
+in_use="$(docker ps -aq | xargs -r docker inspect --format '{{.Image}}')"
+for repo in nginx ubuntu/squid certbot/certbot postgres redis; do
+  for id in $(docker images --no-trunc --format '{{.ID}}' "$repo" | sort -u); do
+    if ! grep -qx "$id" <<<"$in_use"; then
+      docker rmi "$id" >/dev/null && echo "    removed old $repo image ${id:7:12}"
+    fi
+  done
+done

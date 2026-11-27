@@ -101,6 +101,27 @@ updates:
       python-packages:
         patterns:
           - '*'
+  # Prism's pinned third-party images in docker/docker-compose.prism.yaml.
+  # Checked daily: these are the internet-facing and data services, where
+  # security releases matter. Only the images Prism pins are allowed, so the
+  # Dify-owned pins in docker-compose.yaml are left to Dify syncs. Major
+  # versions are ignored: a new postgres or redis major needs a data
+  # migration, and new nginx/squid majors deserve a deliberate change.
+  - package-ecosystem: 'docker-compose'
+    directory: '/docker'
+    target-branch: 'main'
+    open-pull-requests-limit: 5
+    schedule:
+      interval: 'daily'
+    allow:
+      - dependency-name: 'nginx'
+      - dependency-name: 'ubuntu/squid'
+      - dependency-name: 'certbot/certbot'
+      - dependency-name: 'postgres'
+      - dependency-name: 'redis'
+    ignore:
+      - dependency-name: '*'
+        update-types: ['version-update:semver-major']
   - package-ecosystem: 'github-actions'
     directory: '/'
     open-pull-requests-limit: 5
