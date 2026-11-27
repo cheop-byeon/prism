@@ -266,9 +266,44 @@ def _invoke_llm_with_retry(model_instance, usage_sink: list | None = None, **kwa
             if isinstance(result.message.content, str) and "<think>" in result.message.content:
                 result.message.content = _strip_reasoning_tags(result.message.content)
             return result
-        except (PluginInvokeError, InvokeError):
+        except (PluginInvokeError, InvokeError) as exc:
             if attempt == _LLM_RETRIES:
                 raise
+            # Some models (e.g. gpt-6.1-sol via an openai_api_compatible
+            # endpoint) reason internally by default and reject function
+            # tools combined with that default outright -- confirmed live:
+            # "Function tools with reasoning_effort are not supported for
+            # gpt-6.1-sol in /v1/chat/completions ... set reasoning_effort
+            # to 'none'." That's deterministic, not transient -- retrying
+            # with the same parameters just repeats it (confirmed live:
+            # three identical 400s, ~8s apart), so this is the one
+            # retry-loop error worth actually fixing before the next
+            # attempt rather than just waiting out. Reacting to the error
+            # text instead of proactively sending reasoning_effort for
+            # every call that exposes the parameter rule -- confirmed live
+            # that rule is exposed for GLM/Mistral too (an admin-set
+            # "Thinking Mode Support" toggle, not a real capability
+            # signal), so sending it unconditionally would risk an
+            # unrecognized-parameter rejection on backends that don't
+            # actually need or expect it.
+            exc_text = str(exc)
+            if "reasoning_effort" in exc_text and "not supported" in exc_text:
+                model_parameters = dict(kwargs.get("model_parameters") or {})
+                model_parameters["reasoning_effort"] = "none"
+                kwargs["model_parameters"] = model_parameters
+            elif "reasoning_effort" in exc_text and "does not support" in exc_text and "Supported values are" in exc_text:
+                # "none" itself isn't universally accepted either --
+                # confirmed live, gpt-6.1-sol's own error on THAT attempt:
+                # "'reasoning_effort' does not support 'none' with this
+                # model. Supported values are: 'low', 'medium', 'high',
+                # and 'xhigh'." The error always lists this specific
+                # model's real valid options, so pick the lowest one
+                # offered instead of guessing a second hardcoded value.
+                options = re.findall(r"'(\w+)'", exc_text.rsplit("Supported values are", 1)[-1])
+                if options:
+                    model_parameters = dict(kwargs.get("model_parameters") or {})
+                    model_parameters["reasoning_effort"] = options[0]
+                    kwargs["model_parameters"] = model_parameters
             time.sleep(_LLM_RETRY_SECONDS)
 
 
@@ -551,7 +586,10 @@ def _resolve_rfc_number_for_draft(draft_name: str) -> str | None:
 
 
 def _list_available_corpora(
-    viewer_account_id: str | None = None, *, include_local_source_lines: bool = True
+    viewer_account_id: str | None = None,
+    *,
+    include_local_source_lines: bool = True,
+    summarize_local_sources: bool = False,
 ) -> tuple[str, list[dict]]:
     """Return (formatted catalog for the tool observation, structured catalog).
 
@@ -562,6 +600,22 @@ def _list_available_corpora(
     ~300 local sources, resolving each one's WG via live Datatracker calls
     purely to build a text block that caller never uses. ask()'s own tool
     calls (which DO need that text) leave this at its default.
+
+    summarize_local_sources=True keeps the section (so the model still learns
+    local sources exist at all) but replaces the full per-draft enumeration
+    with a single count + guidance line, skipping every per-draft Datatracker
+    WG resolution -- confirmed live that with 8,375 accumulated local sources
+    (up from ~300 when include_local_source_lines was added), the full
+    listing alone took 8+ minutes and produced a ~280,000-token tool result
+    that outright overflowed a 262k-context model's prompt on the very next
+    LLM call, and would still dominate/degrade context on a larger-context
+    model even without erroring outright. Only meaningful when
+    include_local_source_lines is True; ask()'s no-draft-hint tool call path
+    (the "panorama question" case -- confirmed live this is exactly when the
+    full listing used to fire) passes this instead of the old unconditional
+    enumeration, since the model demonstrably still finds the right local
+    source by guessing its draft/WG name directly rather than reading it off
+    this catalog.
 
     The structured form is `[{draft_name, rfc_number, wg, evolution_dataset_id,
     mailarchive_dataset_id}]` -- used by ask() to auto-seed the mailarchive
@@ -648,7 +702,9 @@ def _list_available_corpora(
     # would tell it these exist at all.
     if include_local_source_lines:
         registered_names = set(by_draft.keys())
-        local_lines = _list_indexed_local_sources(exclude=registered_names, viewer_account_id=viewer_account_id)
+        local_lines = _list_indexed_local_sources(
+            exclude=registered_names, viewer_account_id=viewer_account_id, summary_only=summarize_local_sources
+        )
         if local_lines:
             lines.append("")
             lines.append(
@@ -662,7 +718,9 @@ def _list_available_corpora(
     return "\n".join(lines), catalog
 
 
-def _list_indexed_local_sources(exclude: set[str], viewer_account_id: str | None = None) -> list[str]:
+def _list_indexed_local_sources(
+    exclude: set[str], viewer_account_id: str | None = None, *, summary_only: bool = False
+) -> list[str]:
     """One line per locally-tracked source that actually has a built local
     index -- an unindexed local source (downloaded but "Build index" never
     clicked) has nothing for search_local_drafts_rfc/search_local_mailarchive
@@ -672,11 +730,27 @@ def _list_indexed_local_sources(exclude: set[str], viewer_account_id: str | None
     viewer_account_id restricts this to sources visible to that account
     (their own pulls plus anything shared) -- see
     IetfImportService.list_local_source_names.
+
+    summary_only=True skips the per-draft WG resolution and per-draft line
+    below entirely and returns just a one-line count + guidance instead --
+    list_local_source_names itself is a cheap DB query either way; it's the
+    per-draft resolve_wg_for_draft loop beneath it that doesn't scale (see
+    _list_available_corpora's summarize_local_sources docstring for the
+    8,375-sources measurement this is responding to).
     """
     from services.ietf_import_service import IetfImportService
     from services.local_source_index_service import LocalSourceIndexService
 
     draft_names = [d for d in IetfImportService.list_local_source_names(viewer_account_id) if d not in exclude]
+    if not draft_names:
+        return []
+    if summary_only:
+        return [
+            f"  ({len(draft_names)} locally-indexed draft sources available -- too many to list "
+            "individually. Call search_local_drafts_rfc / search_local_mailarchive directly with a "
+            "draft name you already know, or call this tool again with a draft hint to see one entry's "
+            "detail; these tools work even for a source not named here.)"
+        ]
 
     # Same reasoning as the registered-corpora loop above: resolve_wg_for_draft
     # is two uncached live Datatracker round trips per draft -- with the
@@ -949,7 +1023,6 @@ def _suggest_passage_questions(
             tools=[],
             stop=[],
             stream=False,
-            user="ask_decision_agent_passage_questions",
         )
     except Exception:
         return []
@@ -1054,7 +1127,6 @@ def _judge_lane_discussion(
             tools=[],
             stop=[],
             stream=False,
-            user="ask_decision_agent_lane_discussion",
         )
     except Exception:
         return
@@ -2652,7 +2724,6 @@ def _verify_answer(
         tools=[],
         stop=[],
         stream=False,
-        user="ask_decision_agent_verify",
     )
     content = result.message.content
     return content if isinstance(content, str) else str(content)
@@ -3754,8 +3825,18 @@ def ask(
             # unrelated drafts and contributing to that run's eventual LLM
             # response timeouts, independent of how narrow the actual
             # question was.
+            #
+            # summarize_local_sources=True (the no-draft/"panorama question"
+            # case, where include_local_source_lines is True): at 8,375
+            # accumulated local sources, the full per-draft enumeration this
+            # used to do unconditionally took 8+ minutes and produced a
+            # ~280,000-token observation that outright overflowed a
+            # 262k-context model's very next prompt -- confirmed live. The
+            # model still finds the right local source by guessing its
+            # draft/WG name directly (confirmed live across two real runs),
+            # so a cheap count + guidance line is enough signal here.
             catalog_text, catalog = _list_available_corpora(
-                viewer_account_id, include_local_source_lines=not draft
+                viewer_account_id, include_local_source_lines=not draft, summarize_local_sources=not draft
             )
             if verbose:
                 print(f"[iter {iteration}] {tool_name}", file=sys.stderr)
@@ -4043,7 +4124,6 @@ def ask(
             tools=[] if is_last else tools,
             stop=[],
             stream=False,
-            user="ask_decision_agent_script",
         )
         message = result.message
         content = message.content if isinstance(message.content, str) else str(message.content or "")

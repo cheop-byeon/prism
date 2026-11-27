@@ -120,7 +120,7 @@ class AgenticRagSessionService:
             app_id=_PRISM_APP_ID,
             mode=AppMode.AGENT_CHAT.value,
             name=first_line[:200],
-            inputs={},
+            _inputs={},
             introduction="",
             system_instruction="",
             system_instruction_tokens=0,
@@ -420,7 +420,10 @@ class AgenticRagSessionService:
 
         try:
             conversations.delete(
-                session=db.session(), app_model=_prism_app(), conversation_id=session_id, account=account
+                session=db.session(),
+                app_model=_prism_app(get_data_tenant_id()),
+                conversation_id=session_id,
+                account=account,
             )
         except ConversationNotExistsError:
             return False
@@ -523,7 +526,7 @@ class AgenticRagSessionService:
         message = Message(
             app_id=_PRISM_APP_ID,
             conversation_id=session_id,
-            inputs={},
+            _inputs={},
             query=query,
             message="",
             message_tokens=usage.get("prompt_tokens", 0),
